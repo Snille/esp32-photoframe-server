@@ -107,7 +107,7 @@
               :lazy-src="getThumbnailUrl(photo.thumbnail_url)"
               aspect-ratio="1"
               contain
-              class="bg-grey-lighten-3 rounded"
+              class="bg-surface-variant rounded"
             >
               <template v-slot:placeholder>
                 <div class="d-flex align-center justify-center fill-height">

@@ -9,7 +9,7 @@ A image server for the [ESP32 PhotoFrame](https://github.com/aitjcize/esp32-phot
     - **Synology Photos**: Connect directly to your Synology NAS (supports DSM 7 Personal and Shared spaces).
     - **Telegram Bot**: Send photos directly to your frame via a Telegram bot.
     - **URL Proxy**: Display images from any URL.
-    - **AI Generation**: Generate unique images using OpenAI (GPT Image, DALL-E) or Google Gemini.
+    - **AI Generation**: Generate unique images using OpenAI (GPT Image, DALL-E), Google Gemini, or a local ComfyUI server.
 - **Smart Image Processing**:
     - Automatic cropping to device aspect ratio (800x480 or 480x800).
     - **Smart Collage**: Automatically combines two landscape photos in portrait mode (or vice versa) to maximize screen usage.
@@ -17,6 +17,8 @@ A image server for the [ESP32 PhotoFrame](https://github.com/aitjcize/esp32-phot
 - **Overlays**:
     - Customizable Date/Time display.
     - Real-time Weather status (Temperature + Condition) based on location.
+    - **Battery badge**: shows the frame's battery level (icon, text, or both) using the level the device reports on each fetch.
+    - **Per-element placement**: position Date, Photo Date, Weather and Battery in any of six slots (top/bottom × left/center/right), with an adjustable size scale and a live preview in the device settings.
     - "iPhone Lockscreen" style aesthetics with Inter font and drop shadows.
 - **Authentication**:
     - User account system with login/registration.

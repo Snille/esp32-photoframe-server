@@ -159,6 +159,45 @@ func (c *Client) PushImage(imageBytes []byte, thumbBytes []byte) error {
 	return nil
 }
 
+// PushRawEPD pushes uncompressed, display-ready 4bpp EPD bytes to the device as
+// a plain request body with Content-Type: application/x-epd-raw. Used for
+// SRAM-only boards (see SystemInfo.IsRawEPDOnly) that cannot inflate EPDGZ or
+// hold a multipart upload in RAM — the device streams the body straight into
+// its framebuffer, mirroring the raw-EPD pull path.
+func (c *Client) PushRawEPD(rawBytes []byte) error {
+	ip, err := c.resolveHost(c.host)
+	if err != nil {
+		return fmt.Errorf("failed to resolve device %s: %w", c.host, err)
+	}
+
+	// Quick reachability check on IP
+	if err := c.checkReachability(ip); err != nil {
+		return fmt.Errorf("device %s (%s) is not reachable: %w", c.host, ip, err)
+	}
+
+	url := fmt.Sprintf("http://%s/api/display-image", ip)
+
+	req, err := http.NewRequest("POST", url, bytes.NewReader(rawBytes))
+	if err != nil {
+		return fmt.Errorf("failed to create request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/x-epd-raw")
+	req.ContentLength = int64(len(rawBytes))
+	req.Host = c.host
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("failed to send request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("device returned status: %d", resp.StatusCode)
+	}
+
+	return nil
+}
+
 // Host returns the client's target host.
 func (c *Client) Host() string {
 	return c.host
@@ -257,11 +296,21 @@ func (c *Client) checkReachability(ip string) error {
 }
 
 type SystemInfo struct {
-	DeviceName string `json:"device_name"`
-	Width      int    `json:"width"`
-	Height     int    `json:"height"`
-	BoardName  string `json:"board_name"`
-	Version    string `json:"version"`
+	DeviceName      string `json:"device_name"`
+	Width           int    `json:"width"`
+	Height          int    `json:"height"`
+	BoardName       string `json:"board_name"`
+	Version         string `json:"version"`
+	HasFlashStorage bool   `json:"has_flash_storage"`
+	SDCardInserted  bool   `json:"sdcard_inserted"`
+}
+
+// IsRawEPDOnly reports whether the device has no persistent storage (no flash
+// LittleFS, no SD card). Such SRAM-only boards (e.g. FireBeetle 2 ESP32-E)
+// cannot inflate EPDGZ or buffer a multipart upload in RAM, so they must be
+// pushed uncompressed, display-ready EPD bytes via PushRawEPD.
+func (si *SystemInfo) IsRawEPDOnly() bool {
+	return si != nil && !si.HasFlashStorage && !si.SDCardInserted
 }
 
 func (c *Client) FetchSystemInfo() (*SystemInfo, error) {

@@ -2,11 +2,13 @@ package handler
 
 import (
 	"bytes"
+	"compress/gzip"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"image"
 	"image/png"
+	"io"
 	"log"
 
 	_ "image/jpeg"
@@ -117,6 +119,7 @@ func (h *ImageHandler) ServeImage(c echo.Context) error {
 	showDate := false
 	showPhotoDate := false
 	showWeather := false
+	showBattery := false
 	var lat, lon float64
 
 	if deviceFound {
@@ -127,9 +130,21 @@ func (h *ImageHandler) ServeImage(c echo.Context) error {
 		showDate = device.ShowDate
 		showPhotoDate = device.ShowPhotoDate
 		showWeather = device.ShowWeather
+		showBattery = device.ShowBattery
 		lat = device.WeatherLat
 		lon = device.WeatherLon
 	}
+
+	// Battery level reported by the device on every image fetch
+	// (X-Battery-Percentage). -1 means no battery / not readable, in which
+	// case the badge is suppressed even if showBattery is enabled.
+	batteryPercent := -1
+	if bStr := c.Request().Header.Get("X-Battery-Percentage"); bStr != "" {
+		if b, err := strconv.Atoi(bStr); err == nil {
+			batteryPercent = b
+		}
+	}
+	showBattery = showBattery && batteryPercent >= 0 && batteryPercent <= 100
 
 	// ALWAYS overrides logical resolution/orientation from Headers if present
 	if wStr := c.Request().Header.Get("X-Display-Width"); wStr != "" {
@@ -215,6 +230,13 @@ func (h *ImageHandler) ServeImage(c echo.Context) error {
 	var devicePtr *model.Device
 	if deviceFound {
 		devicePtr = &device
+		// The device can override its AI prompt locally (set on the frame's
+		// WebUI and sent as X-AI-Prompt). Used by the ai_generation source.
+		if source == model.SourceAIGeneration {
+			if p := strings.TrimSpace(c.Request().Header.Get("X-AI-Prompt")); p != "" {
+				device.AIPrompt = p
+			}
+		}
 	}
 	sourceResp, err := h.sources.Fetch(source, &imagesource.Request{
 		Device:       devicePtr,
@@ -307,7 +329,7 @@ func (h *ImageHandler) ServeImage(c echo.Context) error {
 	}
 
 	// 2. Render layout (photo + overlay + calendar)
-	needsOverlay := showDate || showPhotoDate || showWeather || showCalendar
+	needsOverlay := showDate || showPhotoDate || showWeather || showCalendar || showBattery
 	var imgWithOverlay image.Image
 
 	if needsOverlay {
@@ -356,10 +378,18 @@ func (h *ImageHandler) ServeImage(c echo.Context) error {
 			PhotoDate:     photoTakenAt,
 			ShowWeather:   showWeather,
 			Weather:       weatherData,
-			ShowCalendar:  showCalendar,
-			Events:        events,
-			Timezone:      deviceTimezone,
-			DateFormat:    device.DateFormat,
+			ShowCalendar:   showCalendar,
+			Events:         events,
+			Timezone:       deviceTimezone,
+			DateFormat:     device.DateFormat,
+			ShowBattery:       showBattery,
+			BatteryPercent:    batteryPercent,
+			DatePosition:      device.DatePosition,
+			PhotoDatePosition: device.PhotoDatePosition,
+			WeatherPosition:   device.WeatherPosition,
+			BatteryPosition:   device.BatteryPosition,
+			BatteryStyle:      device.BatteryStyle,
+			OverlayScale:      device.OverlayScale,
 		})
 		if renderErr != nil {
 			return c.JSON(http.StatusInternalServerError, map[string]string{"error": "render failed: " + renderErr.Error()})
@@ -380,7 +410,8 @@ func (h *ImageHandler) ServeImage(c echo.Context) error {
 
 	// Determine output format based on firmware version (epdgz requires >= 2.6.1)
 	firmwareVersion := c.Request().Header.Get("X-Firmware-Version")
-	if firmwareVersion == "" || !photoframe.SupportsEPDGZ(firmwareVersion) {
+	rawEPD := c.Request().Header.Get("X-EPD-Raw") == "1"
+	if !rawEPD && (firmwareVersion == "" || !photoframe.SupportsEPDGZ(firmwareVersion)) {
 		procOptions["format"] = "png"
 	}
 
@@ -415,6 +446,18 @@ func (h *ImageHandler) ServeImage(c echo.Context) error {
 		fmt.Printf("Processor failed: %v\n", err)
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "processor service failed: " + err.Error()})
 	}
+	if rawEPD {
+		gz, err := gzip.NewReader(bytes.NewReader(processedBytes))
+		if err != nil {
+			return c.JSON(http.StatusInternalServerError, map[string]string{"error": "raw epd gzip reader failed: " + err.Error()})
+		}
+		rawBytes, err := io.ReadAll(gz)
+		gz.Close()
+		if err != nil {
+			return c.JSON(http.StatusInternalServerError, map[string]string{"error": "raw epd decompress failed: " + err.Error()})
+		}
+		processedBytes = rawBytes
+	}
 
 	// 4. Cache Thumbnail & Set Headers
 	if thumbBytes != nil {
@@ -436,7 +479,9 @@ func (h *ImageHandler) ServeImage(c echo.Context) error {
 	c.Response().Header().Set("Content-Length", fmt.Sprintf("%d", len(processedBytes)))
 
 	contentType := "application/octet-stream"
-	if firmwareVersion == "" || !photoframe.SupportsEPDGZ(firmwareVersion) {
+	if rawEPD {
+		contentType = "application/x-epd-raw"
+	} else if firmwareVersion == "" || !photoframe.SupportsEPDGZ(firmwareVersion) {
 		contentType = "image/png"
 	}
 	return c.Blob(http.StatusOK, contentType, processedBytes)
@@ -610,6 +655,12 @@ func (h *ImageHandler) GetDeviceConfig(c echo.Context) error {
 	}
 
 	return c.JSON(http.StatusOK, resp)
+}
+
+// ListSources returns the names of all registered image sources, so the web UI
+// can offer them when switching a device's source. GET /api/sources
+func (h *ImageHandler) ListSources(c echo.Context) error {
+	return c.JSON(http.StatusOK, map[string]interface{}{"sources": h.sources.Names()})
 }
 
 // buildConfigPayload builds the X-Config-Payload JSON from device's stored config.

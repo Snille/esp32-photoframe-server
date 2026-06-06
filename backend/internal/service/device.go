@@ -1,10 +1,13 @@
 package service
 
 import (
+	"bytes"
+	"compress/gzip"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"image"
+	"io"
 	"log"
 	"os"
 
@@ -58,7 +61,7 @@ func (s *DeviceService) ListDevices() ([]model.Device, error) {
 	return devices, nil
 }
 
-func (s *DeviceService) AddDevice(host string, enableCollage, showDate, showPhotoDate, showWeather bool, weatherLat, weatherLon float64, layout string, displayMode string, showCalendar bool, calendarID string, dateFormat string) (*model.Device, error) {
+func (s *DeviceService) AddDevice(host string, enableCollage, showDate, showPhotoDate, showWeather bool, weatherLat, weatherLon float64, layout string, displayMode string, showCalendar bool, calendarID string, dateFormat string, showBattery bool, overlay model.OverlaySettings) (*model.Device, error) {
 	// Try to fetch device info (works on LAN, fails for remote devices)
 	var name string
 	var width, height int
@@ -133,6 +136,13 @@ func (s *DeviceService) AddDevice(host string, enableCollage, showDate, showPhot
 		ShowCalendar:             showCalendar,
 		CalendarID:               calendarID,
 		DateFormat:               dateFormat,
+		ShowBattery:              showBattery,
+		DatePosition:             model.NormalizeOverlayPosition(overlay.DatePosition, "bottom-left"),
+		PhotoDatePosition:        model.NormalizeOverlayPosition(overlay.PhotoDatePosition, "bottom-left"),
+		WeatherPosition:          model.NormalizeOverlayPosition(overlay.WeatherPosition, "bottom-right"),
+		BatteryPosition:          model.NormalizeOverlayPosition(overlay.BatteryPosition, "top-right"),
+		BatteryStyle:             model.NormalizeBatteryStyle(overlay.BatteryStyle),
+		OverlayScale:             model.NormalizeOverlayScale(overlay.OverlayScale),
 		DeviceConfig:             deviceConfig,
 		DeviceProcessingSettings: deviceProc,
 		DeviceColorPalette:       devicePalette,
@@ -152,7 +162,7 @@ func (s *DeviceService) AddDevice(host string, enableCollage, showDate, showPhot
 // Hardware-derived fields (Width, Height, BoardName, DeviceConfig,
 // DeviceProcessingSettings, DeviceColorPalette) are only written by
 // AddDevice and RefreshDeviceFromHardware.
-func (s *DeviceService) UpdateDevice(id uint, name, host, orientation string, enableCollage, showDate, showPhotoDate, showWeather bool, weatherLat, weatherLon float64, aiProvider, aiModel, aiPrompt string, layout string, displayMode string, showCalendar bool, calendarID string, dateFormat string) (*model.Device, error) {
+func (s *DeviceService) UpdateDevice(id uint, name, host, orientation string, enableCollage, showDate, showPhotoDate, showWeather bool, weatherLat, weatherLon float64, aiProvider, aiModel, aiPrompt string, layout string, displayMode string, showCalendar bool, calendarID string, dateFormat string, showBattery bool, overlay model.OverlaySettings) (*model.Device, error) {
 	var device model.Device
 	if err := s.db.First(&device, id).Error; err != nil {
 		return nil, errors.New("device not found")
@@ -188,6 +198,13 @@ func (s *DeviceService) UpdateDevice(id uint, name, host, orientation string, en
 	device.ShowCalendar = showCalendar
 	device.CalendarID = calendarID
 	device.DateFormat = dateFormat
+	device.ShowBattery = showBattery
+	device.DatePosition = model.NormalizeOverlayPosition(overlay.DatePosition, "bottom-left")
+	device.PhotoDatePosition = model.NormalizeOverlayPosition(overlay.PhotoDatePosition, "bottom-left")
+	device.WeatherPosition = model.NormalizeOverlayPosition(overlay.WeatherPosition, "bottom-right")
+	device.BatteryPosition = model.NormalizeOverlayPosition(overlay.BatteryPosition, "top-right")
+	device.BatteryStyle = model.NormalizeBatteryStyle(overlay.BatteryStyle)
+	device.OverlayScale = model.NormalizeOverlayScale(overlay.OverlayScale)
 
 	if err := s.db.Save(&device).Error; err != nil {
 		return nil, err
@@ -288,8 +305,15 @@ func (s *DeviceService) PushToHost(device *model.Device, imagePath string, extra
 		log.Printf("Failed to fetch system info for %s: %v", device.Name, sysInfoErr)
 	}
 
-	// Use PNG for older firmware that doesn't support epdgz
-	if sysInfoErr != nil || !photoframe.SupportsEPDGZ(sysInfo.Version) {
+	// Decide output/transport based on what the device can handle.
+	// SRAM-only boards (no persistent storage) cannot inflate EPDGZ or buffer a
+	// multipart upload, so we push raw 4bpp EPD bytes. They require EPDGZ output
+	// from the CLI (which we then decompress), so do NOT force PNG for them.
+	rawEPD := sysInfoErr == nil && sysInfo.IsRawEPDOnly()
+	if rawEPD {
+		delete(processingOpts, "format")
+	} else if sysInfoErr != nil || !photoframe.SupportsEPDGZ(sysInfo.Version) {
+		// Use PNG for older firmware that doesn't support epdgz
 		processingOpts["format"] = "png"
 	}
 
@@ -411,9 +435,32 @@ func (s *DeviceService) PushToHost(device *model.Device, imagePath string, extra
 		return fmt.Errorf("processing failed: %w", err)
 	}
 
+	if rawEPD {
+		// CLI produced EPDGZ; decompress to the raw 4bpp panel bytes the
+		// SRAM-only device streams directly into its framebuffer.
+		rawData, err := gunzipBytes(processedData)
+		if err != nil {
+			return fmt.Errorf("failed to decompress EPD for raw push: %w", err)
+		}
+		if err := pfClient.PushRawEPD(rawData); err != nil {
+			return fmt.Errorf("failed to push to device: %w", err)
+		}
+		return nil
+	}
+
 	if err := pfClient.PushImage(processedData, thumbData); err != nil {
 		return fmt.Errorf("failed to push to device: %w", err)
 	}
 
 	return nil
+}
+
+// gunzipBytes decompresses a gzip (EPDGZ) byte slice in full.
+func gunzipBytes(data []byte) ([]byte, error) {
+	gz, err := gzip.NewReader(bytes.NewReader(data))
+	if err != nil {
+		return nil, err
+	}
+	defer gz.Close()
+	return io.ReadAll(gz)
 }

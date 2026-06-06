@@ -57,6 +57,13 @@ func (h *DeviceHandler) AddDevice(c echo.Context) error {
 		ShowCalendar  bool    `json:"show_calendar"`
 		CalendarID    string  `json:"calendar_id"`
 		DateFormat    string  `json:"date_format"`
+		ShowBattery   bool    `json:"show_battery"`
+		DatePosition      string `json:"date_position"`
+		PhotoDatePosition string `json:"photo_date_position"`
+		WeatherPosition   string `json:"weather_position"`
+		BatteryPosition   string `json:"battery_position"`
+		BatteryStyle      string `json:"battery_style"`
+		OverlayScale      float64 `json:"overlay_scale"`
 	}
 	if err := c.Bind(&req); err != nil {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid request"})
@@ -70,7 +77,14 @@ func (h *DeviceHandler) AddDevice(c echo.Context) error {
 		req.Layout = model.LayoutPhotoOverlay
 	}
 
-	device, err := h.deviceService.AddDevice(req.Host, req.EnableCollage, req.ShowDate, req.ShowPhotoDate, req.ShowWeather, req.WeatherLat, req.WeatherLon, req.Layout, req.DisplayMode, req.ShowCalendar, req.CalendarID, req.DateFormat)
+	device, err := h.deviceService.AddDevice(req.Host, req.EnableCollage, req.ShowDate, req.ShowPhotoDate, req.ShowWeather, req.WeatherLat, req.WeatherLon, req.Layout, req.DisplayMode, req.ShowCalendar, req.CalendarID, req.DateFormat, req.ShowBattery, model.OverlaySettings{
+		DatePosition:      req.DatePosition,
+		PhotoDatePosition: req.PhotoDatePosition,
+		WeatherPosition:   req.WeatherPosition,
+		BatteryPosition:   req.BatteryPosition,
+		BatteryStyle:      req.BatteryStyle,
+		OverlayScale:      req.OverlayScale,
+	})
 	if err != nil {
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": err.Error()})
 	}
@@ -100,6 +114,13 @@ func (h *DeviceHandler) UpdateDevice(c echo.Context) error {
 		ShowCalendar  bool    `json:"show_calendar"`
 		CalendarID    string  `json:"calendar_id"`
 		DateFormat    string  `json:"date_format"`
+		ShowBattery   bool    `json:"show_battery"`
+		DatePosition      string `json:"date_position"`
+		PhotoDatePosition string `json:"photo_date_position"`
+		WeatherPosition   string `json:"weather_position"`
+		BatteryPosition   string `json:"battery_position"`
+		BatteryStyle      string `json:"battery_style"`
+		OverlayScale      float64 `json:"overlay_scale"`
 	}
 	if err := c.Bind(&req); err != nil {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid request"})
@@ -109,7 +130,14 @@ func (h *DeviceHandler) UpdateDevice(c echo.Context) error {
 		req.Layout = model.LayoutPhotoOverlay
 	}
 
-	device, err := h.deviceService.UpdateDevice(uint(id), req.Name, req.Host, req.Orientation, req.EnableCollage, req.ShowDate, req.ShowPhotoDate, req.ShowWeather, req.WeatherLat, req.WeatherLon, req.AIProvider, req.AIModel, req.AIPrompt, req.Layout, req.DisplayMode, req.ShowCalendar, req.CalendarID, req.DateFormat)
+	device, err := h.deviceService.UpdateDevice(uint(id), req.Name, req.Host, req.Orientation, req.EnableCollage, req.ShowDate, req.ShowPhotoDate, req.ShowWeather, req.WeatherLat, req.WeatherLon, req.AIProvider, req.AIModel, req.AIPrompt, req.Layout, req.DisplayMode, req.ShowCalendar, req.CalendarID, req.DateFormat, req.ShowBattery, model.OverlaySettings{
+		DatePosition:      req.DatePosition,
+		PhotoDatePosition: req.PhotoDatePosition,
+		WeatherPosition:   req.WeatherPosition,
+		BatteryPosition:   req.BatteryPosition,
+		BatteryStyle:      req.BatteryStyle,
+		OverlayScale:      req.OverlayScale,
+	})
 	if err != nil {
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": err.Error()})
 	}

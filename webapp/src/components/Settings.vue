@@ -852,7 +852,89 @@
                     >
                   </div>
 
-                  <v-btn color="primary" @click="save">Save API Keys</v-btn>
+                  <v-text-field
+                    v-model="form.comfyui_host"
+                    label="ComfyUI Server (local)"
+                    variant="outlined"
+                    class="mb-1"
+                    placeholder="http://host:8188"
+                    hint="Used by the ComfyUI provider. Workflow is read from comfyui_workflow.json in the server data directory."
+                    persistent-hint
+                  ></v-text-field>
+                  <div class="text-caption text-grey ml-2 mb-4">
+                    Runs a local ComfyUI workflow (e.g. Z-Image). Select
+                    “ComfyUI (local)” as the AI provider per-device.
+                  </div>
+
+                  <v-expansion-panels variant="accordion" class="mb-4">
+                    <v-expansion-panel>
+                      <v-expansion-panel-title>
+                        <v-icon size="small" class="mr-2"
+                          >mdi-code-json</v-icon
+                        >
+                        ComfyUI Workflow
+                        <v-chip
+                          v-if="form.comfyui_workflow && !comfyuiWorkflowValid"
+                          color="error"
+                          size="x-small"
+                          class="ml-2"
+                          >invalid JSON</v-chip
+                        >
+                      </v-expansion-panel-title>
+                      <v-expansion-panel-text>
+                        <v-alert
+                          type="info"
+                          variant="tonal"
+                          density="compact"
+                          class="mb-3"
+                        >
+                          The prompt is <strong>not</strong> set here — it comes
+                          from each device’s <strong>Prompt</strong> field (Edit
+                          Device → AI Generation). Image size and seed are also
+                          set automatically per generation, so you don’t need to
+                          edit them in the JSON. This workflow only defines the
+                          model, steps, sampler, etc.
+                        </v-alert>
+                        <v-textarea
+                          v-model="form.comfyui_workflow"
+                          label="Workflow (API-format JSON)"
+                          variant="outlined"
+                          rows="6"
+                          auto-grow
+                          spellcheck="false"
+                          class="mb-1 comfyui-workflow"
+                          :error="
+                            !!form.comfyui_workflow && !comfyuiWorkflowValid
+                          "
+                          :hint="
+                            !form.comfyui_workflow
+                              ? 'Empty → falls back to comfyui_workflow.json on the server.'
+                              : comfyuiWorkflowValid
+                                ? 'Valid JSON — click Save to store it.'
+                                : 'Not valid JSON yet.'
+                          "
+                          persistent-hint
+                        ></v-textarea>
+                        <v-file-input
+                          label="…or upload a workflow .json"
+                          accept="application/json,.json"
+                          variant="outlined"
+                          density="compact"
+                          prepend-icon="mdi-upload"
+                          hide-details
+                          class="mb-1"
+                          @update:model-value="onWorkflowFile"
+                        ></v-file-input>
+                        <div class="text-caption text-grey ml-2">
+                          In ComfyUI enable Dev Mode, then “Save (API Format)”
+                          and paste/upload that file here. Stored on the server
+                          and used for every generation.
+                        </div>
+                      </v-expansion-panel-text>
+                    </v-expansion-panel>
+                  </v-expansion-panels>
+
+                  <v-btn color="primary" @click="save">Save AI Settings</v-btn>
                 </v-card-text>
               </v-window-item>
             </v-window>
@@ -932,7 +1014,7 @@
               <v-divider class="mb-6"></v-divider>
 
               <h3 class="text-h6 mb-4">Active Sessions</h3>
-              <v-list density="compact" class="bg-grey-lighten-4 rounded mb-6">
+              <v-list density="compact" class="bg-surface rounded border mb-6">
                 <v-list-item
                   v-for="session in sessions"
                   :key="session.id"
@@ -1471,6 +1553,12 @@
                               color="primary"
                               hide-details
                             ></v-checkbox>
+                            <v-checkbox
+                              v-model="editingDevice.show_battery"
+                              label="Show Battery"
+                              color="primary"
+                              hide-details
+                            ></v-checkbox>
                           </div>
                           <v-select
                             v-if="editingDevice.show_date"
@@ -1510,6 +1598,164 @@
                               ></v-text-field>
                             </v-col>
                           </v-row>
+
+                          <!-- Per-element placement -->
+                          <template
+                            v-if="
+                              editingDevice.show_date ||
+                              editingDevice.show_photo_date ||
+                              editingDevice.show_weather ||
+                              editingDevice.show_battery
+                            "
+                          >
+                            <div
+                              class="text-caption text-medium-emphasis mt-4 mb-1"
+                            >
+                              Placement
+                            </div>
+                            <div class="text-caption text-disabled mb-2">
+                              Date / Photo Date / Weather positions apply on the
+                              Full Photo (overlay) layout. Battery shows on the
+                              photo in all layouts.
+                            </div>
+                            <v-row dense>
+                              <v-col
+                                v-if="editingDevice.show_date"
+                                cols="12"
+                                sm="6"
+                              >
+                                <v-select
+                                  v-model="editingDevice.date_position"
+                                  :items="positionOptions"
+                                  item-title="label"
+                                  item-value="value"
+                                  label="Date position"
+                                  variant="outlined"
+                                  density="compact"
+                                  hide-details
+                                ></v-select>
+                              </v-col>
+                              <v-col
+                                v-if="editingDevice.show_photo_date"
+                                cols="12"
+                                sm="6"
+                              >
+                                <v-select
+                                  v-model="editingDevice.photo_date_position"
+                                  :items="positionOptions"
+                                  item-title="label"
+                                  item-value="value"
+                                  label="Photo Date position"
+                                  variant="outlined"
+                                  density="compact"
+                                  hide-details
+                                ></v-select>
+                              </v-col>
+                              <v-col
+                                v-if="editingDevice.show_weather"
+                                cols="12"
+                                sm="6"
+                              >
+                                <v-select
+                                  v-model="editingDevice.weather_position"
+                                  :items="positionOptions"
+                                  item-title="label"
+                                  item-value="value"
+                                  label="Weather position"
+                                  variant="outlined"
+                                  density="compact"
+                                  hide-details
+                                ></v-select>
+                              </v-col>
+                              <v-col
+                                v-if="editingDevice.show_battery"
+                                cols="12"
+                                sm="6"
+                              >
+                                <v-select
+                                  v-model="editingDevice.battery_position"
+                                  :items="positionOptions"
+                                  item-title="label"
+                                  item-value="value"
+                                  label="Battery position"
+                                  variant="outlined"
+                                  density="compact"
+                                  hide-details
+                                ></v-select>
+                              </v-col>
+                              <v-col
+                                v-if="editingDevice.show_battery"
+                                cols="12"
+                                sm="6"
+                              >
+                                <v-select
+                                  v-model="editingDevice.battery_style"
+                                  :items="batteryStyleOptions"
+                                  item-title="label"
+                                  item-value="value"
+                                  label="Battery display"
+                                  variant="outlined"
+                                  density="compact"
+                                  hide-details
+                                ></v-select>
+                              </v-col>
+                            </v-row>
+
+                            <v-slider
+                              v-model="editingDevice.overlay_scale"
+                              :min="0.5"
+                              :max="2"
+                              :step="0.1"
+                              label="Text size"
+                              color="primary"
+                              hide-details
+                              class="mt-4 mr-2"
+                            >
+                              <template #append>
+                                <span
+                                  class="text-caption"
+                                  style="min-width: 42px"
+                                >
+                                  {{
+                                    Math.round(
+                                      (editingDevice.overlay_scale || 1) * 100
+                                    )
+                                  }}%
+                                </span>
+                              </template>
+                            </v-slider>
+
+                            <div
+                              class="text-caption text-medium-emphasis mt-4 mb-1"
+                            >
+                              Live preview
+                            </div>
+                            <div class="overlay-preview" :style="previewBoxStyle">
+                              <div
+                                v-for="slot in previewSlotList"
+                                :key="slot.pos"
+                                class="op-slot"
+                                :class="'op-' + slot.pos"
+                              >
+                                <div
+                                  v-for="el in slot.items"
+                                  :key="el.key"
+                                  class="op-chip"
+                                  :class="{ low: el.low }"
+                                  :style="{ fontSize: previewFontSize(el) }"
+                                >
+                                  <span v-if="el.battery" class="op-bat">
+                                    <span
+                                      class="op-bat-fill"
+                                      :style="{ width: el.pct + '%' }"
+                                    ></span>
+                                  </span>
+                                  <span v-if="el.emoji">{{ el.emoji }}</span>
+                                  <span v-if="el.text">{{ el.text }}</span>
+                                </div>
+                              </div>
+                            </div>
+                          </template>
                           <v-tooltip
                             :disabled="
                               form.google_calendar_connected === 'true'
@@ -1897,6 +2143,7 @@
                             { title: 'None', value: '' },
                             { title: 'OpenAI', value: 'openai' },
                             { title: 'Google Gemini', value: 'google' },
+                            { title: 'ComfyUI (local)', value: 'comfyui' },
                           ]"
                           label="AI Provider"
                           variant="outlined"
@@ -1904,8 +2151,22 @@
                           hide-details
                           class="mb-3"
                         ></v-select>
+                        <v-alert
+                          v-if="editingDevice.ai_provider === 'comfyui'"
+                          type="info"
+                          variant="tonal"
+                          density="compact"
+                          class="mb-3"
+                        >
+                          Uses the local ComfyUI server and workflow configured
+                          under Settings → AI Generation. The model is defined by
+                          the workflow file, so no model selection is needed.
+                        </v-alert>
                         <v-select
-                          v-if="editingDevice.ai_provider"
+                          v-if="
+                            editingDevice.ai_provider &&
+                            editingDevice.ai_provider !== 'comfyui'
+                          "
                           v-model="editingDevice.ai_model"
                           :items="
                             aiModelOptionsForProvider(editingDevice.ai_provider)
@@ -2076,6 +2337,7 @@ import {
   deleteURLSource,
   getDeviceConfig,
   updateDeviceConfig,
+  listSources,
   updateAccount,
   listSessions,
   revokeSession,
@@ -2100,16 +2362,38 @@ const confirmDialog = ref();
 // Image Source Binding State
 const useThisServer = ref(true);
 const selectedSource = ref('immich');
-const sourceOptions = [
-  { title: 'Gallery', value: 'gallery' },
-  { title: 'Immich', value: 'immich' },
-  { title: 'Google Photos', value: 'google_photos' },
-  { title: 'Synology Photos', value: 'synology_photos' },
-  { title: 'URL Proxy', value: 'url_proxy' },
-  { title: 'AI Generation', value: 'ai_generation' },
-  { title: 'Fractal (Mandelbrot zoom)', value: 'fractal' },
-  { title: 'DLA (diffusion-limited aggregation)', value: 'dla' },
-];
+// Friendly titles for known sources; anything else is prettified from its name.
+const sourceTitles: Record<string, string> = {
+  gallery: 'Gallery',
+  immich: 'Immich',
+  google_photos: 'Google Photos',
+  synology_photos: 'Synology Photos',
+  url_proxy: 'URL Proxy',
+  ai_generation: 'AI Generation',
+  fractal: 'Fractal (Mandelbrot zoom)',
+  dla: 'DLA (diffusion-limited aggregation)',
+};
+const titleForSource = (name: string) =>
+  sourceTitles[name] ||
+  name.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
+// Populated from the backend registry (GET /api/sources) so new server-side
+// sources appear automatically; seeded with the known set as a fallback.
+const sourceOptions = ref<{ title: string; value: string }[]>(
+  Object.entries(sourceTitles).map(([value, title]) => ({ title, value }))
+);
+const loadSources = async () => {
+  try {
+    const names = await listSources();
+    if (names.length) {
+      sourceOptions.value = names.map((n) => ({
+        title: titleForSource(n),
+        value: n,
+      }));
+    }
+  } catch {
+    // Keep the seeded defaults if the request fails.
+  }
+};
 
 // URL Proxy State
 const urlSources = ref<any[]>([]); // Renamed from urlImages
@@ -2628,6 +2912,115 @@ const dateFormatOptions = [
   { label: 'YYYY.MM.DD', value: '2006.01.02' },
 ];
 
+const positionOptions = [
+  { label: 'Top Left', value: 'top-left' },
+  { label: 'Top Center', value: 'top-center' },
+  { label: 'Top Right', value: 'top-right' },
+  { label: 'Bottom Left', value: 'bottom-left' },
+  { label: 'Bottom Center', value: 'bottom-center' },
+  { label: 'Bottom Right', value: 'bottom-right' },
+];
+
+const batteryStyleOptions = [
+  { label: 'Icon + Text', value: 'both' },
+  { label: 'Icon only', value: 'icon' },
+  { label: 'Text only', value: 'text' },
+];
+
+// --- Live overlay preview (mirrors the server renderer's placement rules) ---
+interface PreviewEl {
+  key: string;
+  pos: string;
+  kind: string;
+  text?: string;
+  emoji?: string;
+  battery?: boolean;
+  pct?: number;
+  low?: boolean;
+}
+
+// Date/photo-date/weather only float on the full-photo (overlay) layout;
+// battery shows on the photo in every layout.
+const isOverlayLayoutPreview = computed(() => {
+  const l = editingDevice.layout || 'photo_overlay';
+  return l !== 'photo_info' && l !== 'side_panel';
+});
+
+const previewElements = computed<PreviewEl[]>(() => {
+  const els: PreviewEl[] = [];
+  const ov = isOverlayLayoutPreview.value;
+  const sampleDate = 'Mon, Jan 02';
+  if (ov && editingDevice.show_date) {
+    els.push({
+      key: 'date',
+      pos: editingDevice.date_position || 'bottom-left',
+      kind: 'date',
+      text: sampleDate,
+    });
+  }
+  if (ov && editingDevice.show_photo_date) {
+    els.push({
+      key: 'pdate',
+      pos: editingDevice.photo_date_position || 'bottom-left',
+      kind: 'photo',
+      emoji: '📷',
+      text: sampleDate,
+    });
+  }
+  if (ov && editingDevice.show_weather) {
+    els.push({
+      key: 'weather',
+      pos: editingDevice.weather_position || 'bottom-right',
+      kind: 'weather',
+      emoji: '☀️',
+      text: '21.0°C',
+    });
+  }
+  if (editingDevice.show_battery) {
+    const style = editingDevice.battery_style || 'both';
+    const pct = 76;
+    els.push({
+      key: 'bat',
+      pos: editingDevice.battery_position || 'top-right',
+      kind: 'battery',
+      battery: style !== 'text',
+      text: style !== 'icon' ? `${pct}%` : '',
+      pct,
+      low: pct <= 15,
+    });
+  }
+  return els;
+});
+
+const previewSlotList = computed(() => {
+  const order = [
+    'top-left',
+    'top-center',
+    'top-right',
+    'bottom-left',
+    'bottom-center',
+    'bottom-right',
+  ];
+  return order
+    .map((pos) => ({
+      pos,
+      items: previewElements.value.filter((e) => e.pos === pos),
+    }))
+    .filter((s) => s.items.length > 0);
+});
+
+const previewBoxStyle = computed(() => {
+  const portrait = (editingDevice.orientation || 'landscape') === 'portrait';
+  return portrait
+    ? { width: '180px', height: '270px' }
+    : { width: '270px', height: '180px' };
+});
+
+const previewFontSize = (el: PreviewEl) => {
+  const base = el.kind === 'date' ? 13 : 11;
+  return `${base * (editingDevice.overlay_scale || 1)}px`;
+};
+
 const layoutDescriptions: Record<string, string> = {
   photo_info:
     'Photo on top with a dedicated info strip showing date, weather, and calendar events.',
@@ -2722,6 +3115,13 @@ const openAddDeviceDialog = () => {
     show_calendar: false,
     calendar_id: '',
     date_format: '',
+    show_battery: false,
+    date_position: 'bottom-left',
+    photo_date_position: 'bottom-left',
+    weather_position: 'bottom-right',
+    battery_position: 'top-right',
+    battery_style: 'both',
+    overlay_scale: 1,
   });
   Object.assign(deviceConfig, {
     auto_rotate: false,
@@ -2786,6 +3186,14 @@ const saveDevice = async () => {
         show_calendar: editingDevice.show_calendar || false,
         calendar_id: editingDevice.calendar_id || '',
         date_format: editingDevice.date_format || '',
+        show_battery: editingDevice.show_battery || false,
+        date_position: editingDevice.date_position || 'bottom-left',
+        photo_date_position:
+          editingDevice.photo_date_position || 'bottom-left',
+        weather_position: editingDevice.weather_position || 'bottom-right',
+        battery_position: editingDevice.battery_position || 'top-right',
+        battery_style: editingDevice.battery_style || 'both',
+        overlay_scale: editingDevice.overlay_scale ?? 1,
       });
       await loadDevices();
       showMessage('Device added. Fetched settings from device.');
@@ -2819,7 +3227,17 @@ const saveDevice = async () => {
         editingDevice.display_mode || 'cover',
         editingDevice.show_calendar || false,
         editingDevice.calendar_id || '',
-        editingDevice.date_format || ''
+        editingDevice.date_format || '',
+        editingDevice.show_battery || false,
+        {
+          date_position: editingDevice.date_position || 'bottom-left',
+          photo_date_position:
+            editingDevice.photo_date_position || 'bottom-left',
+          weather_position: editingDevice.weather_position || 'bottom-right',
+          battery_position: editingDevice.battery_position || 'top-right',
+          battery_style: editingDevice.battery_style || 'both',
+          overlay_scale: editingDevice.overlay_scale ?? 1,
+        }
       );
 
       // Save device remote config (config + processing + palette)
@@ -2976,6 +3394,8 @@ const form = reactive({
   telegram_target_device_id: [] as number[],
   openai_api_key: '',
   google_api_key: '',
+  comfyui_host: '',
+  comfyui_workflow: '',
   device_host: '', // Keep for backward compatibility/display? Or remove. Remove from form, keep in store maybe?
 });
 
@@ -3013,6 +3433,7 @@ const showMessage = (msg: string, isError = false) => {
 
 onMounted(async () => {
   loadSessions();
+  loadSources();
   await store.fetchSettings();
   Object.assign(form, {
     Orientation: store.settings.orientation || 'landscape',
@@ -3060,6 +3481,8 @@ onMounted(async () => {
     ),
     openai_api_key: store.settings.openai_api_key || '',
     google_api_key: store.settings.google_api_key || '',
+    comfyui_host: store.settings.comfyui_host || '',
+    comfyui_workflow: store.settings.comfyui_workflow || '',
   });
 
   // Load cached albums if available
@@ -3154,6 +3577,8 @@ const saveSettingsInternal = async () => {
     ),
     openai_api_key: form.openai_api_key,
     google_api_key: form.google_api_key,
+    comfyui_host: form.comfyui_host,
+    comfyui_workflow: form.comfyui_workflow,
   });
 };
 
@@ -3535,6 +3960,27 @@ const revokeSessionHandler = async (id: number) => {
 
 // Get image endpoint URL
 // Always use direct add-on port for device access (ESP32 devices access directly, not via ingress)
+const comfyuiWorkflowValid = computed(() => {
+  if (!form.comfyui_workflow.trim()) return false;
+  try {
+    JSON.parse(form.comfyui_workflow);
+    return true;
+  } catch {
+    return false;
+  }
+});
+
+const onWorkflowFile = async (file: File | File[] | null) => {
+  const f = Array.isArray(file) ? file[0] : file;
+  if (!f) return;
+  try {
+    form.comfyui_workflow = await f.text();
+    showMessage('Workflow loaded — click Save to store it.');
+  } catch {
+    showMessage('Could not read workflow file', true);
+  }
+};
+
 const getImageUrl = (source: string) => {
   const hostname = window.location.hostname;
   const protocol = window.location.protocol;
@@ -3569,5 +4015,104 @@ const getDeviceFromUA = (ua: string) => {
 .color-swatch {
   height: 60px;
   border-bottom: 1px solid rgba(0, 0, 0, 0.12);
+}
+.comfyui-workflow :deep(textarea) {
+  font-family: 'Roboto Mono', ui-monospace, monospace;
+  font-size: 0.8rem;
+  line-height: 1.4;
+}
+
+/* Live overlay placement preview */
+.overlay-preview {
+  position: relative;
+  border-radius: 8px;
+  overflow: hidden;
+  background: linear-gradient(135deg, #6a7b8c 0%, #93a3b3 50%, #b9a48c 100%);
+  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.2);
+}
+.overlay-preview .op-slot {
+  position: absolute;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-width: calc(100% - 12px);
+}
+.overlay-preview .op-top-left {
+  top: 6px;
+  left: 6px;
+  align-items: flex-start;
+}
+.overlay-preview .op-top-center {
+  top: 6px;
+  left: 50%;
+  transform: translateX(-50%);
+  align-items: center;
+}
+.overlay-preview .op-top-right {
+  top: 6px;
+  right: 6px;
+  align-items: flex-end;
+}
+.overlay-preview .op-bottom-left {
+  bottom: 6px;
+  left: 6px;
+  align-items: flex-start;
+}
+.overlay-preview .op-bottom-center {
+  bottom: 6px;
+  left: 50%;
+  transform: translateX(-50%);
+  align-items: center;
+}
+.overlay-preview .op-bottom-right {
+  bottom: 6px;
+  right: 6px;
+  align-items: flex-end;
+}
+.overlay-preview .op-chip {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 6px;
+  border-radius: 5px;
+  background: rgba(0, 0, 0, 0.45);
+  color: #fff;
+  line-height: 1.2;
+  white-space: nowrap;
+  font-weight: 600;
+}
+.overlay-preview .op-chip.low {
+  color: #ffd6d6;
+}
+.overlay-preview .op-bat {
+  position: relative;
+  display: inline-block;
+  width: 1.7em;
+  height: 0.9em;
+  box-sizing: border-box;
+  border: 0.12em solid #fff;
+  border-radius: 0.16em;
+  padding: 0.1em;
+  flex: none;
+}
+.overlay-preview .op-bat::after {
+  content: '';
+  position: absolute;
+  right: -0.24em;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 0.13em;
+  height: 0.42em;
+  background: #fff;
+  border-radius: 0 0.1em 0.1em 0;
+}
+.overlay-preview .op-bat-fill {
+  display: block;
+  height: 100%;
+  background: #fff;
+  border-radius: 0.04em;
+}
+.overlay-preview .op-chip.low .op-bat-fill {
+  background: #e03b3b;
 }
 </style>

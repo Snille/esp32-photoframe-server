@@ -1,5 +1,23 @@
 # Changelog
 
+## v1.8.0
+
+### Added
+- **Battery overlay**: opt-in per-device battery badge baked onto the photo, using the `X-Battery-Percentage` the device sends on each fetch. Display style is selectable (icon, text, or both) and the fill turns red at ≤15%. Works on the pull path in every layout.
+- **Per-element overlay placement**: Date, Photo Date, Weather and Battery can each be placed in any of six slots (top/bottom × left/center/right). Date/Photo-Date/Weather apply on the full-photo (`photo_overlay`) layout; Battery floats on the photo in all layouts. Each element now renders as its own translucent chip so it stays legible in any corner.
+- **Overlay text size**: an adjustable size scale (50%–200%) applied to all overlay elements.
+- **Live overlay preview** in the device settings dialog that mirrors the renderer's placement, size and battery-style rules and updates instantly.
+- **ComfyUI AI provider**: generate images via a local ComfyUI server (workflow editable from the web UI), in addition to OpenAI and Google Gemini.
+- **Raw-EPD push/pull for storage-less boards**: boards without flash/SD (e.g. FireBeetle 2 ESP32-E) receive uncompressed `application/x-epd-raw` so they don't OOM inflating EPDGZ.
+- **Dynamic image-source list** (`GET /api/sources`) and an in-dialog source switcher.
+- **Named themes** (terracotta/ocean/forest × light/dark) selectable from the app bar.
+
+### Changed
+- Capability-gated UI: upload, OTA, AI key fields and software flash-mode controls are hidden on boards that don't support them and shown automatically on those that do.
+
+### Database
+- Migrations `000024`–`000026`: `show_battery`; overlay placement columns (`date_position`, `photo_date_position`, `weather_position`, `battery_position`, `battery_style`); and `overlay_scale`.
+
 ## v1.7.5
 
 ### Fixed

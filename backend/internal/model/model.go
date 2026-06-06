@@ -76,6 +76,17 @@ type Device struct {
 	ShowCalendar  bool    `json:"show_calendar"`
 	CalendarID    string  `json:"calendar_id"` // Google Calendar ID (per-device)
 	DateFormat    string  `json:"date_format"` // Go time format string, empty = default "Mon, Jan 02"
+	ShowBattery   bool    `json:"show_battery"` // Overlay a battery badge (uses X-Battery-Percentage from device)
+	// Per-element overlay placement. One of: top-left, top-center, top-right,
+	// bottom-left, bottom-center, bottom-right. Date/photo-date/weather only
+	// apply on the full-photo (photo_overlay) layout; battery applies on the
+	// photo in every layout.
+	DatePosition      string `json:"date_position" gorm:"default:'bottom-left'"`
+	PhotoDatePosition string `json:"photo_date_position" gorm:"default:'bottom-left'"`
+	WeatherPosition   string `json:"weather_position" gorm:"default:'bottom-right'"`
+	BatteryPosition   string `json:"battery_position" gorm:"default:'top-right'"`
+	BatteryStyle      string `json:"battery_style" gorm:"default:'both'"` // both | icon | text
+	OverlayScale      float64 `json:"overlay_scale" gorm:"default:1"`     // size multiplier for overlay elements (0.5–2.0)
 	// Remote config sync fields (JSON blobs synced from/to device)
 	DeviceConfig             string    `json:"device_config" gorm:"default:'{}'"`
 	DeviceProcessingSettings string    `json:"device_processing_settings" gorm:"default:'{}'"`
@@ -89,6 +100,58 @@ const (
 	LayoutPhotoOverlay = "photo_overlay"
 	LayoutSidePanel    = "side_panel"
 )
+
+// OverlaySettings groups the per-element placement/style fields so they can be
+// threaded through AddDevice/UpdateDevice as a single argument instead of five
+// more positional parameters.
+type OverlaySettings struct {
+	DatePosition      string
+	PhotoDatePosition string
+	WeatherPosition   string
+	BatteryPosition   string
+	BatteryStyle      string
+	OverlayScale      float64
+}
+
+// validOverlayPositions is the set of placements the renderer understands.
+var validOverlayPositions = map[string]bool{
+	"top-left": true, "top-center": true, "top-right": true,
+	"bottom-left": true, "bottom-center": true, "bottom-right": true,
+}
+
+// NormalizeOverlayPosition returns pos if it is a known placement, otherwise
+// the supplied fallback. Keeps bad/empty input from reaching the template.
+func NormalizeOverlayPosition(pos, fallback string) string {
+	if validOverlayPositions[pos] {
+		return pos
+	}
+	return fallback
+}
+
+// NormalizeBatteryStyle clamps the battery display style to a known value.
+func NormalizeBatteryStyle(style string) string {
+	switch style {
+	case "icon", "text", "both":
+		return style
+	default:
+		return "both"
+	}
+}
+
+// NormalizeOverlayScale clamps the overlay size multiplier to [0.5, 2.0],
+// defaulting to 1.0 for zero/unset/out-of-range input.
+func NormalizeOverlayScale(scale float64) float64 {
+	if scale <= 0 {
+		return 1.0
+	}
+	if scale < 0.5 {
+		return 0.5
+	}
+	if scale > 2.0 {
+		return 2.0
+	}
+	return scale
+}
 
 type DeviceHistory struct {
 	ID       uint      `gorm:"primaryKey" json:"id"`

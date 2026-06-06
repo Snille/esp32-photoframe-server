@@ -305,6 +305,7 @@ func main() {
 	protectedApi.POST("/devices/:id/refresh", deviceHandler.RefreshDevice)
 	protectedApi.GET("/devices/:id/config", ih.GetDeviceConfig)
 	protectedApi.PUT("/devices/:id/config", ih.UpdateDeviceConfig)
+	protectedApi.GET("/sources", ih.ListSources)
 
 	// Device Tokens (Protected)
 	protectedApi.POST("/auth/tokens", ah.GenerateDeviceToken)

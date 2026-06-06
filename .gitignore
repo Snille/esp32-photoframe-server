@@ -19,6 +19,8 @@ webapp/*.local
 start.db
 photoframe.db
 *.db
+*.db-shm
+*.db-wal
 *.sqlite
 
 # Data & Temp files
@@ -28,6 +30,9 @@ data/thumb_*.jpg
 data/*.jpg
 data/*.png
 data/*.db
+data/*.db-shm
+data/*.db-wal
+data/comfyui_workflow.json
 !data/.keep
 
 # Logs

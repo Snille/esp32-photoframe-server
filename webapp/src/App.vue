@@ -11,8 +11,30 @@
         />
       </template>
       <v-app-bar-title class="ml-4">ESP32 PhotoFrame Server</v-app-bar-title>
-      <template v-if="authStore.isLoggedIn" v-slot:append>
+      <template v-slot:append>
+        <v-menu>
+          <template #activator="{ props }">
+            <v-btn
+              icon="mdi-palette"
+              variant="text"
+              v-bind="props"
+              title="Theme"
+            ></v-btn>
+          </template>
+          <v-list density="compact" :selected="[currentTheme]">
+            <v-list-item
+              v-for="opt in themeOptions"
+              :key="opt.value"
+              :value="opt.value"
+              :active="opt.value === currentTheme"
+              @click="applyTheme(opt.value)"
+            >
+              <v-list-item-title>{{ opt.title }}</v-list-item-title>
+            </v-list-item>
+          </v-list>
+        </v-menu>
         <v-btn
+          v-if="authStore.isLoggedIn"
           variant="text"
           @click="authStore.logout"
           prepend-icon="mdi-logout"
@@ -22,7 +44,7 @@
       </template>
     </v-app-bar>
 
-    <v-main class="bg-grey-lighten-4">
+    <v-main>
       <v-container class="py-6" style="max-width: 1200px">
         <div
           v-if="authStore.loading && !authStore.isInitialized"
@@ -46,15 +68,33 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted } from 'vue';
+import { onMounted, ref } from 'vue';
+import { useTheme } from 'vuetify';
 import Settings from './components/Settings.vue';
 import Login from './components/Login.vue';
 import Setup from './components/Setup.vue';
 import { useAuthStore } from './stores/auth';
+import {
+  themeOptions,
+  THEME_STORAGE_KEY,
+  DEFAULT_THEME,
+} from './plugins/vuetify';
 
 const authStore = useAuthStore();
+const theme = useTheme();
+const currentTheme = ref(DEFAULT_THEME);
+
+const applyTheme = (name: string) => {
+  theme.global.name.value = name;
+  currentTheme.value = name;
+  localStorage.setItem(THEME_STORAGE_KEY, name);
+};
 
 onMounted(async () => {
+  const saved = localStorage.getItem(THEME_STORAGE_KEY);
+  if (saved && themeOptions.some((t) => t.value === saved)) {
+    applyTheme(saved);
+  }
   await authStore.checkStatus();
 });
 </script>

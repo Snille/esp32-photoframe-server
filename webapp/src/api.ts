@@ -37,6 +37,11 @@ export const getSettings = async () => {
   return response.data;
 };
 
+export const listSources = async (): Promise<string[]> => {
+  const response = await api.get('sources');
+  return response.data.sources || [];
+};
+
 export const updateSettings = async (settings: Record<string, string>) => {
   const response = await api.post('settings', { settings });
   return response.data;
@@ -74,6 +79,13 @@ export interface Device {
   show_calendar?: boolean;
   calendar_id?: string;
   date_format?: string;
+  show_battery?: boolean;
+  date_position?: string;
+  photo_date_position?: string;
+  weather_position?: string;
+  battery_position?: string;
+  battery_style?: string;
+  overlay_scale?: number;
   created_at: string;
   model?: any;
 }
@@ -97,6 +109,13 @@ export const addDevice = async (params: {
   show_calendar?: boolean;
   calendar_id?: string;
   date_format?: string;
+  show_battery?: boolean;
+  date_position?: string;
+  photo_date_position?: string;
+  weather_position?: string;
+  battery_position?: string;
+  battery_style?: string;
+  overlay_scale?: number;
 }) => {
   const response = await api.post('devices', params);
   return response.data;
@@ -123,7 +142,16 @@ export const updateDevice = async (
   displayMode?: string,
   showCalendar?: boolean,
   calendarId?: string,
-  dateFormat?: string
+  dateFormat?: string,
+  showBattery?: boolean,
+  overlayPositions?: {
+    date_position?: string;
+    photo_date_position?: string;
+    weather_position?: string;
+    battery_position?: string;
+    battery_style?: string;
+    overlay_scale?: number;
+  }
 ) => {
   const response = await api.put(`/devices/${id}`, {
     name,
@@ -143,6 +171,13 @@ export const updateDevice = async (
     show_calendar: showCalendar || false,
     calendar_id: calendarId || '',
     date_format: dateFormat || '',
+    show_battery: showBattery || false,
+    date_position: overlayPositions?.date_position || 'bottom-left',
+    photo_date_position: overlayPositions?.photo_date_position || 'bottom-left',
+    weather_position: overlayPositions?.weather_position || 'bottom-right',
+    battery_position: overlayPositions?.battery_position || 'top-right',
+    battery_style: overlayPositions?.battery_style || 'both',
+    overlay_scale: overlayPositions?.overlay_scale ?? 1,
   });
   return response.data;
 };

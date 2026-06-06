@@ -54,6 +54,17 @@ type RenderOptions struct {
 	Events        []gcalendar.Event
 	Timezone      string // IANA timezone e.g. "Asia/Taipei" for date formatting
 	DateFormat    string // Go time format string, empty = default "Mon, Jan 02"
+	ShowBattery    bool  // Draw a battery badge on the photo
+	BatteryPercent int   // 0-100 battery level reported by the device
+	// Per-element placement (top/bottom × left/center/right). Date/photo-date/
+	// weather only take effect on the photo_overlay layout; battery applies on
+	// the photo in every layout.
+	DatePosition      string
+	PhotoDatePosition string
+	WeatherPosition   string
+	BatteryPosition   string
+	BatteryStyle      string  // both | icon | text
+	OverlayScale      float64 // size multiplier for overlay elements (0.5–2.0)
 }
 
 const browserIdleTimeout = 1 * time.Minute
@@ -81,6 +92,11 @@ func NewRendererService() (*RendererService, error) {
 		"isSmallScreen": func(w, h int) bool {
 			total := w * h
 			return total < 500000
+		},
+		// slot bundles the root template data with a position string so the
+		// shared "ov_slot" template can render any of the six placement slots.
+		"slot": func(d interface{}, pos string) map[string]interface{} {
+			return map[string]interface{}{"D": d, "Pos": pos}
 		},
 	}
 
@@ -274,6 +290,16 @@ func (s *RendererService) Render(opts RenderOptions) (image.Image, error) {
 		IsPortrait:    opts.Height > opts.Width,
 		IsSmall:       (opts.Width * opts.Height) < 500000,
 		PhotoRatio:    photoRatio,
+		ShowBattery:    opts.ShowBattery,
+		BatteryPercent: opts.BatteryPercent,
+		IsOverlayLayout: opts.Layout != model.LayoutPhotoInfo && opts.Layout != model.LayoutSidePanel,
+		DatePosition:      model.NormalizeOverlayPosition(opts.DatePosition, "bottom-left"),
+		PhotoDatePosition: model.NormalizeOverlayPosition(opts.PhotoDatePosition, "bottom-left"),
+		WeatherPosition:   model.NormalizeOverlayPosition(opts.WeatherPosition, "bottom-right"),
+		BatteryPosition:   model.NormalizeOverlayPosition(opts.BatteryPosition, "top-right"),
+		ShowBatteryIcon:   model.NormalizeBatteryStyle(opts.BatteryStyle) != "text",
+		ShowBatteryText:   model.NormalizeBatteryStyle(opts.BatteryStyle) != "icon",
+		OverlayScale:      model.NormalizeOverlayScale(opts.OverlayScale),
 	}
 
 	var htmlBuf bytes.Buffer
@@ -351,6 +377,16 @@ type templateData struct {
 	IsPortrait    bool
 	IsSmall       bool
 	PhotoRatio    float64 // fraction of screen for photo (0.0-1.0)
+	ShowBattery    bool
+	BatteryPercent int
+	IsOverlayLayout   bool // full-photo layout: date/photo-date/weather float on the photo
+	DatePosition      string
+	PhotoDatePosition string
+	WeatherPosition   string
+	BatteryPosition   string
+	ShowBatteryIcon   bool
+	ShowBatteryText   bool
+	OverlayScale      float64
 }
 
 func imageToBase64(img image.Image) (string, error) {
@@ -477,7 +513,30 @@ func init() {
 }
 
 // The HTML/CSS template for all 3 layouts
-const layoutTemplate = `<!DOCTYPE html>
+const layoutTemplate = `
+{{- define "el_date"}}<div class="ov-chip date">{{.DateStr}}</div>{{end}}
+{{- define "el_photodate"}}<div class="ov-chip photo-date"><span class="material-symbols-outlined">photo_camera</span> {{.PhotoDateStr}}</div>{{end}}
+{{- define "el_weather"}}{{if .Weather}}<div class="ov-chip weather"><span class="material-symbols-outlined">{{.Weather.IconName}}</span> {{printf "%.1f" .Weather.Temperature}}&deg;C &nbsp; {{.Weather.Humidity}}%</div>{{end}}{{end}}
+{{- define "el_calendar"}}{{if .NextEvent}}<div class="ov-chip event">{{formatEventTime .NextEvent}} &mdash; {{.NextEvent.Summary}}</div>{{end}}{{end}}
+{{- define "el_battery"}}<div class="ov-chip battery{{if le .BatteryPercent 15}} low{{end}}">{{if .ShowBatteryIcon}}<div class="battery-icon"><div class="battery-fill" style="width: {{.BatteryPercent}}%"></div></div>{{end}}{{if .ShowBatteryText}}<span>{{.BatteryPercent}}%</span>{{end}}</div>{{end}}
+{{- define "ov_slot"}}
+  <div class="ov-slot {{.Pos}}">
+    {{if and .D.IsOverlayLayout .D.ShowDate (eq .D.DatePosition .Pos)}}{{template "el_date" .D}}{{end}}
+    {{if and .D.IsOverlayLayout .D.ShowCalendar (eq .D.DatePosition .Pos)}}{{template "el_calendar" .D}}{{end}}
+    {{if and .D.IsOverlayLayout .D.ShowPhotoDate (eq .D.PhotoDatePosition .Pos)}}{{template "el_photodate" .D}}{{end}}
+    {{if and .D.IsOverlayLayout .D.ShowWeather (eq .D.WeatherPosition .Pos)}}{{template "el_weather" .D}}{{end}}
+    {{if and .D.ShowBattery (eq .D.BatteryPosition .Pos)}}{{template "el_battery" .D}}{{end}}
+  </div>
+{{- end}}
+{{- define "floating"}}<div class="floating">
+  {{template "ov_slot" (slot . "top-left")}}
+  {{template "ov_slot" (slot . "top-center")}}
+  {{template "ov_slot" (slot . "top-right")}}
+  {{template "ov_slot" (slot . "bottom-left")}}
+  {{template "ov_slot" (slot . "bottom-center")}}
+  {{template "ov_slot" (slot . "bottom-right")}}
+</div>{{end -}}
+<!DOCTYPE html>
 <html>
 <head>
 <meta charset="utf-8">
@@ -560,6 +619,76 @@ const layoutTemplate = `<!DOCTYPE html>
     filter: blur(20px) brightness(0.9);
     z-index: 0;
   }
+
+  /* --- Floating overlay elements (date / photo-date / weather / battery) ---
+     Each element is placed into one of six slots positioned over the photo.
+     Every element carries its own translucent chip so it stays legible in any
+     corner, instead of relying on a single bottom gradient. */
+  .floating {
+    position: absolute;
+    inset: 0;
+    z-index: 5;
+    pointer-events: none;
+    --ov-scale: {{printf "%.2f" .OverlayScale}};
+  }
+  .ov-slot {
+    position: absolute;
+    display: flex;
+    flex-direction: column;
+    gap: calc(var(--gap) * 0.6);
+    max-width: calc(100% - var(--padding) * 2);
+  }
+  .ov-slot.top-left      { top: var(--padding);    left: var(--padding);  align-items: flex-start; }
+  .ov-slot.top-center    { top: var(--padding);    left: 50%; transform: translateX(-50%); align-items: center; }
+  .ov-slot.top-right     { top: var(--padding);    right: var(--padding); align-items: flex-end; }
+  .ov-slot.bottom-left   { bottom: var(--padding); left: var(--padding);  align-items: flex-start; }
+  .ov-slot.bottom-center { bottom: var(--padding); left: 50%; transform: translateX(-50%); align-items: center; }
+  .ov-slot.bottom-right  { bottom: var(--padding); right: var(--padding); align-items: flex-end; }
+
+  .ov-chip {
+    display: flex;
+    align-items: center;
+    gap: 0.4em;
+    padding: 0.25em 0.55em;
+    border-radius: 0.4em;
+    background: rgba(0,0,0,0.45);
+    color: #fff;
+    line-height: 1.15;
+    max-width: 100%;
+  }
+  .ov-chip.date { font-size: calc(var(--heading-size) * var(--ov-scale)); font-weight: 600; }
+  .ov-chip.photo-date { font-size: calc(var(--secondary-size) * var(--ov-scale)); }
+  .ov-chip.photo-date .material-symbols-outlined { font-size: 1.1em; }
+  .ov-chip.weather { font-size: calc(var(--secondary-size) * var(--ov-scale)); font-weight: 600; }
+  .ov-chip.weather .material-symbols-outlined { font-size: 1.4em; }
+  .ov-chip.event { font-size: calc(var(--secondary-size) * var(--ov-scale)); opacity: 0.95; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; display: block; }
+  .ov-chip.battery { font-size: calc(var(--secondary-size) * var(--ov-scale)); font-weight: 600; }
+
+  /* CSS battery icon — renders identically even if the icon font is missing. */
+  .battery-icon {
+    position: relative;
+    width: 1.7em;
+    height: 0.9em;
+    box-sizing: border-box;
+    border: 0.12em solid #fff;
+    border-radius: 0.16em;
+    padding: 0.1em;
+    flex: none;
+  }
+  .battery-icon::after {
+    content: '';
+    position: absolute;
+    right: -0.24em;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 0.13em;
+    height: 0.42em;
+    background: #fff;
+    border-radius: 0 0.1em 0.1em 0;
+  }
+  .battery-fill { height: 100%; background: #fff; border-radius: 0.04em; }
+  .ov-chip.battery.low { color: #ffd6d6; }
+  .ov-chip.battery.low .battery-fill { background: #e03b3b; }
 
   .info-panel {
     background: #ffffff;
@@ -804,6 +933,7 @@ const layoutTemplate = `<!DOCTYPE html>
   <div class="photo-area">
     {{if eq .DisplayMode "fit"}}<img class="photo-blur" src="data:image/jpeg;base64,{{.PhotoBase64}}">{{end}}
     <img class="photo" src="data:image/jpeg;base64,{{.PhotoBase64}}">
+    {{template "floating" .}}
   </div>
   <div class="info-panel">
     <div class="info-header">
@@ -839,42 +969,13 @@ const layoutTemplate = `<!DOCTYPE html>
 </div>
 
 {{else if eq .Layout "photo_overlay"}}
-<!-- LAYOUT 2: Full Photo + Bottom Overlay -->
+<!-- LAYOUT 2: Full Photo + Floating Overlay Elements -->
 <div class="layout-photo_overlay">
   <div class="photo-area">
     {{if eq .DisplayMode "fit"}}<img class="photo-blur" src="data:image/jpeg;base64,{{.PhotoBase64}}">{{end}}
     <img class="photo" src="data:image/jpeg;base64,{{.PhotoBase64}}">
+    {{template "floating" .}}
   </div>
-  {{if or .ShowDate .ShowPhotoDate .ShowWeather .ShowCalendar}}
-  <div class="overlay">
-    <div class="overlay-left">
-      {{if .ShowDate}}
-      <div class="date">{{.DateStr}}</div>
-      {{end}}
-      {{if .ShowPhotoDate}}<div class="photo-date"><span class="material-symbols-outlined">photo_camera</span> {{.PhotoDateStr}}</div>{{end}}
-      {{if and .ShowCalendar .NextEvent}}
-      <div class="event-inline">
-        {{formatEventTime .NextEvent}} &mdash; {{.NextEvent.Summary}}
-      </div>
-      {{end}}
-      {{if and .ShowCalendar (gt (len .Events) 1)}}
-        {{range $i, $ev := .Events}}
-          {{if and (gt $i 0) (le $i 2)}}
-          <div class="event-inline">
-            {{formatEventTime $ev}} &mdash; {{$ev.Summary}}
-          </div>
-          {{end}}
-        {{end}}
-      {{end}}
-    </div>
-    {{if and .ShowWeather .Weather}}
-    <div class="overlay-right">
-      <span class="material-symbols-outlined weather-icon-small">{{.Weather.IconName}}</span>
-      <div class="weather-details">{{printf "%.1f" .Weather.Temperature}}&deg;C &nbsp; {{.Weather.Humidity}}%</div>
-    </div>
-    {{end}}
-  </div>
-  {{end}}
 </div>
 
 {{else if eq .Layout "side_panel"}}
@@ -883,6 +984,7 @@ const layoutTemplate = `<!DOCTYPE html>
   <div class="photo-area">
     {{if eq .DisplayMode "fit"}}<img class="photo-blur" src="data:image/jpeg;base64,{{.PhotoBase64}}">{{end}}
     <img class="photo" src="data:image/jpeg;base64,{{.PhotoBase64}}">
+    {{template "floating" .}}
   </div>
   <div class="info-panel">
     {{if or .ShowDate .ShowPhotoDate (and .ShowWeather .Weather)}}
@@ -923,28 +1025,8 @@ const layoutTemplate = `<!DOCTYPE html>
   <div class="photo-area">
     {{if eq .DisplayMode "fit"}}<img class="photo-blur" src="data:image/jpeg;base64,{{.PhotoBase64}}">{{end}}
     <img class="photo" src="data:image/jpeg;base64,{{.PhotoBase64}}">
+    {{template "floating" .}}
   </div>
-  {{if or .ShowDate .ShowPhotoDate .ShowWeather .ShowCalendar}}
-  <div class="overlay">
-    <div class="overlay-left">
-      {{if .ShowDate}}
-      <div class="date">{{.DateStr}}</div>
-      {{end}}
-      {{if .ShowPhotoDate}}<div class="photo-date"><span class="material-symbols-outlined">photo_camera</span> {{.PhotoDateStr}}</div>{{end}}
-      {{if and .ShowCalendar .NextEvent}}
-      <div class="event-inline">
-        {{formatEventTime .NextEvent}} &mdash; {{.NextEvent.Summary}}
-      </div>
-      {{end}}
-    </div>
-    {{if and .ShowWeather .Weather}}
-    <div class="overlay-right">
-      <span class="material-symbols-outlined weather-icon-small">{{.Weather.IconName}}</span>
-      <div class="weather-details">{{printf "%.1f" .Weather.Temperature}}&deg;C &nbsp; {{.Weather.Humidity}}%</div>
-    </div>
-    {{end}}
-  </div>
-  {{end}}
 </div>
 {{end}}
 
