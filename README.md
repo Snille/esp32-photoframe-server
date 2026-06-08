@@ -17,7 +17,7 @@ A image server for the [ESP32 PhotoFrame](https://github.com/aitjcize/esp32-phot
 - **Overlays**:
     - Customizable Date/Time display.
     - Real-time Weather status (Temperature + Condition) based on location.
-    - **Battery badge**: shows the frame's battery level (icon, text, or both) using the level the device reports on each fetch.
+    - **Battery badge**: shows the frame's battery level (icon, text, or both) using the level the device reports on each fetch. The icon can be rotated (0/90/180/270°), the percentage text placed on any side of it, and its size scaled independently of the overlay text.
     - **Per-element placement**: position Date, Photo Date, Weather and Battery in any of six slots (top/bottom × left/center/right), with an adjustable size scale and a live preview in the device settings.
     - "iPhone Lockscreen" style aesthetics with Inter font and drop shadows.
 - **Authentication**:

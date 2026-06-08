@@ -47,20 +47,52 @@ func (c *Client) do(method, path string) (*http.Response, error) {
 	return c.httpClient.Do(req)
 }
 
-// TestConnection verifies the server is reachable and the API key is valid
+// TestConnection verifies the server is reachable and the API key is valid.
+//
+// It first tries /api/users/me, but a scoped API key may lack the user.read
+// permission (→ 403) and older/newer Immich versions may not expose that exact
+// path (→ 404). In those cases we fall back to /api/albums, which is the
+// permission the app actually needs for syncing, so the key is considered
+// valid as long as it can list albums. A 401 anywhere means the key is bad.
 func (c *Client) TestConnection() error {
 	resp, err := c.do("GET", "/api/users/me")
 	if err != nil {
 		return err
 	}
-	defer resp.Body.Close()
-	if resp.StatusCode == http.StatusUnauthorized {
+	resp.Body.Close()
+
+	switch resp.StatusCode {
+	case http.StatusOK:
+		return nil
+	case http.StatusUnauthorized:
 		return fmt.Errorf("invalid API key")
-	}
-	if resp.StatusCode != http.StatusOK {
+	case http.StatusForbidden, http.StatusNotFound:
+		// Scoped key without user.read, or endpoint absent on this version —
+		// validate against the endpoint we actually use instead.
+		return c.testViaAlbums(resp.StatusCode)
+	default:
 		return fmt.Errorf("server returned status: %d", resp.StatusCode)
 	}
-	return nil
+}
+
+// testViaAlbums confirms the key works against /api/albums. prevStatus is the
+// status from the /api/users/me probe, reported if albums also fails for an
+// unexpected reason.
+func (c *Client) testViaAlbums(prevStatus int) error {
+	resp, err := c.do("GET", "/api/albums")
+	if err != nil {
+		return err
+	}
+	resp.Body.Close()
+
+	switch resp.StatusCode {
+	case http.StatusOK:
+		return nil
+	case http.StatusUnauthorized:
+		return fmt.Errorf("invalid API key")
+	default:
+		return fmt.Errorf("server returned status: %d", prevStatus)
+	}
 }
 
 // ListAlbums returns all albums visible to the API key owner

@@ -64,6 +64,9 @@ type RenderOptions struct {
 	WeatherPosition   string
 	BatteryPosition   string
 	BatteryStyle      string  // both | icon | text
+	BatteryRotation   int     // rotate the battery badge: 0/90/180/270 degrees
+	BatteryTextSide   string  // side of the icon the % text sits: right | left | top | bottom
+	BatteryIconScale  float64 // size multiplier for the battery icon only (0.5–2.0)
 	OverlayScale      float64 // size multiplier for overlay elements (0.5–2.0)
 }
 
@@ -299,6 +302,9 @@ func (s *RendererService) Render(opts RenderOptions) (image.Image, error) {
 		BatteryPosition:   model.NormalizeOverlayPosition(opts.BatteryPosition, "top-right"),
 		ShowBatteryIcon:   model.NormalizeBatteryStyle(opts.BatteryStyle) != "text",
 		ShowBatteryText:   model.NormalizeBatteryStyle(opts.BatteryStyle) != "icon",
+		BatteryRotation:   model.NormalizeBatteryRotation(opts.BatteryRotation),
+		BatteryTextSide:   model.NormalizeBatteryTextSide(opts.BatteryTextSide),
+		BatteryIconScale:  model.NormalizeBatteryIconScale(opts.BatteryIconScale),
 		OverlayScale:      model.NormalizeOverlayScale(opts.OverlayScale),
 	}
 
@@ -386,6 +392,9 @@ type templateData struct {
 	BatteryPosition   string
 	ShowBatteryIcon   bool
 	ShowBatteryText   bool
+	BatteryRotation   int
+	BatteryTextSide   string
+	BatteryIconScale  float64
 	OverlayScale      float64
 }
 
@@ -518,7 +527,7 @@ const layoutTemplate = `
 {{- define "el_photodate"}}<div class="ov-chip photo-date"><span class="material-symbols-outlined">photo_camera</span> {{.PhotoDateStr}}</div>{{end}}
 {{- define "el_weather"}}{{if .Weather}}<div class="ov-chip weather"><span class="material-symbols-outlined">{{.Weather.IconName}}</span> {{printf "%.1f" .Weather.Temperature}}&deg;C &nbsp; {{.Weather.Humidity}}%</div>{{end}}{{end}}
 {{- define "el_calendar"}}{{if .NextEvent}}<div class="ov-chip event">{{formatEventTime .NextEvent}} &mdash; {{.NextEvent.Summary}}</div>{{end}}{{end}}
-{{- define "el_battery"}}<div class="ov-chip battery{{if le .BatteryPercent 15}} low{{end}}">{{if .ShowBatteryIcon}}<div class="battery-icon"><div class="battery-fill" style="width: {{.BatteryPercent}}%"></div></div>{{end}}{{if .ShowBatteryText}}<span>{{.BatteryPercent}}%</span>{{end}}</div>{{end}}
+{{- define "el_battery"}}<div class="ov-chip battery bat-rot-{{.BatteryRotation}} bat-text-{{.BatteryTextSide}}{{if le .BatteryPercent 15}} low{{end}}">{{if .ShowBatteryIcon}}<div class="battery-icon"><div class="battery-fill" style="width: {{.BatteryPercent}}%"></div></div>{{end}}{{if .ShowBatteryText}}<span class="battery-text">{{.BatteryPercent}}%</span>{{end}}</div>{{end}}
 {{- define "ov_slot"}}
   <div class="ov-slot {{.Pos}}">
     {{if and .D.IsOverlayLayout .D.ShowDate (eq .D.DatePosition .Pos)}}{{template "el_date" .D}}{{end}}
@@ -630,6 +639,7 @@ const layoutTemplate = `
     z-index: 5;
     pointer-events: none;
     --ov-scale: {{printf "%.2f" .OverlayScale}};
+    --bat-icon-scale: {{printf "%.2f" .BatteryIconScale}};
   }
   .ov-slot {
     position: absolute;
@@ -664,9 +674,27 @@ const layoutTemplate = `
   .ov-chip.event { font-size: calc(var(--secondary-size) * var(--ov-scale)); opacity: 0.95; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; display: block; }
   .ov-chip.battery { font-size: calc(var(--secondary-size) * var(--ov-scale)); font-weight: 600; }
 
+  /* Battery icon rotation. A 90/270-turned icon is 1.7em tall, so reserve
+     vertical room via min-height to keep it inside the chip background. */
+  .bat-rot-90 .battery-icon  { transform: rotate(90deg); }
+  .bat-rot-180 .battery-icon { transform: rotate(180deg); }
+  .bat-rot-270 .battery-icon { transform: rotate(270deg); }
+  .ov-chip.battery.bat-rot-90, .ov-chip.battery.bat-rot-270 {
+    min-height: calc(var(--secondary-size) * var(--bat-icon-scale) * 2.6);
+  }
+
+  /* Which side of the icon the % text sits on (right is the default row). */
+  .ov-chip.battery.bat-text-left   { flex-direction: row-reverse; }
+  .ov-chip.battery.bat-text-top    { flex-direction: column-reverse; }
+  .ov-chip.battery.bat-text-bottom { flex-direction: column; }
+
   /* CSS battery icon — renders identically even if the icon font is missing. */
   .battery-icon {
     position: relative;
+    /* Sized off the unscaled base * its own multiplier, so the icon size is
+       independent of the text size (--ov-scale). All inner metrics are in em
+       and therefore scale together with the icon. */
+    font-size: calc(var(--secondary-size) * var(--bat-icon-scale));
     width: 1.7em;
     height: 0.9em;
     box-sizing: border-box;
@@ -674,6 +702,7 @@ const layoutTemplate = `
     border-radius: 0.16em;
     padding: 0.1em;
     flex: none;
+    transform-origin: center;
   }
   .battery-icon::after {
     content: '';

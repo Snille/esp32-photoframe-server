@@ -389,6 +389,9 @@ func (h *ImageHandler) ServeImage(c echo.Context) error {
 			WeatherPosition:   device.WeatherPosition,
 			BatteryPosition:   device.BatteryPosition,
 			BatteryStyle:      device.BatteryStyle,
+			BatteryRotation:   device.BatteryRotation,
+			BatteryTextSide:   device.BatteryTextSide,
+			BatteryIconScale:  device.BatteryIconScale,
 			OverlayScale:      device.OverlayScale,
 		})
 		if renderErr != nil {

@@ -55,6 +55,21 @@
               <v-tab value="ai_generation">AI Generation</v-tab>
             </v-tabs>
 
+            <v-text-field
+              v-model="form.device_image_base_url"
+              label="Device-facing server URL (optional)"
+              placeholder="Auto-detect — e.g. https://photos.example.com"
+              hint="Used to build the Image Endpoint URLs below. Leave blank to auto-detect: http adds the add-on port, https/reverse-proxy URLs are used as-is. Set this (e.g. https://photos.example.com, no port) when running behind a reverse proxy."
+              persistent-hint
+              clearable
+              variant="outlined"
+              density="compact"
+              prepend-inner-icon="mdi-server-network"
+              class="mb-4"
+              @blur="saveSettingsInternal()"
+              @click:clear="saveSettingsInternal()"
+            ></v-text-field>
+
             <v-window v-model="activeDataSourceTab">
               <!-- URL Proxy -->
               <v-window-item value="url">
@@ -1699,7 +1714,71 @@
                                   hide-details
                                 ></v-select>
                               </v-col>
+                              <v-col
+                                v-if="editingDevice.show_battery"
+                                cols="12"
+                                sm="6"
+                              >
+                                <v-select
+                                  v-model.number="editingDevice.battery_rotation"
+                                  :items="batteryRotationOptions"
+                                  item-title="label"
+                                  item-value="value"
+                                  label="Battery icon rotation"
+                                  variant="outlined"
+                                  density="compact"
+                                  hide-details
+                                ></v-select>
+                              </v-col>
+                              <v-col
+                                v-if="
+                                  editingDevice.show_battery &&
+                                  editingDevice.battery_style === 'both'
+                                "
+                                cols="12"
+                                sm="6"
+                              >
+                                <v-select
+                                  v-model="editingDevice.battery_text_side"
+                                  :items="batteryTextSideOptions"
+                                  item-title="label"
+                                  item-value="value"
+                                  label="Battery text side"
+                                  variant="outlined"
+                                  density="compact"
+                                  hide-details
+                                ></v-select>
+                              </v-col>
                             </v-row>
+
+                            <v-slider
+                              v-if="
+                                editingDevice.show_battery &&
+                                editingDevice.battery_style !== 'text'
+                              "
+                              v-model="editingDevice.battery_icon_scale"
+                              :min="0.5"
+                              :max="2"
+                              :step="0.1"
+                              label="Battery icon size"
+                              color="primary"
+                              hide-details
+                              class="mt-4 mr-2"
+                            >
+                              <template #append>
+                                <span
+                                  class="text-caption"
+                                  style="min-width: 42px"
+                                >
+                                  {{
+                                    Math.round(
+                                      (editingDevice.battery_icon_scale || 1) *
+                                        100
+                                    )
+                                  }}%
+                                </span>
+                              </template>
+                            </v-slider>
 
                             <v-slider
                               v-model="editingDevice.overlay_scale"
@@ -1742,9 +1821,13 @@
                                   :key="el.key"
                                   class="op-chip"
                                   :class="{ low: el.low }"
-                                  :style="{ fontSize: previewFontSize(el) }"
+                                  :style="previewChipStyle(el)"
                                 >
-                                  <span v-if="el.battery" class="op-bat">
+                                  <span
+                                    v-if="el.battery"
+                                    class="op-bat"
+                                    :style="previewBatStyle(el)"
+                                  >
                                     <span
                                       class="op-bat-fill"
                                       :style="{ width: el.pct + '%' }"
@@ -2707,6 +2790,13 @@ const loadDeviceConfig = async (deviceId: number) => {
     if (cfg.device_name) {
       editingDevice.name = cfg.device_name;
     }
+    // Surface the frame's own AI prompt (editable on the device, returned by
+    // /api/config) so it round-trips on "Sync from Device". The frame's prompt
+    // wins at runtime (X-AI-Prompt header), so reflect it here when set; keep
+    // the server-side prompt when the frame has none so we never blank it.
+    if (typeof cfg.ai_prompt === 'string' && cfg.ai_prompt.trim() !== '') {
+      editingDevice.ai_prompt = cfg.ai_prompt;
+    }
     Object.assign(deviceConfig, {
       auto_rotate: cfg.auto_rotate ?? false,
       rotate_interval: cfg.rotate_interval ?? 3600,
@@ -2927,6 +3017,20 @@ const batteryStyleOptions = [
   { label: 'Text only', value: 'text' },
 ];
 
+const batteryRotationOptions = [
+  { label: 'Normal (0°)', value: 0 },
+  { label: 'Rotated 90°', value: 90 },
+  { label: 'Upside down (180°)', value: 180 },
+  { label: 'Rotated 270°', value: 270 },
+];
+
+const batteryTextSideOptions = [
+  { label: 'Right of icon', value: 'right' },
+  { label: 'Left of icon', value: 'left' },
+  { label: 'Above icon', value: 'top' },
+  { label: 'Below icon', value: 'bottom' },
+];
+
 // --- Live overlay preview (mirrors the server renderer's placement rules) ---
 interface PreviewEl {
   key: string;
@@ -2935,6 +3039,9 @@ interface PreviewEl {
   text?: string;
   emoji?: string;
   battery?: boolean;
+  batteryRotation?: number;
+  batteryTextSide?: string;
+  batteryIconScale?: number;
   pct?: number;
   low?: boolean;
 }
@@ -2984,6 +3091,9 @@ const previewElements = computed<PreviewEl[]>(() => {
       pos: editingDevice.battery_position || 'top-right',
       kind: 'battery',
       battery: style !== 'text',
+      batteryRotation: editingDevice.battery_rotation || 0,
+      batteryTextSide: editingDevice.battery_text_side || 'right',
+      batteryIconScale: editingDevice.battery_icon_scale || 1,
       text: style !== 'icon' ? `${pct}%` : '',
       pct,
       low: pct <= 15,
@@ -3019,6 +3129,40 @@ const previewBoxStyle = computed(() => {
 const previewFontSize = (el: PreviewEl) => {
   const base = el.kind === 'date' ? 13 : 11;
   return `${base * (editingDevice.overlay_scale || 1)}px`;
+};
+
+// Battery icon base size in the preview (px), mirrors the renderer's
+// --secondary-size baseline for the badge. Independent of text size.
+const PREVIEW_BAT_BASE = 11;
+
+// Mirrors the renderer's battery chip rules: text side → flex-direction,
+// 90/270 rotation → reserve vertical room (scaled with the icon size) so the
+// icon stays inside the chip.
+const previewChipStyle = (el: PreviewEl) => {
+  const style: Record<string, string> = { fontSize: previewFontSize(el) };
+  if (el.kind === 'battery') {
+    const side = el.batteryTextSide || 'right';
+    if (side === 'left') style.flexDirection = 'row-reverse';
+    else if (side === 'top') style.flexDirection = 'column-reverse';
+    else if (side === 'bottom') style.flexDirection = 'column';
+    const rot = el.batteryRotation || 0;
+    if (rot === 90 || rot === 270) {
+      style.minHeight = `${PREVIEW_BAT_BASE * (el.batteryIconScale || 1) * 2.6}px`;
+    }
+  }
+  return style;
+};
+
+// The battery icon is sized off its own base * icon scale, independent of the
+// text size, and carries the rotation transform.
+const previewBatStyle = (el: PreviewEl) => {
+  const style: Record<string, string> = {
+    fontSize: `${PREVIEW_BAT_BASE * (el.batteryIconScale || 1)}px`,
+  };
+  if (el.batteryRotation) {
+    style.transform = `rotate(${el.batteryRotation}deg)`;
+  }
+  return style;
 };
 
 const layoutDescriptions: Record<string, string> = {
@@ -3121,6 +3265,9 @@ const openAddDeviceDialog = () => {
     weather_position: 'bottom-right',
     battery_position: 'top-right',
     battery_style: 'both',
+    battery_rotation: 0,
+    battery_text_side: 'right',
+    battery_icon_scale: 1,
     overlay_scale: 1,
   });
   Object.assign(deviceConfig, {
@@ -3193,6 +3340,9 @@ const saveDevice = async () => {
         weather_position: editingDevice.weather_position || 'bottom-right',
         battery_position: editingDevice.battery_position || 'top-right',
         battery_style: editingDevice.battery_style || 'both',
+        battery_rotation: editingDevice.battery_rotation || 0,
+        battery_text_side: editingDevice.battery_text_side || 'right',
+        battery_icon_scale: editingDevice.battery_icon_scale ?? 1,
         overlay_scale: editingDevice.overlay_scale ?? 1,
       });
       await loadDevices();
@@ -3236,6 +3386,9 @@ const saveDevice = async () => {
           weather_position: editingDevice.weather_position || 'bottom-right',
           battery_position: editingDevice.battery_position || 'top-right',
           battery_style: editingDevice.battery_style || 'both',
+          battery_rotation: editingDevice.battery_rotation || 0,
+          battery_text_side: editingDevice.battery_text_side || 'right',
+          battery_icon_scale: editingDevice.battery_icon_scale ?? 1,
           overlay_scale: editingDevice.overlay_scale ?? 1,
         }
       );
@@ -3396,6 +3549,7 @@ const form = reactive({
   google_api_key: '',
   comfyui_host: '',
   comfyui_workflow: '',
+  device_image_base_url: '',
   device_host: '', // Keep for backward compatibility/display? Or remove. Remove from form, keep in store maybe?
 });
 
@@ -3483,6 +3637,7 @@ onMounted(async () => {
     google_api_key: store.settings.google_api_key || '',
     comfyui_host: store.settings.comfyui_host || '',
     comfyui_workflow: store.settings.comfyui_workflow || '',
+    device_image_base_url: store.settings.device_image_base_url || '',
   });
 
   // Load cached albums if available
@@ -3579,6 +3734,7 @@ const saveSettingsInternal = async () => {
     google_api_key: form.google_api_key,
     comfyui_host: form.comfyui_host,
     comfyui_workflow: form.comfyui_workflow,
+    device_image_base_url: (form.device_image_base_url || '').trim(),
   });
 };
 
@@ -3746,8 +3902,8 @@ const clearSynology = async () => {
 };
 
 const testImmich = async () => {
-  await saveSettingsInternal();
   try {
+    await saveSettingsInternal();
     await immichStore.testConnection();
     immichConnected.value = true;
     showMessage('Connection Successful!');
@@ -3762,7 +3918,7 @@ const testImmich = async () => {
 const disconnectImmich = async () => {
   if (
     !(await confirmDialog.value.open(
-      'Are you sure you want to disconnect Immich?'
+      'Disconnect Immich? This also removes the photos synced from Immich.'
     ))
   )
     return;
@@ -3771,11 +3927,22 @@ const disconnectImmich = async () => {
   form.immich_source_mode = 'album';
   form.immich_album_id = '';
   form.immich_albums = [];
-  await saveSettingsInternal();
-  immichConnected.value = false;
-  immichStore.count = 0;
-  immichStore.albums = [];
-  showMessage('Disconnected from Immich.');
+  form.immich_auto_sync_enabled = false;
+  try {
+    await saveSettingsInternal();
+    // Drop the synced photo references too, otherwise the Immich albums stay
+    // available after disconnecting.
+    await api.post('/immich/clear');
+    immichConnected.value = false;
+    immichStore.count = 0;
+    immichStore.albums = [];
+    showMessage('Disconnected from Immich.');
+  } catch (e: any) {
+    showMessage(
+      'Failed to disconnect: ' + (e.response?.data?.error || e.message),
+      true
+    );
+  }
 };
 
 const loadImmichAlbums = async () => {
@@ -3982,10 +4149,28 @@ const onWorkflowFile = async (file: File | File[] | null) => {
 };
 
 const getImageUrl = (source: string) => {
-  const hostname = window.location.hostname;
-  const protocol = window.location.protocol;
-  // Use configurable port via env var, default to 9607 for production
+  // 1) Explicit override (e.g. reverse-proxy URL) wins — used verbatim, no port
+  //    is appended. Blank = auto-detect.
+  const override = (form.device_image_base_url || '').trim();
+  if (override) {
+    return `${override.replace(/\/+$/, '')}/image/${source}`;
+  }
+
+  const { protocol, hostname, port } = window.location;
+  // 2) Auto-detect whether the add-on port is needed by looking at the URL the
+  //    WebUI is served from:
+  //    - https:// almost always means a reverse proxy terminates TLS on its own
+  //      port (443/custom) and forwards to us — trust that origin as-is.
+  //    - an explicit non-add-on port already in the address bar (other than the
+  //      HA ingress port 8123) is likewise a deliberate front-end → keep it.
+  //    Otherwise fall back to the direct add-on port the ESP32 reaches.
   const addonPort = import.meta.env.VITE_ADDON_PORT || '9607';
+  if (protocol === 'https:') {
+    return `${window.location.origin}/image/${source}`;
+  }
+  if (port && port !== '8123' && port !== addonPort) {
+    return `${window.location.origin}/image/${source}`;
+  }
   return `${protocol}//${hostname}:${addonPort}/image/${source}`;
 };
 

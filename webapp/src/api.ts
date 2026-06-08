@@ -85,6 +85,9 @@ export interface Device {
   weather_position?: string;
   battery_position?: string;
   battery_style?: string;
+  battery_rotation?: number;
+  battery_text_side?: string;
+  battery_icon_scale?: number;
   overlay_scale?: number;
   created_at: string;
   model?: any;
@@ -115,6 +118,9 @@ export const addDevice = async (params: {
   weather_position?: string;
   battery_position?: string;
   battery_style?: string;
+  battery_rotation?: number;
+  battery_text_side?: string;
+  battery_icon_scale?: number;
   overlay_scale?: number;
 }) => {
   const response = await api.post('devices', params);
@@ -150,6 +156,9 @@ export const updateDevice = async (
     weather_position?: string;
     battery_position?: string;
     battery_style?: string;
+    battery_rotation?: number;
+    battery_text_side?: string;
+    battery_icon_scale?: number;
     overlay_scale?: number;
   }
 ) => {
@@ -177,6 +186,9 @@ export const updateDevice = async (
     weather_position: overlayPositions?.weather_position || 'bottom-right',
     battery_position: overlayPositions?.battery_position || 'top-right',
     battery_style: overlayPositions?.battery_style || 'both',
+    battery_rotation: overlayPositions?.battery_rotation ?? 0,
+    battery_text_side: overlayPositions?.battery_text_side || 'right',
+    battery_icon_scale: overlayPositions?.battery_icon_scale ?? 1,
     overlay_scale: overlayPositions?.overlay_scale ?? 1,
   });
   return response.data;

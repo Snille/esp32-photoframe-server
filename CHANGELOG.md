@@ -11,12 +11,34 @@
 - **Raw-EPD push/pull for storage-less boards**: boards without flash/SD (e.g. FireBeetle 2 ESP32-E) receive uncompressed `application/x-epd-raw` so they don't OOM inflating EPDGZ.
 - **Dynamic image-source list** (`GET /api/sources`) and an in-dialog source switcher.
 - **Named themes** (terracotta/ocean/forest × light/dark) selectable from the app bar.
+- **Battery badge rotation**: rotate the battery icon 0/90/180/270° per device (e.g. for a portrait-mounted frame), with extra chip headroom so a turned icon stays inside its background.
+- **Battery text side**: place the percentage text on any side of the icon — right, left, above or below.
+- **Battery icon size**: a per-device size scale (50%–200%) for the battery icon, independent of the overlay text size.
+- **Device-facing server URL override**: an optional base URL (Settings → Data Sources) used to build the per-source Image Endpoint URLs. Blank auto-detects (http appends the add-on port; https / reverse-proxy origins are used as-is); set it (e.g. `https://photos.example.com`, no port) when running behind a reverse proxy.
 
 ### Changed
 - Capability-gated UI: upload, OTA, AI key fields and software flash-mode controls are hidden on boards that don't support them and shown automatically on those that do.
+- Disconnecting Immich now also clears the synced photos (and disables auto-sync), so its albums no longer linger as an available source.
+
+### Fixed
+- Immich "Test Connection" no longer reports a false failure for **scoped API keys**: a `403` (missing `user.read`) or `404` on `/api/users/me` now falls back to verifying the key against `/api/albums` (the permission the app actually needs).
+- "Sync from Device" now surfaces the frame's own AI prompt (`ai_prompt` from the device config) into the dialog instead of dropping it.
 
 ### Database
-- Migrations `000024`–`000026`: `show_battery`; overlay placement columns (`date_position`, `photo_date_position`, `weather_position`, `battery_position`, `battery_style`); and `overlay_scale`.
+- Migrations `000024`–`000029`: `show_battery`; overlay placement columns (`date_position`, `photo_date_position`, `weather_position`, `battery_position`, `battery_style`); `overlay_scale`; `battery_rotation`; `battery_text_side`; and `battery_icon_scale`.
+
+## v1.7.6
+
+### Added
+- Immich sync gained per-server **Sync Mode** in Settings: `album` (default, existing behavior), `all` (entire library via `/api/search/metadata`), `favorites` (Immich Favorites), and `memories` ("on this day" assets via `/api/memories`). The album picker only renders when mode is `album`. Closes #32
+- Home Assistant add-on store now ships an `icon.png` (128×128 tile) and `logo.png` (250×100 banner) rendered from the firmware project's icon, so the add-on shares the brand mark with the rest of the ecosystem
+
+### Changed
+- Image source dispatch refactored into a flat plugin registry (`internal/imagesource.Source` + `Registry`). Each of the eight sources (`ai_generation`, `fractal`, `dla`, `gallery`, `immich`, `synology_photos`, `google_photos`, `url_proxy`) is now its own ~30-line plugin file owning one source name; the handler does a single `registry.Fetch` with zero per-source branching. The four library-backed sources share `RunDBPhotoFlow` (exclusion-aware pick + smart collage + photo-date lookup) parameterized by per-source pick/load callbacks. Adding a new source is now one file plus one `main.go` registration. `handler/image.go` shrinks ~365 lines. Fractal and DLA generative algorithms ported from the standalone `fractalgen` and `dla` CLIs (contributor: Christopher Rowley)
+
+### Fixed
+- Gallery uploads from iPhone (and any source that writes EXIF `Orientation` instead of rotating pixels) showed up sideways on the device and in the gallery. Uploads and Google Photos sync now run `magick -auto-orient` to bake the orientation into the pixel grid and reset the tag to 1. Telegram, Immich, and Synology paths were already covered
+- Smart collage on a portrait device paired a landscape first photo with a portrait (not landscape) second photo, which `DrawCover` then cropped to a wide strip — and symmetrically on landscape devices. The second-photo query now targets the slot's shape (opposite of the device) instead of the device's own orientation
 
 ## v1.7.5
 

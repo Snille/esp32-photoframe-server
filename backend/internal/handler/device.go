@@ -63,6 +63,9 @@ func (h *DeviceHandler) AddDevice(c echo.Context) error {
 		WeatherPosition   string `json:"weather_position"`
 		BatteryPosition   string `json:"battery_position"`
 		BatteryStyle      string `json:"battery_style"`
+		BatteryRotation   int     `json:"battery_rotation"`
+		BatteryTextSide   string  `json:"battery_text_side"`
+		BatteryIconScale  float64 `json:"battery_icon_scale"`
 		OverlayScale      float64 `json:"overlay_scale"`
 	}
 	if err := c.Bind(&req); err != nil {
@@ -83,6 +86,9 @@ func (h *DeviceHandler) AddDevice(c echo.Context) error {
 		WeatherPosition:   req.WeatherPosition,
 		BatteryPosition:   req.BatteryPosition,
 		BatteryStyle:      req.BatteryStyle,
+		BatteryRotation:   req.BatteryRotation,
+		BatteryTextSide:   req.BatteryTextSide,
+		BatteryIconScale:  req.BatteryIconScale,
 		OverlayScale:      req.OverlayScale,
 	})
 	if err != nil {
@@ -120,6 +126,9 @@ func (h *DeviceHandler) UpdateDevice(c echo.Context) error {
 		WeatherPosition   string `json:"weather_position"`
 		BatteryPosition   string `json:"battery_position"`
 		BatteryStyle      string `json:"battery_style"`
+		BatteryRotation   int     `json:"battery_rotation"`
+		BatteryTextSide   string  `json:"battery_text_side"`
+		BatteryIconScale  float64 `json:"battery_icon_scale"`
 		OverlayScale      float64 `json:"overlay_scale"`
 	}
 	if err := c.Bind(&req); err != nil {
@@ -136,6 +145,9 @@ func (h *DeviceHandler) UpdateDevice(c echo.Context) error {
 		WeatherPosition:   req.WeatherPosition,
 		BatteryPosition:   req.BatteryPosition,
 		BatteryStyle:      req.BatteryStyle,
+		BatteryRotation:   req.BatteryRotation,
+		BatteryTextSide:   req.BatteryTextSide,
+		BatteryIconScale:  req.BatteryIconScale,
 		OverlayScale:      req.OverlayScale,
 	})
 	if err != nil {

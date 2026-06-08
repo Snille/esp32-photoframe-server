@@ -142,6 +142,9 @@ func (s *DeviceService) AddDevice(host string, enableCollage, showDate, showPhot
 		WeatherPosition:          model.NormalizeOverlayPosition(overlay.WeatherPosition, "bottom-right"),
 		BatteryPosition:          model.NormalizeOverlayPosition(overlay.BatteryPosition, "top-right"),
 		BatteryStyle:             model.NormalizeBatteryStyle(overlay.BatteryStyle),
+		BatteryRotation:          model.NormalizeBatteryRotation(overlay.BatteryRotation),
+		BatteryTextSide:          model.NormalizeBatteryTextSide(overlay.BatteryTextSide),
+		BatteryIconScale:         model.NormalizeBatteryIconScale(overlay.BatteryIconScale),
 		OverlayScale:             model.NormalizeOverlayScale(overlay.OverlayScale),
 		DeviceConfig:             deviceConfig,
 		DeviceProcessingSettings: deviceProc,
@@ -204,6 +207,9 @@ func (s *DeviceService) UpdateDevice(id uint, name, host, orientation string, en
 	device.WeatherPosition = model.NormalizeOverlayPosition(overlay.WeatherPosition, "bottom-right")
 	device.BatteryPosition = model.NormalizeOverlayPosition(overlay.BatteryPosition, "top-right")
 	device.BatteryStyle = model.NormalizeBatteryStyle(overlay.BatteryStyle)
+	device.BatteryRotation = model.NormalizeBatteryRotation(overlay.BatteryRotation)
+	device.BatteryTextSide = model.NormalizeBatteryTextSide(overlay.BatteryTextSide)
+	device.BatteryIconScale = model.NormalizeBatteryIconScale(overlay.BatteryIconScale)
 	device.OverlayScale = model.NormalizeOverlayScale(overlay.OverlayScale)
 
 	if err := s.db.Save(&device).Error; err != nil {

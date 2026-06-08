@@ -86,6 +86,9 @@ type Device struct {
 	WeatherPosition   string `json:"weather_position" gorm:"default:'bottom-right'"`
 	BatteryPosition   string `json:"battery_position" gorm:"default:'top-right'"`
 	BatteryStyle      string `json:"battery_style" gorm:"default:'both'"` // both | icon | text
+	BatteryRotation   int     `json:"battery_rotation" gorm:"default:0"`  // rotate the battery badge: 0/90/180/270 degrees
+	BatteryTextSide   string  `json:"battery_text_side" gorm:"default:'right'"` // which side of the icon the % text sits: left | right
+	BatteryIconScale  float64 `json:"battery_icon_scale" gorm:"default:1"` // size multiplier for the battery icon only (0.5–2.0), independent of text size
 	OverlayScale      float64 `json:"overlay_scale" gorm:"default:1"`     // size multiplier for overlay elements (0.5–2.0)
 	// Remote config sync fields (JSON blobs synced from/to device)
 	DeviceConfig             string    `json:"device_config" gorm:"default:'{}'"`
@@ -110,6 +113,9 @@ type OverlaySettings struct {
 	WeatherPosition   string
 	BatteryPosition   string
 	BatteryStyle      string
+	BatteryRotation   int
+	BatteryTextSide   string
+	BatteryIconScale  float64
 	OverlayScale      float64
 }
 
@@ -138,6 +144,28 @@ func NormalizeBatteryStyle(style string) string {
 	}
 }
 
+// NormalizeBatteryRotation clamps the battery badge rotation to one of the
+// four right angles, defaulting to 0 for any other value.
+func NormalizeBatteryRotation(deg int) int {
+	switch deg {
+	case 0, 90, 180, 270:
+		return deg
+	default:
+		return 0
+	}
+}
+
+// NormalizeBatteryTextSide clamps which side of the battery icon the percentage
+// text sits on to a known value, defaulting to right.
+func NormalizeBatteryTextSide(side string) string {
+	switch side {
+	case "right", "left", "top", "bottom":
+		return side
+	default:
+		return "right"
+	}
+}
+
 // NormalizeOverlayScale clamps the overlay size multiplier to [0.5, 2.0],
 // defaulting to 1.0 for zero/unset/out-of-range input.
 func NormalizeOverlayScale(scale float64) float64 {
@@ -151,6 +179,12 @@ func NormalizeOverlayScale(scale float64) float64 {
 		return 2.0
 	}
 	return scale
+}
+
+// NormalizeBatteryIconScale clamps the battery icon size multiplier to
+// [0.5, 2.0], defaulting to 1.0 for zero/unset/out-of-range input.
+func NormalizeBatteryIconScale(scale float64) float64 {
+	return NormalizeOverlayScale(scale)
 }
 
 type DeviceHistory struct {

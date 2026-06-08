@@ -1,0 +1,1 @@
+ALTER TABLE devices ADD COLUMN battery_icon_scale REAL NOT NULL DEFAULT 1.0;

@@ -1,0 +1,1 @@
+ALTER TABLE devices ADD COLUMN battery_rotation INTEGER NOT NULL DEFAULT 0;
