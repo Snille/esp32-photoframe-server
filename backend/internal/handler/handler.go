@@ -4,6 +4,7 @@ import (
 	"net/http"
 
 	"github.com/aitjcize/esp32-photoframe-server/backend/internal/service"
+	"github.com/aitjcize/esp32-photoframe-server/backend/internal/version"
 	"github.com/aitjcize/esp32-photoframe-server/backend/pkg/googlephotos"
 	"github.com/labstack/echo/v4"
 )
@@ -19,9 +20,10 @@ func NewHandler(s *service.SettingsService, t *service.TelegramService, g *googl
 	return &Handler{settings: s, telegram: t, google: g, googleCalendar: gc}
 }
 
-// HealthCheck
+// HealthCheck doubles as the public version endpoint — it is reachable
+// pre-auth, so the webapp can show the server version on the login screen too.
 func (h *Handler) HealthCheck(c echo.Context) error {
-	return c.JSON(http.StatusOK, map[string]string{"status": "ok"})
+	return c.JSON(http.StatusOK, map[string]string{"status": "ok", "version": version.Version})
 }
 
 func (h *Handler) GetSettings(c echo.Context) error {

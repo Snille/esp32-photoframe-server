@@ -31,5 +31,5 @@ func (s *googlePhotosSource) Fetch(req *imagesource.Request) (*imagesource.Respo
 	load := func(item model.Image) (image.Image, error) {
 		return LoadLocalPhoto(s.dataDir, item)
 	}
-	return RunDBPhotoFlow(req, s.db, pick, load)
+	return RunDBPhotoFlow(req, s.db, model.SourceGooglePhotos, pick, load)
 }

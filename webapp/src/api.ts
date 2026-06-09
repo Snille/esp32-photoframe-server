@@ -80,6 +80,7 @@ export interface Device {
   calendar_id?: string;
   date_format?: string;
   show_battery?: boolean;
+  display_order?: string;
   date_position?: string;
   photo_date_position?: string;
   weather_position?: string;
@@ -113,6 +114,7 @@ export const addDevice = async (params: {
   calendar_id?: string;
   date_format?: string;
   show_battery?: boolean;
+  display_order?: string;
   date_position?: string;
   photo_date_position?: string;
   weather_position?: string;
@@ -160,6 +162,7 @@ export const updateDevice = async (
     battery_text_side?: string;
     battery_icon_scale?: number;
     overlay_scale?: number;
+    display_order?: string;
   }
 ) => {
   const response = await api.put(`/devices/${id}`, {
@@ -190,6 +193,7 @@ export const updateDevice = async (
     battery_text_side: overlayPositions?.battery_text_side || 'right',
     battery_icon_scale: overlayPositions?.battery_icon_scale ?? 1,
     overlay_scale: overlayPositions?.overlay_scale ?? 1,
+    display_order: overlayPositions?.display_order || 'shuffle',
   });
   return response.data;
 };
@@ -259,13 +263,22 @@ export const deleteURLSource = async (id: number) => {
 export const listPhotos = async (
   source?: string,
   limit?: number,
-  offset?: number
+  offset?: number,
+  sort?: string
 ) => {
   const params: any = {};
   if (source) params.source = source;
   if (limit) params.limit = limit;
   if (offset) params.offset = offset;
+  if (sort) params.sort = sort;
   const response = await api.get('gallery/photos', { params });
+  return response.data;
+};
+
+// Persist a manual photo sequence for 'custom' display order. ids are in
+// display order (index 0 shown first).
+export const reorderGalleryPhotos = async (ids: number[]) => {
+  const response = await api.post('gallery/reorder', { ids });
   return response.data;
 };
 

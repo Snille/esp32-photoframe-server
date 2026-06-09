@@ -35,5 +35,5 @@ func (s *synologyPhotosSource) Fetch(req *imagesource.Request) (*imagesource.Res
 		img, _, err := image.Decode(bytes.NewReader(data))
 		return img, err
 	}
-	return RunDBPhotoFlow(req, s.db, pick, load)
+	return RunDBPhotoFlow(req, s.db, model.SourceSynologyPhotos, pick, load)
 }

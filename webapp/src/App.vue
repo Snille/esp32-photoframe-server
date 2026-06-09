@@ -12,6 +12,12 @@
       </template>
       <v-app-bar-title class="ml-4">ESP32 PhotoFrame Server</v-app-bar-title>
       <template v-slot:append>
+        <span
+          v-if="serverVersion"
+          class="text-caption text-medium-emphasis mr-2"
+          title="Server version"
+          >{{ serverVersion }}</span
+        >
         <v-menu>
           <template #activator="{ props }">
             <v-btn
@@ -74,6 +80,7 @@ import Settings from './components/Settings.vue';
 import Login from './components/Login.vue';
 import Setup from './components/Setup.vue';
 import { useAuthStore } from './stores/auth';
+import { getStatus } from './api';
 import {
   themeOptions,
   THEME_STORAGE_KEY,
@@ -83,6 +90,7 @@ import {
 const authStore = useAuthStore();
 const theme = useTheme();
 const currentTheme = ref(DEFAULT_THEME);
+const serverVersion = ref('');
 
 const applyTheme = (name: string) => {
   theme.global.name.value = name;
@@ -94,6 +102,13 @@ onMounted(async () => {
   const saved = localStorage.getItem(THEME_STORAGE_KEY);
   if (saved && themeOptions.some((t) => t.value === saved)) {
     applyTheme(saved);
+  }
+  // Public endpoint — show the server version (also visible pre-login).
+  try {
+    const status = await getStatus();
+    serverVersion.value = status?.version ?? '';
+  } catch {
+    serverVersion.value = '';
   }
   await authStore.checkStatus();
 });

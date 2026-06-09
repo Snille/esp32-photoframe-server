@@ -1444,6 +1444,28 @@
                               :disabled="!deviceConfig.auto_rotate"
                             ></v-select>
 
+                            <!-- This server: display order -->
+                            <v-select
+                              v-if="useThisServer"
+                              v-model="editingDevice.display_order"
+                              :items="displayOrderOptions"
+                              label="Display order"
+                              variant="outlined"
+                              density="compact"
+                              hide-details
+                              class="mb-1 ml-8"
+                              :disabled="!deviceConfig.auto_rotate"
+                            ></v-select>
+                            <div
+                              v-if="
+                                useThisServer &&
+                                editingDevice.display_order === 'custom'
+                              "
+                              class="text-caption text-medium-emphasis mb-2 ml-8"
+                            >
+                              Set the order in the Gallery tab (Reorder).
+                            </div>
+
                             <!-- Custom URL -->
                             <v-text-field
                               v-if="!useThisServer"
@@ -1945,6 +1967,40 @@
                           image rotations to save power. WiFi is only active
                           during image fetch.
                         </v-alert>
+
+                        <v-divider class="my-4" />
+
+                        <div class="text-subtitle-2 mb-1">Button</div>
+                        <div class="text-caption text-medium-emphasis mb-3">
+                          What the wake button does while the frame is awake. A
+                          press always wakes the frame from deep sleep first.
+                        </div>
+                        <v-select
+                          v-model="deviceConfig.button_action_short"
+                          :items="buttonActionOptions"
+                          label="Short press (&lt;2s)"
+                          variant="outlined"
+                          density="compact"
+                          hide-details
+                          class="mb-2"
+                        />
+                        <v-select
+                          v-model="deviceConfig.button_action_long"
+                          :items="buttonActionOptions"
+                          label="Long press (2–5s)"
+                          variant="outlined"
+                          density="compact"
+                          hide-details
+                          class="mb-2"
+                        />
+                        <v-select
+                          v-model="deviceConfig.button_action_hold"
+                          :items="buttonActionOptions"
+                          label="Hold (≥5s)"
+                          variant="outlined"
+                          density="compact"
+                          hide-details
+                        />
                       </v-tabs-window-item>
 
                       <!-- Home Assistant Tab -->
@@ -2464,6 +2520,21 @@ const titleForSource = (name: string) =>
 const sourceOptions = ref<{ title: string; value: string }[]>(
   Object.entries(sourceTitles).map(([value, title]) => ({ title, value }))
 );
+// Per-device photo display order (applies to DB-backed server sources).
+const displayOrderOptions = [
+  { title: 'Shuffle (each photo once, then reshuffle)', value: 'shuffle' },
+  { title: 'Chronological — newest first', value: 'chrono_newest' },
+  { title: 'Chronological — oldest first', value: 'chrono_oldest' },
+  { title: 'Custom order (set in Gallery)', value: 'custom' },
+];
+// Wake-button gesture actions (must match firmware action ids).
+const buttonActionOptions = [
+  { title: 'Do nothing', value: 'none' },
+  { title: 'Next image', value: 'next_image' },
+  { title: 'Go to deep sleep', value: 'sleep' },
+  { title: 'Toggle deep sleep on/off', value: 'toggle_deep_sleep' },
+  { title: 'Show info screen', value: 'info_screen' },
+];
 const loadSources = async () => {
   try {
     const names = await listSources();
@@ -2597,6 +2668,9 @@ const deviceConfig = reactive<Record<string, any>>({
   timezone_offset: 0,
   ntp_server: 'pool.ntp.org',
   deep_sleep_enabled: true,
+  button_action_short: 'next_image',
+  button_action_long: 'sleep',
+  button_action_hold: 'info_screen',
   ha_url: '',
   openai_api_key: '',
   google_api_key: '',
@@ -2832,6 +2906,9 @@ const loadDeviceConfig = async (deviceId: number) => {
         cfg.display_orientation ?? deviceConfig.display_orientation,
       display_rotation_deg: cfg.display_rotation_deg ?? 180,
       deep_sleep_enabled: cfg.deep_sleep_enabled ?? true,
+      button_action_short: cfg.button_action_short ?? 'next_image',
+      button_action_long: cfg.button_action_long ?? 'sleep',
+      button_action_hold: cfg.button_action_hold ?? 'info_screen',
       ha_url: cfg.ha_url ?? '',
       ntp_server: cfg.ntp_server ?? 'pool.ntp.org',
       openai_api_key: cfg.openai_api_key ?? '',
@@ -3260,6 +3337,7 @@ const openAddDeviceDialog = () => {
     calendar_id: '',
     date_format: '',
     show_battery: false,
+    display_order: 'shuffle',
     date_position: 'bottom-left',
     photo_date_position: 'bottom-left',
     weather_position: 'bottom-right',
@@ -3282,6 +3360,9 @@ const openAddDeviceDialog = () => {
     sleep_end_time: '07:00',
     display_orientation: 'landscape',
     deep_sleep_enabled: true,
+    button_action_short: 'next_image',
+    button_action_long: 'sleep',
+    button_action_hold: 'info_screen',
   });
   isAddingDevice.value = true;
   deviceDialogTab.value = 'general';
@@ -3334,6 +3415,7 @@ const saveDevice = async () => {
         calendar_id: editingDevice.calendar_id || '',
         date_format: editingDevice.date_format || '',
         show_battery: editingDevice.show_battery || false,
+        display_order: editingDevice.display_order || 'shuffle',
         date_position: editingDevice.date_position || 'bottom-left',
         photo_date_position:
           editingDevice.photo_date_position || 'bottom-left',
@@ -3390,6 +3472,7 @@ const saveDevice = async () => {
           battery_text_side: editingDevice.battery_text_side || 'right',
           battery_icon_scale: editingDevice.battery_icon_scale ?? 1,
           overlay_scale: editingDevice.overlay_scale ?? 1,
+          display_order: editingDevice.display_order || 'shuffle',
         }
       );
 
@@ -3439,6 +3522,9 @@ const saveDevice = async () => {
           timezone: timezone,
           ntp_server: deviceConfig.ntp_server,
           deep_sleep_enabled: deviceConfig.deep_sleep_enabled,
+          button_action_short: deviceConfig.button_action_short,
+          button_action_long: deviceConfig.button_action_long,
+          button_action_hold: deviceConfig.button_action_hold,
           ha_url: deviceConfig.ha_url,
           openai_api_key: deviceConfig.openai_api_key,
           google_api_key: deviceConfig.google_api_key,

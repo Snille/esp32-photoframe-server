@@ -61,7 +61,7 @@ func (s *DeviceService) ListDevices() ([]model.Device, error) {
 	return devices, nil
 }
 
-func (s *DeviceService) AddDevice(host string, enableCollage, showDate, showPhotoDate, showWeather bool, weatherLat, weatherLon float64, layout string, displayMode string, showCalendar bool, calendarID string, dateFormat string, showBattery bool, overlay model.OverlaySettings) (*model.Device, error) {
+func (s *DeviceService) AddDevice(host string, enableCollage, showDate, showPhotoDate, showWeather bool, weatherLat, weatherLon float64, layout string, displayMode string, showCalendar bool, calendarID string, dateFormat string, showBattery bool, displayOrder string, overlay model.OverlaySettings) (*model.Device, error) {
 	// Try to fetch device info (works on LAN, fails for remote devices)
 	var name string
 	var width, height int
@@ -137,6 +137,7 @@ func (s *DeviceService) AddDevice(host string, enableCollage, showDate, showPhot
 		CalendarID:               calendarID,
 		DateFormat:               dateFormat,
 		ShowBattery:              showBattery,
+		DisplayOrder:             model.NormalizeDisplayOrder(displayOrder),
 		DatePosition:             model.NormalizeOverlayPosition(overlay.DatePosition, "bottom-left"),
 		PhotoDatePosition:        model.NormalizeOverlayPosition(overlay.PhotoDatePosition, "bottom-left"),
 		WeatherPosition:          model.NormalizeOverlayPosition(overlay.WeatherPosition, "bottom-right"),
@@ -165,7 +166,7 @@ func (s *DeviceService) AddDevice(host string, enableCollage, showDate, showPhot
 // Hardware-derived fields (Width, Height, BoardName, DeviceConfig,
 // DeviceProcessingSettings, DeviceColorPalette) are only written by
 // AddDevice and RefreshDeviceFromHardware.
-func (s *DeviceService) UpdateDevice(id uint, name, host, orientation string, enableCollage, showDate, showPhotoDate, showWeather bool, weatherLat, weatherLon float64, aiProvider, aiModel, aiPrompt string, layout string, displayMode string, showCalendar bool, calendarID string, dateFormat string, showBattery bool, overlay model.OverlaySettings) (*model.Device, error) {
+func (s *DeviceService) UpdateDevice(id uint, name, host, orientation string, enableCollage, showDate, showPhotoDate, showWeather bool, weatherLat, weatherLon float64, aiProvider, aiModel, aiPrompt string, layout string, displayMode string, showCalendar bool, calendarID string, dateFormat string, showBattery bool, displayOrder string, overlay model.OverlaySettings) (*model.Device, error) {
 	var device model.Device
 	if err := s.db.First(&device, id).Error; err != nil {
 		return nil, errors.New("device not found")
@@ -202,6 +203,7 @@ func (s *DeviceService) UpdateDevice(id uint, name, host, orientation string, en
 	device.CalendarID = calendarID
 	device.DateFormat = dateFormat
 	device.ShowBattery = showBattery
+	device.DisplayOrder = model.NormalizeDisplayOrder(displayOrder)
 	device.DatePosition = model.NormalizeOverlayPosition(overlay.DatePosition, "bottom-left")
 	device.PhotoDatePosition = model.NormalizeOverlayPosition(overlay.PhotoDatePosition, "bottom-left")
 	device.WeatherPosition = model.NormalizeOverlayPosition(overlay.WeatherPosition, "bottom-right")

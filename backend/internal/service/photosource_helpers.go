@@ -9,6 +9,7 @@ package service
 import (
 	"image"
 	"log"
+	"math/rand"
 	"os"
 	"path/filepath"
 	"strings"
@@ -38,6 +39,7 @@ type PhotoLoader func(item model.Image) (image.Image, error)
 func RunDBPhotoFlow(
 	req *imagesource.Request,
 	db *gorm.DB,
+	source string,
 	pick PhotoPicker,
 	load PhotoLoader,
 ) (*imagesource.Response, error) {
@@ -45,9 +47,24 @@ func RunDBPhotoFlow(
 	var ids []uint
 	var err error
 
-	if req.Device != nil && req.Device.EnableCollage {
+	switch {
+	case req.Device != nil && req.Device.EnableCollage:
+		// Collage is inherently a random-pairing feature; it ignores the
+		// device's display-order setting and keeps shuffling pairs.
 		img, ids, err = smartCollage(req.Width, req.Height, req.ExcludeIDs, pick, load)
-	} else {
+	case req.Device != nil:
+		// Ordered single-photo selection (shuffle / chronological / custom).
+		var item model.Image
+		item, err = pickOrderedPhoto(db, req.Device, source)
+		if err != nil {
+			return nil, err
+		}
+		img, err = load(item)
+		if err == nil {
+			ids = []uint{item.ID}
+		}
+	default:
+		// No device context (e.g. ad-hoc pulls): fall back to random.
 		var item model.Image
 		item, err = pickRandomWithFallback(pick, req.ExcludeIDs)
 		if err != nil {
@@ -87,6 +104,101 @@ func PickRandomDBPhoto(db *gorm.DB, source, orientationFilter string, excludeIDs
 	var item model.Image
 	err := query.First(&item).Error
 	return item, err
+}
+
+// pickOrderedPhoto selects the next photo for a device according to its
+// DisplayOrder mode. Every mode reduces to the same idea: build the canonical
+// ordered list of candidate image IDs for the source, find where the
+// last-served photo sits, and return the next one (wrapping at the end).
+//
+//   - chrono_newest / chrono_oldest: sort by capture date (fallback created_at)
+//   - custom: sort by Image.DisplayOrder
+//   - shuffle: deterministic shuffle seeded by Device.ShuffleSeed; when a full
+//     cycle completes the seed is bumped so the next pass is a fresh order.
+//
+// The cursor is derived from DeviceHistory (the most recent served photo for
+// this device+source), so no separate per-device position needs persisting.
+func pickOrderedPhoto(db *gorm.DB, device *model.Device, source string) (model.Image, error) {
+	mode := model.NormalizeDisplayOrder(device.DisplayOrder)
+
+	base := db.Model(&model.Image{}).Where("source = ?", source)
+	var ids []uint
+	switch mode {
+	case model.DisplayOrderChronoNewest:
+		base = base.Order("COALESCE(photo_taken_at, created_at) DESC, id DESC")
+	case model.DisplayOrderChronoOldest:
+		base = base.Order("COALESCE(photo_taken_at, created_at) ASC, id ASC")
+	case model.DisplayOrderCustom:
+		base = base.Order("display_order ASC, id ASC")
+	default: // shuffle — pull in a stable order, then shuffle deterministically
+		base = base.Order("id ASC")
+	}
+	if err := base.Pluck("id", &ids).Error; err != nil {
+		return model.Image{}, err
+	}
+	if len(ids) == 0 {
+		return model.Image{}, gorm.ErrRecordNotFound
+	}
+	if mode == model.DisplayOrderShuffle {
+		deterministicShuffle(ids, device.ShuffleSeed)
+	}
+
+	next := 0
+	if lastID := lastServedImageID(db, device.ID, source); lastID != 0 {
+		if idx := indexOfUint(ids, lastID); idx >= 0 {
+			next = idx + 1
+			if next >= len(ids) {
+				// Completed a full pass through the library.
+				next = 0
+				if mode == model.DisplayOrderShuffle {
+					device.ShuffleSeed++
+					db.Model(device).Update("shuffle_seed", device.ShuffleSeed)
+					deterministicShuffle(ids, device.ShuffleSeed)
+				}
+			}
+		}
+	}
+
+	var item model.Image
+	if err := db.First(&item, ids[next]).Error; err != nil {
+		return model.Image{}, err
+	}
+	return item, nil
+}
+
+// lastServedImageID returns the image ID most recently served to the device
+// from the given source, or 0 if none. Soft-deleted images are ignored so the
+// cursor doesn't get stuck on a removed photo.
+func lastServedImageID(db *gorm.DB, deviceID uint, source string) uint {
+	var ids []uint
+	db.Model(&model.DeviceHistory{}).
+		Joins("JOIN images ON images.id = device_histories.image_id").
+		Where("device_histories.device_id = ? AND images.source = ? AND images.deleted_at IS NULL",
+			deviceID, source).
+		Order("device_histories.served_at DESC").
+		Limit(1).
+		Pluck("device_histories.image_id", &ids)
+	if len(ids) > 0 {
+		return ids[0]
+	}
+	return 0
+}
+
+// deterministicShuffle shuffles ids in place using a seeded PRNG, so the same
+// (seed, input order) always yields the same permutation — letting us recompute
+// a shuffle cycle's order across requests without persisting the whole sequence.
+func deterministicShuffle(ids []uint, seed int64) {
+	r := rand.New(rand.NewSource(seed))
+	r.Shuffle(len(ids), func(i, j int) { ids[i], ids[j] = ids[j], ids[i] })
+}
+
+func indexOfUint(s []uint, v uint) int {
+	for i, x := range s {
+		if x == v {
+			return i
+		}
+	}
+	return -1
 }
 
 // pickRandomWithFallback retries with exclusions dropped if the first

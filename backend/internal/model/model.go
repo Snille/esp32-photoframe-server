@@ -36,6 +36,7 @@ type Image struct {
 	ThumbnailKey    string         `json:"thumbnail_key"`                                                    // Cache key for Synology
 	ImmichAssetID   string         `gorm:"index:idx_images_source_immich,priority:2" json:"immich_asset_id"` // UUID for Immich assets
 	PhotoTakenAt    *time.Time     `json:"photo_taken_at"`                                                   // Original photo creation/taken date
+	DisplayOrder    int            `json:"display_order"`                                                    // Manual sort position for devices in 'custom' order mode (lower = earlier)
 	CreatedAt       time.Time      `json:"created_at"`
 	DeletedAt       gorm.DeletedAt `gorm:"index" json:"-"`
 }
@@ -71,6 +72,11 @@ type Device struct {
 	AIProvider    string  `gorm:"column:ai_provider" json:"ai_provider"`
 	AIModel       string  `gorm:"column:ai_model" json:"ai_model"`
 	AIPrompt      string  `gorm:"column:ai_prompt" json:"ai_prompt"`
+	// DisplayOrder controls the sequence photos are shown in for DB-backed
+	// sources: shuffle | chrono_newest | chrono_oldest | custom. ShuffleSeed is
+	// server-managed (bumped each completed shuffle cycle) and not user-editable.
+	DisplayOrder  string  `json:"display_order" gorm:"default:'shuffle'"`
+	ShuffleSeed   int64   `json:"-" gorm:"default:0"`
 	Layout        string  `json:"layout"`       // "photo_info", "photo_overlay", "side_panel"
 	DisplayMode   string  `json:"display_mode"` // "cover" or "fit"
 	ShowCalendar  bool    `json:"show_calendar"`
@@ -103,6 +109,25 @@ const (
 	LayoutPhotoOverlay = "photo_overlay"
 	LayoutSidePanel    = "side_panel"
 )
+
+// Per-device image display order modes (Device.DisplayOrder).
+const (
+	DisplayOrderShuffle      = "shuffle"       // random, each photo once per cycle, then reshuffle
+	DisplayOrderChronoNewest = "chrono_newest" // by capture date, newest first
+	DisplayOrderChronoOldest = "chrono_oldest" // by capture date, oldest first
+	DisplayOrderCustom       = "custom"        // by manual Image.DisplayOrder
+)
+
+// NormalizeDisplayOrder clamps the display order to a known mode, defaulting to
+// shuffle for empty / unknown input.
+func NormalizeDisplayOrder(s string) string {
+	switch s {
+	case DisplayOrderShuffle, DisplayOrderChronoNewest, DisplayOrderChronoOldest, DisplayOrderCustom:
+		return s
+	default:
+		return DisplayOrderShuffle
+	}
+}
 
 // OverlaySettings groups the per-element placement/style fields so they can be
 // threaded through AddDevice/UpdateDevice as a single argument instead of five

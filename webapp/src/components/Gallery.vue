@@ -16,8 +16,39 @@
           </div>
         </div>
         <div class="d-flex gap-2 ga-2">
+          <!-- Reorder controls (for 'custom' display order) -->
+          <template v-if="reorderMode">
+            <v-btn
+              variant="text"
+              height="40"
+              :disabled="reorderSaving"
+              @click="cancelReorder"
+            >
+              Cancel
+            </v-btn>
+            <v-btn
+              color="primary"
+              variant="flat"
+              height="40"
+              :loading="reorderSaving"
+              prepend-icon="mdi-content-save"
+              @click="saveReorder"
+            >
+              Save Order
+            </v-btn>
+          </template>
           <v-btn
-            v-if="galleryStore.totalPhotos > 0"
+            v-else-if="galleryStore.totalPhotos > 1"
+            color="primary"
+            variant="tonal"
+            height="40"
+            prepend-icon="mdi-sort"
+            @click="enterReorder"
+          >
+            Reorder
+          </v-btn>
+          <v-btn
+            v-if="!reorderMode && galleryStore.totalPhotos > 0"
             color="error"
             variant="flat"
             height="40"
@@ -27,7 +58,7 @@
             Delete All
           </v-btn>
           <v-btn
-            v-if="galleryStore.source === 'gallery'"
+            v-if="!reorderMode && galleryStore.source === 'gallery'"
             color="primary"
             variant="flat"
             height="40"
@@ -47,7 +78,7 @@
             @change="onFilesSelected"
           />
           <v-btn
-            v-if="galleryStore.source === 'google_photos'"
+            v-if="!reorderMode && galleryStore.source === 'google_photos'"
             color="primary"
             variant="flat"
             height="40"
@@ -88,6 +119,40 @@
           indeterminate
           color="primary"
         ></v-progress-circular>
+      </div>
+
+      <!-- Reorder Grid (custom display order) -->
+      <div v-else-if="reorderMode">
+        <v-alert
+          type="info"
+          variant="tonal"
+          density="compact"
+          class="mb-4"
+        >
+          Drag photos to set the order they appear on frames using
+          <strong>Custom</strong> display order. The first photo shows first.
+        </v-alert>
+        <div v-if="reorderLoading" class="d-flex justify-center pa-10">
+          <v-progress-circular indeterminate color="primary" />
+        </div>
+        <draggable
+          v-else
+          v-model="reorderItems"
+          item-key="id"
+          class="reorder-grid"
+        >
+          <template #item="{ element, index }">
+            <v-card variant="outlined" class="position-relative reorder-card">
+              <div class="order-badge">{{ index + 1 }}</div>
+              <v-img
+                :src="getThumbnailUrl(element.thumbnail_url)"
+                aspect-ratio="1"
+                contain
+                class="bg-surface-variant rounded"
+              />
+            </v-card>
+          </template>
+        </draggable>
       </div>
 
       <!-- Photo Grid -->
@@ -257,7 +322,7 @@
 
       <!-- Pagination Controls -->
       <div
-        v-if="galleryStore.totalPhotos > galleryStore.limit"
+        v-if="!reorderMode && galleryStore.totalPhotos > galleryStore.limit"
         class="d-flex justify-center mt-6"
       >
         <v-pagination
@@ -271,7 +336,11 @@
 
       <!-- Empty State -->
       <div
-        v-if="!galleryStore.loading && galleryStore.totalPhotos === 0"
+        v-if="
+          !reorderMode &&
+          !galleryStore.loading &&
+          galleryStore.totalPhotos === 0
+        "
         class="text-center py-10"
       >
         <v-icon
@@ -364,16 +433,97 @@
     max-width: 16.6667%;
   }
 }
+
+.reorder-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(110px, 1fr));
+  gap: 10px;
+}
+
+.reorder-card {
+  cursor: grab;
+}
+
+.reorder-card:active {
+  cursor: grabbing;
+}
+
+.order-badge {
+  position: absolute;
+  top: 4px;
+  left: 4px;
+  z-index: 1;
+  min-width: 22px;
+  height: 22px;
+  padding: 0 6px;
+  border-radius: 11px;
+  background: rgba(0, 0, 0, 0.6);
+  color: #fff;
+  font-size: 12px;
+  line-height: 22px;
+  text-align: center;
+}
 </style>
 
 <script setup lang="ts">
 import { onMounted, ref, reactive } from 'vue';
+import draggable from 'vuedraggable';
 import { useAuthStore } from '../stores/auth';
 import { useGalleryStore } from '../stores/gallery';
-import { listDevices, pushToDevice, type Device } from '../api';
+import {
+  listDevices,
+  listPhotos,
+  pushToDevice,
+  reorderGalleryPhotos,
+  type Device,
+} from '../api';
 
 const authStore = useAuthStore();
 const galleryStore = useGalleryStore();
+
+// --- Custom-order drag-and-drop reordering ---
+const reorderMode = ref(false);
+const reorderLoading = ref(false);
+const reorderSaving = ref(false);
+const reorderItems = ref<any[]>([]);
+
+const enterReorder = async () => {
+  reorderMode.value = true;
+  reorderLoading.value = true;
+  try {
+    // Pull the whole source in its saved custom order so dragging covers every
+    // photo (the normal grid is paginated). High cap keeps moderate libraries
+    // workable; huge libraries are an edge case for manual curation.
+    const res = await listPhotos(galleryStore.source, 1000, 0, 'custom');
+    reorderItems.value = res.photos || [];
+  } catch (e) {
+    galleryStore.importMessage = 'Failed to load photos for reordering';
+    reorderMode.value = false;
+  } finally {
+    reorderLoading.value = false;
+  }
+};
+
+const cancelReorder = () => {
+  reorderMode.value = false;
+  reorderItems.value = [];
+};
+
+const saveReorder = async () => {
+  reorderSaving.value = true;
+  try {
+    await reorderGalleryPhotos(reorderItems.value.map((p) => p.id));
+    galleryStore.importMessage = 'Photo order saved.';
+    setTimeout(() => (galleryStore.importMessage = ''), 4000);
+    reorderMode.value = false;
+    reorderItems.value = [];
+    await galleryStore.fetchPhotos();
+  } catch (e) {
+    galleryStore.importMessage = 'Failed to save photo order';
+  } finally {
+    reorderSaving.value = false;
+  }
+};
 
 const uploadInput = ref<HTMLInputElement | null>(null);
 

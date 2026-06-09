@@ -14,6 +14,7 @@ A image server for the [ESP32 PhotoFrame](https://github.com/aitjcize/esp32-phot
     - Automatic cropping to device aspect ratio (800x480 or 480x800).
     - **Smart Collage**: Automatically combines two landscape photos in portrait mode (or vice versa) to maximize screen usage.
     - **Dithering**: Applies Floyd-Steinberg dithering optimized for Spectra 6 color e-paper.
+- **Display Order** (per device): shuffle (each photo once per cycle, then reshuffle), chronological newest- or oldest-first, or a manual custom order arranged by drag-and-drop in the Gallery.
 - **Overlays**:
     - Customizable Date/Time display.
     - Real-time Weather status (Temperature + Condition) based on location.

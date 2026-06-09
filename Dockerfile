@@ -14,7 +14,14 @@ RUN go mod download
 
 # Copy Source
 COPY backend/ ./backend/
-RUN CGO_ENABLED=1 go build -o photoframe-server ./backend
+# config.yaml is the single source of truth for the version; stamp it into the
+# binary via ldflags so /api/status can report it.
+COPY config.yaml ./
+RUN VERSION=$(sed -n 's/^version:[[:space:]]*"\?\([^"]*\)"\?.*/\1/p' config.yaml) && \
+    echo "Building version: ${VERSION}" && \
+    CGO_ENABLED=1 go build \
+      -ldflags "-X github.com/aitjcize/esp32-photoframe-server/backend/internal/version.Version=${VERSION}" \
+      -o photoframe-server ./backend
 
 # Build Stage for Frontend
 FROM node:20-alpine AS frontend-builder

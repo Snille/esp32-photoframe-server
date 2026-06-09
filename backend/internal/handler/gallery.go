@@ -66,8 +66,15 @@ func (h *GalleryHandler) ListPhotos(c echo.Context) error {
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to count photos"})
 	}
 
+	// sort=custom mirrors the 'custom' display-order mode so the reorder UI
+	// shows photos in their saved manual sequence; default is newest-first.
+	order := "created_at desc"
+	if c.QueryParam("sort") == "custom" {
+		order = "display_order asc, id asc"
+	}
+
 	var items []model.Image
-	if err := query.Order("created_at desc").Limit(limit).Offset(offset).Find(&items).Error; err != nil {
+	if err := query.Order(order).Limit(limit).Offset(offset).Find(&items).Error; err != nil {
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to list photos"})
 	}
 
@@ -80,6 +87,7 @@ func (h *GalleryHandler) ListPhotos(c echo.Context) error {
 		Height       int       `json:"height"`
 		Orientation  string    `json:"orientation"`
 		Source       string    `json:"source"`
+		DisplayOrder int       `json:"display_order"`
 	}
 
 	var photos []PhotoResponse
@@ -93,6 +101,7 @@ func (h *GalleryHandler) ListPhotos(c echo.Context) error {
 			Height:       item.Height,
 			Orientation:  item.Orientation,
 			Source:       item.Source,
+			DisplayOrder: item.DisplayOrder,
 		})
 	}
 
@@ -102,6 +111,36 @@ func (h *GalleryHandler) ListPhotos(c echo.Context) error {
 		"limit":  limit,
 		"offset": offset,
 	})
+}
+
+// ReorderPhotos persists a manual photo sequence for 'custom' display order.
+// The request lists image IDs in display order (index 0 shown first); each
+// image's display_order is set to its position. POST /api/gallery/reorder
+// body: {"ids": [12, 5, 9, ...]}.
+func (h *GalleryHandler) ReorderPhotos(c echo.Context) error {
+	var req struct {
+		IDs []uint `json:"ids"`
+	}
+	if err := c.Bind(&req); err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid request"})
+	}
+	if len(req.IDs) == 0 {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "ids required"})
+	}
+
+	err := h.db.Transaction(func(tx *gorm.DB) error {
+		for i, id := range req.IDs {
+			if err := tx.Model(&model.Image{}).Where("id = ?", id).
+				Update("display_order", i).Error; err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to save order"})
+	}
+	return c.JSON(http.StatusOK, map[string]interface{}{"status": "ok", "count": len(req.IDs)})
 }
 
 // UploadPhoto accepts a multipart upload and stores it in the gallery.

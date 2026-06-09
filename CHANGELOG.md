@@ -1,5 +1,19 @@
 # Changelog
 
+## v1.9.0
+
+### Added
+- **Per-device display order**: choose how each frame sequences its photos from DB-backed sources (gallery, Immich, Synology, Google Photos) — `shuffle` (each photo once per cycle, then reshuffle), chronological newest-first, chronological oldest-first, or a manual `custom` order. Every mode shares one cursor mechanism derived from the device's served-image history, so no separate position needs persisting. Set in Edit Device → Auto Rotate → Display order.
+- **Custom-order drag-and-drop**: a Reorder mode in the Gallery (via `vuedraggable`) to arrange photos into the exact sequence used by `custom` display order; persisted through `POST /api/gallery/reorder`.
+- **Server version in the web UI**: the running version (single source of truth: `config.yaml`, stamped into the binary at build via ldflags) is shown in the app bar and returned by the public `GET /api/status`.
+- **Configurable button actions (server-side editing)**: per-device dropdowns in Edit Device → Power to map the frame's wake-button gestures (short / long / hold) to actions (next image, sleep, toggle deep sleep, info screen). Pushed to the frame via the existing device-config sync.
+
+### Changed
+- Shuffle (each photo once per cycle) replaces the previous "random with last-50 exclusion" as the default rotation behaviour for DB-backed sources.
+
+### Database
+- Migration `000030`: `devices.display_order`, `devices.shuffle_seed`, and `images.display_order`.
+
 ## v1.8.0
 
 ### Added

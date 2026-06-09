@@ -35,5 +35,5 @@ func (s *immichSource) Fetch(req *imagesource.Request) (*imagesource.Response, e
 		img, _, err := image.Decode(bytes.NewReader(data))
 		return img, err
 	}
-	return RunDBPhotoFlow(req, s.db, pick, load)
+	return RunDBPhotoFlow(req, s.db, model.SourceImmich, pick, load)
 }
