@@ -64,6 +64,10 @@ export interface Device {
   width: number;
   height: number;
   orientation: string;
+  board_name?: string;
+  // false on no-PSRAM boards (FireBeetle) that can't do HTTPS; drives the
+  // https:// image-URL warning in the device dialog.
+  https_supported?: boolean;
 
   enable_collage: boolean;
   show_date?: boolean;

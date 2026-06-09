@@ -6,6 +6,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"time"
 
 	"io/ioutil"
 
@@ -195,13 +196,15 @@ func (h *DeviceHandler) PushToDevice(c echo.Context) error {
 	}
 
 	imagePath := req.URL
-	var tempFile string // If we create a temp file, we must clean it up
+	var tempFile string         // If we create a temp file, we must clean it up
+	var photoTakenAt *time.Time // Original capture date, for the photo-date overlay
 
 	if req.ImageID != 0 {
 		var img model.Image
 		if err := h.db.First(&img, req.ImageID).Error; err != nil {
 			return c.JSON(http.StatusNotFound, map[string]string{"error": "image not found"})
 		}
+		photoTakenAt = img.PhotoTakenAt
 
 		if img.Source == model.SourceSynologyPhotos {
 			// Download to temporary file
@@ -258,7 +261,7 @@ func (h *DeviceHandler) PushToDevice(c echo.Context) error {
 	}
 
 	// Push
-	if err := h.deviceService.PushToDevice(uint(deviceID), imagePath); err != nil {
+	if err := h.deviceService.PushToDevice(uint(deviceID), imagePath, photoTakenAt); err != nil {
 		errMsg := err.Error()
 		if strings.Contains(errMsg, "not reachable") || strings.Contains(errMsg, "failed to resolve") {
 			return c.JSON(http.StatusServiceUnavailable, map[string]string{

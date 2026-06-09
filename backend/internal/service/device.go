@@ -10,6 +10,7 @@ import (
 	"io"
 	"log"
 	"os"
+	"time"
 
 	"github.com/aitjcize/esp32-photoframe-server/backend/internal/model"
 	"github.com/aitjcize/esp32-photoframe-server/backend/pkg/gcalendar"
@@ -66,6 +67,7 @@ func (s *DeviceService) AddDevice(host string, enableCollage, showDate, showPhot
 	var name string
 	var width, height int
 	var orientation, boardName string
+	httpsSupported := true // assume capable unless the device reports otherwise
 
 	var deviceConfig, deviceProc, devicePalette string
 
@@ -83,6 +85,9 @@ func (s *DeviceService) AddDevice(host string, enableCollage, showDate, showPhot
 		width = sysInfo.Width
 		height = sysInfo.Height
 		boardName = sysInfo.BoardName
+		if sysInfo.HTTPSSupported != nil {
+			httpsSupported = *sysInfo.HTTPSSupported
+		}
 
 		configRaw, cfgErr := pfClient.FetchConfig()
 		if cfgErr == nil {
@@ -125,6 +130,7 @@ func (s *DeviceService) AddDevice(host string, enableCollage, showDate, showPhot
 		Height:                   height,
 		Orientation:              orientation,
 		BoardName:                boardName,
+		HTTPSSupported:           httpsSupported,
 		EnableCollage:            enableCollage,
 		ShowDate:                 showDate,
 		ShowPhotoDate:            showPhotoDate,
@@ -244,6 +250,9 @@ func (s *DeviceService) RefreshDeviceFromHardware(id uint) (*model.Device, error
 	if sysInfo.BoardName != "" {
 		device.BoardName = sysInfo.BoardName
 	}
+	if sysInfo.HTTPSSupported != nil {
+		device.HTTPSSupported = *sysInfo.HTTPSSupported
+	}
 
 	configRaw, err := pfClient.FetchConfig()
 	if err != nil {
@@ -282,14 +291,15 @@ func (s *DeviceService) DeleteDevice(id uint) error {
 
 // --- Push Logic ---
 
-// PushToDevice resolves a device ID to a host and pushes the image
-func (s *DeviceService) PushToDevice(deviceID uint, imagePath string) error {
+// PushToDevice resolves a device ID to a host and pushes the image.
+// photoTakenAt (may be nil) feeds the photo-date overlay.
+func (s *DeviceService) PushToDevice(deviceID uint, imagePath string, photoTakenAt *time.Time) error {
 	var device model.Device
 	if err := s.db.First(&device, deviceID).Error; err != nil {
 		return errors.New("device not found")
 	}
 
-	if err := s.PushToHost(&device, imagePath, nil); err != nil {
+	if err := s.PushToHost(&device, imagePath, nil, photoTakenAt); err != nil {
 		return err
 	}
 
@@ -299,7 +309,7 @@ func (s *DeviceService) PushToDevice(deviceID uint, imagePath string) error {
 // PushToHost processes an image file and pushes it to a target host
 // This encapsulates the logic previously in Telegram bot
 // Now includes fetching device parameters if configured
-func (s *DeviceService) PushToHost(device *model.Device, imagePath string, extraOpts map[string]string) error {
+func (s *DeviceService) PushToHost(device *model.Device, imagePath string, extraOpts map[string]string, photoTakenAt *time.Time) error {
 	// 0. Fetch system info to determine firmware version and optionally device parameters
 	processingOpts := make(map[string]string)
 	for k, v := range extraOpts {
@@ -354,7 +364,20 @@ func (s *DeviceService) PushToHost(device *model.Device, imagePath string, extra
 	}
 
 	// 5. Render layout (photo + overlay + calendar)
-	needsOverlay := device.ShowDate || device.ShowPhotoDate || device.ShowWeather || device.ShowCalendar
+	// The pull path reads the battery level from the device's
+	// X-Battery-Percentage header; a server-initiated push has no such header,
+	// so query the device directly (it's online — we're pushing to it).
+	batteryPercent := -1
+	if device.ShowBattery {
+		if bat, batErr := pfClient.FetchBattery(); batErr != nil {
+			log.Printf("Failed to fetch battery for device %d: %v", device.ID, batErr)
+		} else {
+			batteryPercent = bat.BatteryLevel
+		}
+	}
+	showBattery := device.ShowBattery && batteryPercent >= 0 && batteryPercent <= 100
+
+	needsOverlay := device.ShowDate || device.ShowPhotoDate || device.ShowWeather || device.ShowCalendar || showBattery
 	var finalImg image.Image
 
 	if needsOverlay {
@@ -409,12 +432,24 @@ func (s *DeviceService) PushToHost(device *model.Device, imagePath string, extra
 			Photo:         srcImg,
 			ShowDate:      device.ShowDate,
 			ShowPhotoDate: device.ShowPhotoDate,
+			PhotoDate:     photoTakenAt,
 			ShowWeather:   device.ShowWeather,
 			Weather:       weatherData,
 			ShowCalendar:  device.ShowCalendar,
 			Events:        events,
 			Timezone:      deviceTimezone,
 			DateFormat:    device.DateFormat,
+			ShowBattery:       showBattery,
+			BatteryPercent:    batteryPercent,
+			DatePosition:      device.DatePosition,
+			PhotoDatePosition: device.PhotoDatePosition,
+			WeatherPosition:   device.WeatherPosition,
+			BatteryPosition:   device.BatteryPosition,
+			BatteryStyle:      device.BatteryStyle,
+			BatteryRotation:   device.BatteryRotation,
+			BatteryTextSide:   device.BatteryTextSide,
+			BatteryIconScale:  device.BatteryIconScale,
+			OverlayScale:      device.OverlayScale,
 		})
 		if renderErr != nil {
 			return fmt.Errorf("render failed: %w", renderErr)

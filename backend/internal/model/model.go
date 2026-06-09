@@ -63,6 +63,12 @@ type Device struct {
 	Height         int     `json:"height"`
 	Orientation    string  `json:"orientation"`
 	BoardName      string  `json:"board_name"`
+	// HTTPSSupported mirrors the device's system-info https_supported flag:
+	// false on no-PSRAM boards (e.g. FireBeetle) that can't fit a TLS handshake
+	// alongside the framebuffer, so the web UI warns against https:// image URLs.
+	// Defaults true so existing devices and firmware that don't report it aren't
+	// falsely flagged. Refreshed from hardware on add / sync.
+	HTTPSSupported bool    `json:"https_supported" gorm:"column:https_supported;default:1"`
 	EnableCollage  bool    `json:"enable_collage"` // Per-device collage setting
 	ShowDate       bool    `json:"show_date"`
 	ShowPhotoDate  bool    `json:"show_photo_date"`

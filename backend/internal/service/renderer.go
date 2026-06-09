@@ -666,7 +666,7 @@ const layoutTemplate = `
     line-height: 1.15;
     max-width: 100%;
   }
-  .ov-chip.date { font-size: calc(var(--heading-size) * var(--ov-scale)); font-weight: 600; }
+  .ov-chip.date { font-size: calc(var(--secondary-size) * var(--ov-scale)); font-weight: 600; }
   .ov-chip.photo-date { font-size: calc(var(--secondary-size) * var(--ov-scale)); }
   .ov-chip.photo-date .material-symbols-outlined { font-size: 1.1em; }
   .ov-chip.weather { font-size: calc(var(--secondary-size) * var(--ov-scale)); font-weight: 600; }

@@ -1,5 +1,19 @@
 # Changelog
 
+## v1.10.0
+
+### Added
+- **HTTPS capability guard for no-PSRAM frames**: the device dialog now warns and blocks Save when an `https://` image URL is chosen for a board that can't do HTTPS (e.g. the FireBeetle — its TLS handshake won't fit in RAM alongside the framebuffer). Capability is read from the device's `system-info` `https_supported` flag, persisted per device and refreshed on add / sync. Existing and remote devices default to "supported" so nothing is falsely flagged.
+
+### Fixed
+- **Pushed images now render the chosen overlays**: a server-initiated push (Push to Device) previously skipped the date / battery / placement overlays that the pull path renders. The push path now applies the full overlay set — battery (with level fetched live from the device's `/api/battery`, since a push has no `X-Battery-Percentage` header), per-element placement, styles and scale.
+- **Photo-date overlay on push**: the original capture date now shows on pushed images (threaded from the image record), not just on pulls.
+- **"Sync from Device" no longer drops settings**: saving a device's config previously rebuilt it from a fixed field list, silently dropping device settings the UI doesn't manage (custom HTTP header, SD rotation mode, Wi-Fi SSID, AI prompt) and any newly-added firmware field. Config saves now merge onto the device's last-synced config, preserving every untouched field.
+- **Today's-date overlay font size** now matches the other overlay elements (was rendered larger).
+
+### Database
+- Migration `000031`: `devices.https_supported` (default true).
+
 ## v1.9.0
 
 ### Added

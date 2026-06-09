@@ -583,8 +583,46 @@ func (h *ImageHandler) UpdateDeviceConfig(c echo.Context) error {
 	updates := map[string]interface{}{
 		"config_last_updated": time.Now().Unix(),
 	}
+
+	// Merge the incoming config onto the last-synced device config rather than
+	// replacing it. The web UI only sends the fields it knows how to edit, so a
+	// plain replace silently drops device settings it doesn't manage
+	// (http_header_*, sd_rotation_mode, ai_prompt, wifi_ssid, …) and — worse —
+	// any firmware setting added after this save code was last touched. Merging
+	// preserves every untouched key, so new fields survive a save even before
+	// the UI learns about them. Sync-from-device re-pulls the full config, so
+	// the merge base stays fresh.
+	var configMap map[string]interface{}
+	if device.DeviceConfig != "" && device.DeviceConfig != "{}" {
+		json.Unmarshal([]byte(device.DeviceConfig), &configMap)
+	}
+	if configMap == nil {
+		configMap = map[string]interface{}{}
+	}
 	if len(req.Config) > 0 {
-		updates["device_config"] = string(req.Config)
+		var incoming map[string]interface{}
+		if err := json.Unmarshal(req.Config, &incoming); err == nil {
+			for k, v := range incoming {
+				configMap[k] = v
+			}
+		}
+	}
+
+	// If image_url points to this server, ensure a device token is included.
+	if imageURL, ok := configMap["image_url"].(string); ok && strings.Contains(imageURL, "/image/") {
+		if userID, ok := c.Get("user_id").(uint); ok {
+			username, _ := c.Get("username").(string)
+			token, err := h.auth.GetOrGenerateDeviceToken(userID, username, device.Name, &device.ID)
+			if err == nil {
+				configMap["access_token"] = token
+			}
+		}
+	}
+
+	if len(req.Config) > 0 || len(configMap) > 0 {
+		if merged, err := json.Marshal(configMap); err == nil {
+			updates["device_config"] = string(merged)
+		}
 	}
 	if len(req.ProcessingSettings) > 0 {
 		updates["device_processing_settings"] = string(req.ProcessingSettings)
@@ -595,31 +633,11 @@ func (h *ImageHandler) UpdateDeviceConfig(c echo.Context) error {
 
 	h.db.Model(&device).Updates(updates)
 
-	// If image_url points to this server, ensure a device token is included
-	var configMap map[string]interface{}
-	if len(req.Config) > 0 {
-		json.Unmarshal(req.Config, &configMap)
-	}
-	if configMap != nil {
-		if imageURL, ok := configMap["image_url"].(string); ok && strings.Contains(imageURL, "/image/") {
-			// Generate or reuse a device token
-			if userID, ok := c.Get("user_id").(uint); ok {
-				username, _ := c.Get("username").(string)
-				token, err := h.auth.GetOrGenerateDeviceToken(userID, username, device.Name, &device.ID)
-				if err == nil {
-					configMap["access_token"] = token
-					// Re-serialize with token for DB storage
-					updated, _ := json.Marshal(configMap)
-					updates["device_config"] = string(updated)
-					h.db.Model(&device).Update("device_config", string(updated))
-				}
-			}
-		}
-	}
-
-	// Attempt to push config to device directly
+	// Attempt to push config to device directly. Only when the caller actually
+	// sent a config (not a processing/palette-only update), and push the full
+	// merged map so the device receives every field, not just the edited ones.
 	pushResult := "synced"
-	if device.Host != "" && configMap != nil {
+	if device.Host != "" && len(req.Config) > 0 && len(configMap) > 0 {
 		if err := photoframe.NewClient(device.Host).PushConfig(configMap); err != nil {
 			log.Printf("Could not push config to device %s: %v (will sync on next image fetch)", device.Host, err)
 			pushResult = "offline"

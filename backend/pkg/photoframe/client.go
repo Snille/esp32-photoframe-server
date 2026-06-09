@@ -303,6 +303,10 @@ type SystemInfo struct {
 	Version         string `json:"version"`
 	HasFlashStorage bool   `json:"has_flash_storage"`
 	SDCardInserted  bool   `json:"sdcard_inserted"`
+	// HTTPSSupported is a pointer so we can tell "device reported false" (no
+	// PSRAM → can't do HTTPS) apart from "firmware too old to report it" (nil,
+	// leave the stored capability untouched).
+	HTTPSSupported *bool `json:"https_supported"`
 }
 
 // IsRawEPDOnly reports whether the device has no persistent storage (no flash
@@ -339,6 +343,49 @@ func (c *Client) FetchSystemInfo() (*SystemInfo, error) {
 	var info SystemInfo
 	if err := json.NewDecoder(resp.Body).Decode(&info); err != nil {
 		return nil, fmt.Errorf("failed to decode system info: %w", err)
+	}
+
+	return &info, nil
+}
+
+// BatteryInfo mirrors the device's /api/battery response.
+type BatteryInfo struct {
+	BatteryLevel     int  `json:"battery_level"` // percent 0-100, -1 if unknown
+	BatteryVoltage   int  `json:"battery_voltage"`
+	Charging         bool `json:"charging"`
+	USBConnected     bool `json:"usb_connected"`
+	BatteryConnected bool `json:"battery_connected"`
+}
+
+// FetchBattery reads the device's current battery level. Used by the
+// server-initiated push path, which (unlike the pull path) has no
+// X-Battery-Percentage header to read the level from.
+func (c *Client) FetchBattery() (*BatteryInfo, error) {
+	ip, err := c.resolveHost(c.host)
+	if err != nil {
+		return nil, fmt.Errorf("failed to resolve device %s: %w", c.host, err)
+	}
+
+	url := fmt.Sprintf("http://%s/api/battery", ip)
+	req, err := http.NewRequest("GET", url, nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Host = c.host
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("device returned status: %d", resp.StatusCode)
+	}
+
+	var info BatteryInfo
+	if err := json.NewDecoder(resp.Body).Decode(&info); err != nil {
+		return nil, fmt.Errorf("failed to decode battery info: %w", err)
 	}
 
 	return &info, nil

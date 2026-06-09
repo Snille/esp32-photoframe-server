@@ -1478,6 +1478,22 @@
                               :disabled="!deviceConfig.auto_rotate"
                             />
 
+                            <v-alert
+                              v-if="deviceHttpsBlocked"
+                              type="warning"
+                              variant="tonal"
+                              density="compact"
+                              class="mb-2 ml-8"
+                            >
+                              This board has no PSRAM, so it can't fetch over
+                              <strong>HTTPS</strong> (the TLS handshake runs out of
+                              memory). The image URL resolves to an https:// address —
+                              point it at an <strong>http://</strong> endpoint on the
+                              local network instead (e.g. set a plain-http "Device-facing
+                              server URL" in Settings → General, or use a custom http
+                              URL).
+                            </v-alert>
+
                             <v-checkbox
                               v-model="deviceConfig.save_downloaded_images"
                               label="Save downloaded images to Downloads album"
@@ -2427,6 +2443,7 @@
                       color="primary"
                       @click="saveDevice"
                       :loading="savingDeviceConfig"
+                      :disabled="deviceHttpsBlocked"
                       >{{ isAddingDevice ? 'Add' : 'Save' }}</v-btn
                     >
                   </v-card-actions>
@@ -2501,6 +2518,34 @@ const confirmDialog = ref();
 // Image Source Binding State
 const useThisServer = ref(true);
 const selectedSource = ref('immich');
+
+// HTTPS guard: no-PSRAM boards (e.g. FireBeetle) can't complete a TLS handshake
+// alongside the framebuffer, so an https:// image URL never fetches. The device
+// reports https_supported=false (refreshed on add/sync); warn + block save when
+// the effective image URL would be https on such a board. Missing flag (older
+// firmware / remote devices) is treated as capable to avoid false warnings.
+const deviceHttpsUnsupported = computed(
+  () => editingDevice.https_supported === false
+);
+
+const effectiveImageUrl = computed(() => {
+  if (deviceConfig.rotation_mode !== 'url') return '';
+  if (useThisServer.value) {
+    try {
+      return getImageUrl(selectedSource.value) || '';
+    } catch {
+      return '';
+    }
+  }
+  return deviceConfig.image_url || '';
+});
+
+const deviceHttpsBlocked = computed(
+  () =>
+    deviceHttpsUnsupported.value &&
+    deviceConfig.rotation_mode === 'url' &&
+    /^\s*https:\/\//i.test(effectiveImageUrl.value)
+);
 // Friendly titles for known sources; anything else is prettified from its name.
 const sourceTitles: Record<string, string> = {
   gallery: 'Gallery',

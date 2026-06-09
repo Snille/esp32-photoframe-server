@@ -21,7 +21,7 @@ type SettingsProvider interface {
 }
 
 type Pusher interface {
-	PushToHost(device *model.Device, imagePath string, extraOpts map[string]string) error
+	PushToHost(device *model.Device, imagePath string, extraOpts map[string]string, photoTakenAt *time.Time) error
 }
 
 type Bot struct {
@@ -131,7 +131,7 @@ func (bot *Bot) handlePhoto(c tele.Context) error {
 				continue
 			}
 
-			err = bot.pusher.PushToHost(&device, destPath, nil)
+			err = bot.pusher.PushToHost(&device, destPath, nil, nil)
 			if err != nil {
 				log.Printf("Failed to push to device %s: %v", device.Name, err)
 				failDevices = append(failDevices, device.Name)
