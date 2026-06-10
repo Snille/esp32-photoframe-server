@@ -94,6 +94,19 @@ export interface Device {
   battery_text_side?: string;
   battery_icon_scale?: number;
   overlay_scale?: number;
+  overlay_font?: string;
+  overlay_weight?: string;
+  show_names?: boolean;
+  names_position?: string;
+  name_format?: string;
+  names_show_age?: boolean;
+  names_max_len?: number;
+  show_location?: boolean;
+  location_position?: string;
+  location_max_len?: number;
+  show_description?: boolean;
+  description_position?: string;
+  description_max_len?: number;
   created_at: string;
   model?: any;
 }
@@ -128,6 +141,19 @@ export const addDevice = async (params: {
   battery_text_side?: string;
   battery_icon_scale?: number;
   overlay_scale?: number;
+  overlay_font?: string;
+  overlay_weight?: string;
+  show_names?: boolean;
+  names_position?: string;
+  name_format?: string;
+  names_show_age?: boolean;
+  names_max_len?: number;
+  show_location?: boolean;
+  location_position?: string;
+  location_max_len?: number;
+  show_description?: boolean;
+  description_position?: string;
+  description_max_len?: number;
 }) => {
   const response = await api.post('devices', params);
   return response.data;
@@ -166,6 +192,19 @@ export const updateDevice = async (
     battery_text_side?: string;
     battery_icon_scale?: number;
     overlay_scale?: number;
+    overlay_font?: string;
+    overlay_weight?: string;
+    show_names?: boolean;
+    names_position?: string;
+    name_format?: string;
+    names_show_age?: boolean;
+    names_max_len?: number;
+    show_location?: boolean;
+    location_position?: string;
+    location_max_len?: number;
+    show_description?: boolean;
+    description_position?: string;
+    description_max_len?: number;
     display_order?: string;
   }
 ) => {
@@ -197,6 +236,19 @@ export const updateDevice = async (
     battery_text_side: overlayPositions?.battery_text_side || 'right',
     battery_icon_scale: overlayPositions?.battery_icon_scale ?? 1,
     overlay_scale: overlayPositions?.overlay_scale ?? 1,
+    overlay_font: overlayPositions?.overlay_font || 'noto_sans',
+    overlay_weight: overlayPositions?.overlay_weight || 'medium',
+    show_names: overlayPositions?.show_names || false,
+    names_position: overlayPositions?.names_position || 'top-left',
+    name_format: overlayPositions?.name_format || 'first_last',
+    names_show_age: overlayPositions?.names_show_age || false,
+    names_max_len: overlayPositions?.names_max_len ?? 30,
+    show_location: overlayPositions?.show_location || false,
+    location_position: overlayPositions?.location_position || 'bottom-center',
+    location_max_len: overlayPositions?.location_max_len ?? 40,
+    show_description: overlayPositions?.show_description || false,
+    description_position: overlayPositions?.description_position || 'wide-bottom',
+    description_max_len: overlayPositions?.description_max_len ?? 80,
     display_order: overlayPositions?.display_order || 'shuffle',
   });
   return response.data;
@@ -204,6 +256,30 @@ export const updateDevice = async (
 
 // Pulls live state (dimensions, board name, config, processing settings,
 // palette) from the device. Requires the device to be online.
+export interface BatterySample {
+  sampled_at: string;
+  percent: number;
+  voltage_mv: number;
+}
+
+export interface BatteryEstimate {
+  has_data: boolean;
+  current_percent: number;
+  current_voltage_mv: number;
+  drain_per_day: number;
+  days_remaining: number;
+  trend: 'discharging' | 'charging' | 'stable' | 'insufficient';
+  sample_count: number;
+  window_start: string;
+  last_sampled_at: string;
+  recent: BatterySample[];
+}
+
+export const getBatteryEstimate = async (id: number): Promise<BatteryEstimate> => {
+  const response = await api.get(`/devices/${id}/battery`);
+  return response.data;
+};
+
 export const refreshDevice = async (id: number) => {
   const response = await api.post(`/devices/${id}/refresh`);
   return response.data;

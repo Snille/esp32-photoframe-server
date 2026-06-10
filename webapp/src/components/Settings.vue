@@ -1257,7 +1257,8 @@
               <!-- Edit Device Dialog (tabbed like device webapp) -->
               <v-dialog
                 v-model="showEditDeviceDialog"
-                max-width="1100px"
+                width="92vw"
+                max-width="1400px"
                 scrollable
               >
                 <v-card>
@@ -1273,6 +1274,7 @@
                   >
                     <v-tab value="general">General</v-tab>
                     <v-tab value="autoRotate">Auto Rotate</v-tab>
+                    <v-tab value="overlay">Overlay</v-tab>
                     <v-tab value="power">Power</v-tab>
                     <v-tab value="homeAssistant">Home Assistant</v-tab>
                     <v-tab value="processing">Processing</v-tab>
@@ -1281,7 +1283,9 @@
                   </v-tabs>
                   <v-card-text
                     :style="
-                      isAddingDevice ? '' : 'height: 455px; overflow-y: auto'
+                      isAddingDevice
+                        ? ''
+                        : 'min-height: 300px; max-height: 78vh; overflow-y: auto'
                     "
                   >
                     <!-- Add Device: just host input -->
@@ -1579,11 +1583,12 @@
                             class="mt-2 mb-1"
                           ></v-checkbox>
                         </div>
+                      </v-tabs-window-item>
 
-                        <v-divider class="my-4" />
-
+                      <!-- Overlay Tab -->
+                      <v-tabs-window-item value="overlay">
                         <!-- Overlay section -->
-                        <div class="text-body-1 font-weight-medium mb-4">
+                        <div class="text-body-1 font-weight-medium mb-4 mt-1">
                           Overlay
                         </div>
                         <div class="ml-10">
@@ -1612,7 +1617,113 @@
                               color="primary"
                               hide-details
                             ></v-checkbox>
+                            <v-checkbox
+                              v-model="editingDevice.show_names"
+                              label="Show Names"
+                              color="primary"
+                              hide-details
+                            ></v-checkbox>
+                            <v-checkbox
+                              v-model="editingDevice.show_location"
+                              label="Show Location"
+                              color="primary"
+                              hide-details
+                            ></v-checkbox>
+                            <v-checkbox
+                              v-model="editingDevice.show_description"
+                              label="Show Description"
+                              color="primary"
+                              hide-details
+                            ></v-checkbox>
                           </div>
+
+                          <!-- People name options (Immich face metadata) -->
+                          <template v-if="editingDevice.show_names">
+                            <div class="text-caption text-disabled mt-3 mb-2">
+                              Names come from face metadata (Immich). Photos
+                              without recognized people show nothing.
+                            </div>
+                            <v-row dense>
+                              <v-col cols="12" sm="6">
+                                <v-select
+                                  v-model="editingDevice.name_format"
+                                  :items="nameFormatOptions"
+                                  item-title="label"
+                                  item-value="value"
+                                  label="Name format"
+                                  variant="outlined"
+                                  density="compact"
+                                  hide-details
+                                ></v-select>
+                              </v-col>
+                              <v-col cols="12" sm="6" class="d-flex align-center">
+                                <v-checkbox
+                                  v-model="editingDevice.names_show_age"
+                                  label="Show age (in parentheses)"
+                                  color="primary"
+                                  hide-details
+                                ></v-checkbox>
+                              </v-col>
+                            </v-row>
+                            <v-slider
+                              v-model="editingDevice.names_max_len"
+                              :min="8"
+                              :max="120"
+                              :step="1"
+                              label="Names max length"
+                              color="primary"
+                              hide-details
+                              class="mt-4 mr-2"
+                            >
+                              <template #append>
+                                <span
+                                  class="text-caption"
+                                  style="min-width: 56px"
+                                >
+                                  {{ editingDevice.names_max_len || 30 }} chars
+                                </span>
+                              </template>
+                            </v-slider>
+                          </template>
+
+                          <!-- Location length limit -->
+                          <v-slider
+                            v-if="editingDevice.show_location"
+                            v-model="editingDevice.location_max_len"
+                            :min="8"
+                            :max="120"
+                            :step="1"
+                            label="Location max length"
+                            color="primary"
+                            hide-details
+                            class="mt-4 mr-2"
+                          >
+                            <template #append>
+                              <span class="text-caption" style="min-width: 56px">
+                                {{ editingDevice.location_max_len || 40 }} chars
+                              </span>
+                            </template>
+                          </v-slider>
+
+                          <!-- Description length limit -->
+                          <v-slider
+                            v-if="editingDevice.show_description"
+                            v-model="editingDevice.description_max_len"
+                            :min="8"
+                            :max="240"
+                            :step="1"
+                            label="Description max length"
+                            color="primary"
+                            hide-details
+                            class="mt-4 mr-2"
+                          >
+                            <template #append>
+                              <span class="text-caption" style="min-width: 56px">
+                                {{ editingDevice.description_max_len || 80 }}
+                                chars
+                              </span>
+                            </template>
+                          </v-slider>
                           <v-select
                             v-if="editingDevice.show_date"
                             v-model="editingDevice.date_format"
@@ -1658,9 +1769,48 @@
                               editingDevice.show_date ||
                               editingDevice.show_photo_date ||
                               editingDevice.show_weather ||
-                              editingDevice.show_battery
+                              editingDevice.show_battery ||
+                              editingDevice.show_names ||
+                              editingDevice.show_location ||
+                              editingDevice.show_description
                             "
                           >
+                            <div
+                              class="text-caption text-medium-emphasis mt-4 mb-1"
+                            >
+                              Typeface
+                            </div>
+                            <div class="text-caption text-disabled mb-2">
+                              Applies to every overlay field. The five families
+                              were chosen for clarity on e-paper.
+                            </div>
+                            <v-row dense>
+                              <v-col cols="12" sm="6">
+                                <v-select
+                                  v-model="editingDevice.overlay_font"
+                                  :items="fontOptions"
+                                  item-title="label"
+                                  item-value="value"
+                                  label="Font"
+                                  variant="outlined"
+                                  density="compact"
+                                  hide-details
+                                ></v-select>
+                              </v-col>
+                              <v-col cols="12" sm="6">
+                                <v-select
+                                  v-model="editingDevice.overlay_weight"
+                                  :items="fontWeightOptions"
+                                  item-title="label"
+                                  item-value="value"
+                                  label="Weight"
+                                  variant="outlined"
+                                  density="compact"
+                                  hide-details
+                                ></v-select>
+                              </v-col>
+                            </v-row>
+
                             <div
                               class="text-caption text-medium-emphasis mt-4 mb-1"
                             >
@@ -1715,6 +1865,54 @@
                                   item-title="label"
                                   item-value="value"
                                   label="Weather position"
+                                  variant="outlined"
+                                  density="compact"
+                                  hide-details
+                                ></v-select>
+                              </v-col>
+                              <v-col
+                                v-if="editingDevice.show_names"
+                                cols="12"
+                                sm="6"
+                              >
+                                <v-select
+                                  v-model="editingDevice.names_position"
+                                  :items="positionOptions"
+                                  item-title="label"
+                                  item-value="value"
+                                  label="Names position"
+                                  variant="outlined"
+                                  density="compact"
+                                  hide-details
+                                ></v-select>
+                              </v-col>
+                              <v-col
+                                v-if="editingDevice.show_location"
+                                cols="12"
+                                sm="6"
+                              >
+                                <v-select
+                                  v-model="editingDevice.location_position"
+                                  :items="positionOptions"
+                                  item-title="label"
+                                  item-value="value"
+                                  label="Location position"
+                                  variant="outlined"
+                                  density="compact"
+                                  hide-details
+                                ></v-select>
+                              </v-col>
+                              <v-col
+                                v-if="editingDevice.show_description"
+                                cols="12"
+                                sm="6"
+                              >
+                                <v-select
+                                  v-model="editingDevice.description_position"
+                                  :items="positionOptions"
+                                  item-title="label"
+                                  item-value="value"
+                                  label="Description position"
                                   variant="outlined"
                                   density="compact"
                                   hide-details
@@ -1849,31 +2047,72 @@
                             </div>
                             <div class="overlay-preview" :style="previewBoxStyle">
                               <div
-                                v-for="slot in previewSlotList"
-                                :key="slot.pos"
-                                class="op-slot"
-                                :class="'op-' + slot.pos"
+                                v-for="region in previewRegions"
+                                :key="region.name"
+                                class="op-region"
+                                :class="'op-region-' + region.name"
                               >
-                                <div
-                                  v-for="el in slot.items"
-                                  :key="el.key"
-                                  class="op-chip"
-                                  :class="{ low: el.low }"
-                                  :style="previewChipStyle(el)"
+                                <template
+                                  v-for="part in region.parts"
+                                  :key="part.key"
                                 >
-                                  <span
-                                    v-if="el.battery"
-                                    class="op-bat"
-                                    :style="previewBatStyle(el)"
+                                  <div
+                                    v-if="part.type === 'corners'"
+                                    class="op-corner-row"
                                   >
-                                    <span
-                                      class="op-bat-fill"
-                                      :style="{ width: el.pct + '%' }"
-                                    ></span>
-                                  </span>
-                                  <span v-if="el.emoji">{{ el.emoji }}</span>
-                                  <span v-if="el.text">{{ el.text }}</span>
-                                </div>
+                                    <div
+                                      v-for="cell in part.cells"
+                                      :key="cell.pos"
+                                      class="op-slot"
+                                      :class="'op-' + cell.pos"
+                                    >
+                                      <div
+                                        v-for="el in cell.items"
+                                        :key="el.key"
+                                        class="op-chip"
+                                        :class="{ low: el.low }"
+                                        :style="previewChipStyle(el)"
+                                      >
+                                        <span
+                                          v-if="el.battery"
+                                          class="op-bat"
+                                          :style="previewBatStyle(el)"
+                                        >
+                                          <span
+                                            class="op-bat-fill"
+                                            :style="{ width: el.pct + '%' }"
+                                          ></span>
+                                        </span>
+                                        <span v-if="el.emoji">{{
+                                          el.emoji
+                                        }}</span>
+                                        <span v-if="el.text">{{ el.text }}</span>
+                                      </div>
+                                    </div>
+                                  </div>
+                                  <div v-else class="op-slot op-wide">
+                                    <div
+                                      v-for="el in part.items"
+                                      :key="el.key"
+                                      class="op-chip"
+                                      :class="{ low: el.low }"
+                                      :style="previewChipStyle(el)"
+                                    >
+                                      <span
+                                        v-if="el.battery"
+                                        class="op-bat"
+                                        :style="previewBatStyle(el)"
+                                      >
+                                        <span
+                                          class="op-bat-fill"
+                                          :style="{ width: el.pct + '%' }"
+                                        ></span>
+                                      </span>
+                                      <span v-if="el.emoji">{{ el.emoji }}</span>
+                                      <span v-if="el.text">{{ el.text }}</span>
+                                    </div>
+                                  </div>
+                                </template>
                               </div>
                             </div>
                           </template>
@@ -1965,6 +2204,98 @@
 
                       <!-- Power Tab -->
                       <v-tabs-window-item value="power">
+                        <!-- Battery drain estimate (derived from the level the
+                             frame reports on each image fetch — no external
+                             measurement hardware). -->
+                        <div class="d-flex align-center mb-1 mt-2">
+                          <div class="text-subtitle-2">Battery</div>
+                          <v-spacer />
+                          <v-btn
+                            variant="text"
+                            size="x-small"
+                            icon="mdi-refresh"
+                            title="Refresh estimate"
+                            :loading="batteryLoading"
+                            @click="loadBatteryEstimate(editingDevice.id)"
+                          ></v-btn>
+                        </div>
+                        <div
+                          v-if="!batteryEstimate || !batteryEstimate.has_data"
+                          class="text-caption text-medium-emphasis mb-2"
+                        >
+                          No battery readings yet. The frame reports its level on
+                          each image fetch; an estimate appears once a few
+                          samples have accumulated.
+                        </div>
+                        <template v-else>
+                          <div
+                            class="d-flex align-center mb-2"
+                            style="gap: 14px"
+                          >
+                            <div class="text-h5">
+                              {{ batteryEstimate.current_percent }}%
+                            </div>
+                            <v-chip
+                              size="small"
+                              :color="batteryTrendColor"
+                              variant="tonal"
+                              >{{ batteryTrendLabel }}</v-chip
+                            >
+                            <div class="text-caption text-medium-emphasis">
+                              <span v-if="batteryEstimate.current_voltage_mv > 0"
+                                >{{
+                                  (
+                                    batteryEstimate.current_voltage_mv / 1000
+                                  ).toFixed(2)
+                                }}
+                                V ·
+                              </span>
+                              {{ batteryEstimate.sample_count }} samples
+                            </div>
+                          </div>
+                          <div
+                            v-if="batteryEstimate.trend === 'discharging'"
+                            class="text-body-2 mb-2"
+                          >
+                            ~{{ batteryEstimate.drain_per_day.toFixed(1) }} %/day
+                            · est.
+                            <strong>{{ batteryDaysLabel }}</strong> remaining
+                          </div>
+                          <div
+                            v-else-if="batteryEstimate.trend === 'charging'"
+                            class="text-body-2 mb-2"
+                          >
+                            Charging / on USB — level is rising.
+                          </div>
+                          <div
+                            v-else-if="batteryEstimate.trend === 'stable'"
+                            class="text-body-2 mb-2"
+                          >
+                            Level steady — not enough drain yet to estimate
+                            runtime.
+                          </div>
+                          <div v-else class="text-body-2 mb-2">
+                            Collecting data — a longer span is needed before a
+                            trend can be read.
+                          </div>
+                          <svg
+                            v-if="batterySparkline"
+                            viewBox="0 0 100 28"
+                            preserveAspectRatio="none"
+                            class="battery-spark text-primary"
+                          >
+                            <polyline
+                              :points="batterySparkline"
+                              fill="none"
+                              stroke="currentColor"
+                              stroke-width="1.5"
+                              vector-effect="non-scaling-stroke"
+                            />
+                          </svg>
+                        </template>
+
+                        <v-divider class="my-4" />
+
                         <v-switch
                           v-model="deviceConfig.deep_sleep_enabled"
                           label="Enable Deep Sleep"
@@ -2493,6 +2824,8 @@ import {
   deleteURLSource,
   getDeviceConfig,
   updateDeviceConfig,
+  getBatteryEstimate,
+  type BatteryEstimate,
   listSources,
   updateAccount,
   listSessions,
@@ -3124,10 +3457,86 @@ const dateFormatOptions = [
   { label: 'YYYY.MM.DD', value: '2006.01.02' },
 ];
 
+// formatGoDate renders a date using a Go reference-time layout (the same
+// strings dateFormatOptions stores), so the live preview matches what the
+// server renderer produces. An empty layout falls back to the renderer default
+// "Mon, Jan 02". Tokens are matched longest-first by a left-to-right scan so
+// inserted values are never re-interpreted as tokens.
+const formatGoDate = (layout: string, d: Date): string => {
+  const wdShort = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][d.getDay()];
+  const wdLong = [
+    'Sunday',
+    'Monday',
+    'Tuesday',
+    'Wednesday',
+    'Thursday',
+    'Friday',
+    'Saturday',
+  ][d.getDay()];
+  const moShort = [
+    'Jan',
+    'Feb',
+    'Mar',
+    'Apr',
+    'May',
+    'Jun',
+    'Jul',
+    'Aug',
+    'Sep',
+    'Oct',
+    'Nov',
+    'Dec',
+  ][d.getMonth()];
+  const moLong = [
+    'January',
+    'February',
+    'March',
+    'April',
+    'May',
+    'June',
+    'July',
+    'August',
+    'September',
+    'October',
+    'November',
+    'December',
+  ][d.getMonth()];
+  const day2 = String(d.getDate()).padStart(2, '0');
+  const month2 = String(d.getMonth() + 1).padStart(2, '0');
+  const year4 = String(d.getFullYear());
+
+  if (!layout) return `${wdShort}, ${moShort} ${day2}`;
+
+  const tokens: [string, string][] = [
+    ['Monday', wdLong],
+    ['January', moLong],
+    ['2006', year4],
+    ['Mon', wdShort],
+    ['Jan', moShort],
+    ['02', day2],
+    ['01', month2],
+  ];
+  let out = '';
+  let i = 0;
+  while (i < layout.length) {
+    const match = tokens.find((t) => layout.startsWith(t[0], i));
+    if (match) {
+      out += match[1];
+      i += match[0].length;
+    } else {
+      out += layout[i];
+      i += 1;
+    }
+  }
+  return out;
+};
+
 const positionOptions = [
   { label: 'Top Left', value: 'top-left' },
   { label: 'Top Center', value: 'top-center' },
   { label: 'Top Right', value: 'top-right' },
+  { label: 'Wide Top (full-width band)', value: 'wide-top' },
+  { label: 'Wide Bottom (full-width band)', value: 'wide-bottom' },
   { label: 'Bottom Left', value: 'bottom-left' },
   { label: 'Bottom Center', value: 'bottom-center' },
   { label: 'Bottom Right', value: 'bottom-right' },
@@ -3152,6 +3561,99 @@ const batteryTextSideOptions = [
   { label: 'Above icon', value: 'top' },
   { label: 'Below icon', value: 'bottom' },
 ];
+
+// Overlay typeface. Keys match the server renderer's overlayFontFamily map; the
+// five families are installed in the container and picked for e-paper clarity.
+const fontOptions = [
+  { label: 'Noto Sans', value: 'noto_sans' },
+  { label: 'Inter', value: 'inter' },
+  { label: 'DejaVu Sans', value: 'dejavu_sans' },
+  { label: 'Liberation Sans', value: 'liberation_sans' },
+  { label: 'DejaVu Serif', value: 'dejavu_serif' },
+  { label: 'Ole (handwritten)', value: 'ole' },
+];
+
+const fontWeightOptions = [
+  { label: 'Regular', value: 'regular' },
+  { label: 'Medium', value: 'medium' },
+  { label: 'Bold', value: 'bold' },
+];
+
+// People name rendering formats (keys mirror the backend's validNameFormats).
+const nameFormatOptions = [
+  { label: 'First Last (Anna Andersson)', value: 'first_last' },
+  { label: 'First L. (Anna A.)', value: 'first_initial' },
+  { label: 'First (Anna)', value: 'first' },
+  { label: 'Last First (Andersson Anna)', value: 'last_first' },
+  { label: 'Last F. (Andersson A.)', value: 'last_initial' },
+  { label: 'Last (Andersson)', value: 'last' },
+];
+
+// sampleNamesText mirrors the backend FormatPeople for the live preview, using
+// two sample people so the chosen format, age toggle and length limit are
+// visible.
+const sampleNamesText = (): string => {
+  const sample = [
+    { first: 'Anna', last: 'Andersson', age: 34 },
+    { first: 'Erik', last: 'Berg', age: 7 },
+  ];
+  const format = editingDevice.name_format || 'first_last';
+  const showAge = !!editingDevice.names_show_age;
+  const maxLen = editingDevice.names_max_len || 30;
+
+  const label = (p: { first: string; last: string }) => {
+    const li = p.last ? p.last.charAt(0).toUpperCase() + '.' : '';
+    const fi = p.first ? p.first.charAt(0).toUpperCase() + '.' : '';
+    switch (format) {
+      case 'first':
+        return p.first;
+      case 'first_initial':
+        return p.last ? `${p.first} ${li}` : p.first;
+      case 'last':
+        return p.last || p.first;
+      case 'last_first':
+        return p.last ? `${p.last} ${p.first}` : p.first;
+      case 'last_initial':
+        return p.last ? `${p.last} ${fi}` : p.first;
+      default:
+        return p.last ? `${p.first} ${p.last}` : p.first;
+    }
+  };
+
+  const parts = sample.map((p) => {
+    let s = label(p);
+    if (showAge) s += ` (${p.age})`;
+    return s;
+  });
+
+  let out = '';
+  for (let i = 0; i < parts.length; i++) {
+    const candidate = i > 0 ? `, ${parts[i]}` : parts[i];
+    if (out !== '' && out.length + candidate.length > maxLen) {
+      return `${out} +${parts.length - i}`;
+    }
+    out += candidate;
+  }
+  return out;
+};
+
+// CSS font-family stacks for the live preview (mirrors the renderer). The
+// preview is approximate — browsers fall back to a generic family if a face
+// isn't installed locally.
+const previewFontStacks: Record<string, string> = {
+  noto_sans: "'Noto Sans', Arial, sans-serif",
+  inter: "'Inter', 'Noto Sans', sans-serif",
+  dejavu_sans: "'DejaVu Sans', 'Noto Sans', sans-serif",
+  liberation_sans: "'Liberation Sans', Arial, sans-serif",
+  dejavu_serif: "'DejaVu Serif', 'Noto Serif', serif",
+  ole: "'Ole', cursive",
+};
+
+const previewFontWeights: Record<string, number> = {
+  regular: 400,
+  medium: 500,
+  bold: 700,
+};
 
 // --- Live overlay preview (mirrors the server renderer's placement rules) ---
 interface PreviewEl {
@@ -3178,13 +3680,13 @@ const isOverlayLayoutPreview = computed(() => {
 const previewElements = computed<PreviewEl[]>(() => {
   const els: PreviewEl[] = [];
   const ov = isOverlayLayoutPreview.value;
-  const sampleDate = 'Mon, Jan 02';
+  const now = new Date();
   if (ov && editingDevice.show_date) {
     els.push({
       key: 'date',
       pos: editingDevice.date_position || 'bottom-left',
       kind: 'date',
-      text: sampleDate,
+      text: formatGoDate(editingDevice.date_format || '', now),
     });
   }
   if (ov && editingDevice.show_photo_date) {
@@ -3193,7 +3695,8 @@ const previewElements = computed<PreviewEl[]>(() => {
       pos: editingDevice.photo_date_position || 'bottom-left',
       kind: 'photo',
       emoji: '📷',
-      text: sampleDate,
+      // Photo date is always rendered as "Jan 02, 2006" by the server.
+      text: formatGoDate('Jan 02, 2006', now),
     });
   }
   if (ov && editingDevice.show_weather) {
@@ -3202,7 +3705,38 @@ const previewElements = computed<PreviewEl[]>(() => {
       pos: editingDevice.weather_position || 'bottom-right',
       kind: 'weather',
       emoji: '☀️',
-      text: '21.0°C',
+      // Renderer shows temperature AND humidity, e.g. "21.0°C  45%".
+      text: '21.0°C  45%',
+    });
+  }
+  if (ov && editingDevice.show_names) {
+    els.push({
+      key: 'names',
+      pos: editingDevice.names_position || 'top-left',
+      kind: 'names',
+      emoji: '👥',
+      text: sampleNamesText(),
+    });
+  }
+  if (ov && editingDevice.show_location) {
+    els.push({
+      key: 'location',
+      pos: editingDevice.location_position || 'bottom-center',
+      kind: 'location',
+      emoji: '📍',
+      text: 'Björnås, Skåne, Sweden',
+    });
+  }
+  if (ov && editingDevice.show_description) {
+    const sample = 'A lovely day by the lake with the whole family.';
+    const max = editingDevice.description_max_len || 80;
+    els.push({
+      key: 'description',
+      pos: editingDevice.description_position || 'wide-bottom',
+      kind: 'description',
+      emoji: '📝',
+      text:
+        sample.length > max ? sample.slice(0, max - 1).trimEnd() + '…' : sample,
     });
   }
   if (editingDevice.show_battery) {
@@ -3224,21 +3758,44 @@ const previewElements = computed<PreviewEl[]>(() => {
   return els;
 });
 
-const previewSlotList = computed(() => {
-  const order = [
-    'top-left',
-    'top-center',
-    'top-right',
-    'bottom-left',
-    'bottom-center',
-    'bottom-right',
+// previewRegions mirrors the renderer's floating layout: a top and bottom
+// region, each a corner row (left/center/right grid) plus a full-width band.
+// Empty parts are dropped, so a wide band collapses into the corner row's place
+// when no corner chip is shown.
+const previewRegions = computed(() => {
+  const at = (pos: string) =>
+    previewElements.value.filter((e) => e.pos === pos);
+  const topCorners = ['top-left', 'top-center', 'top-right'];
+  const botCorners = ['bottom-left', 'bottom-center', 'bottom-right'];
+
+  const topParts: any[] = [];
+  if (topCorners.some((p) => at(p).length)) {
+    topParts.push({
+      type: 'corners',
+      key: 'tc',
+      cells: topCorners.map((pos) => ({ pos, items: at(pos) })),
+    });
+  }
+  if (at('wide-top').length) {
+    topParts.push({ type: 'wide', key: 'wt', items: at('wide-top') });
+  }
+
+  const botParts: any[] = [];
+  if (at('wide-bottom').length) {
+    botParts.push({ type: 'wide', key: 'wb', items: at('wide-bottom') });
+  }
+  if (botCorners.some((p) => at(p).length)) {
+    botParts.push({
+      type: 'corners',
+      key: 'bc',
+      cells: botCorners.map((pos) => ({ pos, items: at(pos) })),
+    });
+  }
+
+  return [
+    { name: 'top', parts: topParts },
+    { name: 'bottom', parts: botParts },
   ];
-  return order
-    .map((pos) => ({
-      pos,
-      items: previewElements.value.filter((e) => e.pos === pos),
-    }))
-    .filter((s) => s.items.length > 0);
 });
 
 const previewBoxStyle = computed(() => {
@@ -3248,20 +3805,47 @@ const previewBoxStyle = computed(() => {
     : { width: '270px', height: '180px' };
 });
 
-const previewFontSize = (el: PreviewEl) => {
-  const base = el.kind === 'date' ? 13 : 11;
-  return `${base * (editingDevice.overlay_scale || 1)}px`;
-};
+// The preview box is rendered with a fixed 180px short side (270x180 landscape
+// / 180x270 portrait). To make the preview match the device 1:1, mirror the
+// renderer's --secondary-size formula for the panel, then scale it down by the
+// ratio of the preview box to the real panel.
+const PREVIEW_SHORT_PX = 180;
 
-// Battery icon base size in the preview (px), mirrors the renderer's
-// --secondary-size baseline for the badge. Independent of text size.
-const PREVIEW_BAT_BASE = 11;
+const previewPanelMinDim = computed(() => {
+  const w = editingDevice.width || 600;
+  const h = editingDevice.height || 400;
+  const m = Math.min(w, h);
+  return m > 0 ? m : 400;
+});
+
+// Renderer: baseUnit = 4.8 * (minDim/480)^0.62 ; secondary-size = 4.0 * baseUnit
+// (px on the real panel). previewSecondaryPx is that value scaled to the
+// preview box, i.e. the px size a --secondary-size element occupies in preview.
+const previewSecondaryPx = computed(() => {
+  const minDim = previewPanelMinDim.value;
+  const baseUnit = 4.8 * Math.pow(minDim / 480, 0.62);
+  const secondary = baseUnit * 4.0;
+  return secondary * (PREVIEW_SHORT_PX / minDim);
+});
+
+const previewFontSize = (_el: PreviewEl) => {
+  // All overlay chips share one size in the renderer (--secondary-size * scale).
+  return `${previewSecondaryPx.value * (editingDevice.overlay_scale || 1)}px`;
+};
 
 // Mirrors the renderer's battery chip rules: text side → flex-direction,
 // 90/270 rotation → reserve vertical room (scaled with the icon size) so the
 // icon stays inside the chip.
 const previewChipStyle = (el: PreviewEl) => {
-  const style: Record<string, string> = { fontSize: previewFontSize(el) };
+  const style: Record<string, string> = {
+    fontSize: previewFontSize(el),
+    fontFamily:
+      previewFontStacks[editingDevice.overlay_font || 'noto_sans'] ||
+      previewFontStacks.noto_sans,
+    fontWeight: String(
+      previewFontWeights[editingDevice.overlay_weight || 'medium'] || 500
+    ),
+  };
   if (el.kind === 'battery') {
     const side = el.batteryTextSide || 'right';
     if (side === 'left') style.flexDirection = 'row-reverse';
@@ -3269,7 +3853,7 @@ const previewChipStyle = (el: PreviewEl) => {
     else if (side === 'bottom') style.flexDirection = 'column';
     const rot = el.batteryRotation || 0;
     if (rot === 90 || rot === 270) {
-      style.minHeight = `${PREVIEW_BAT_BASE * (el.batteryIconScale || 1) * 2.6}px`;
+      style.minHeight = `${previewSecondaryPx.value * (el.batteryIconScale || 1) * 2.6}px`;
     }
   }
   return style;
@@ -3279,7 +3863,7 @@ const previewChipStyle = (el: PreviewEl) => {
 // text size, and carries the rotation transform.
 const previewBatStyle = (el: PreviewEl) => {
   const style: Record<string, string> = {
-    fontSize: `${PREVIEW_BAT_BASE * (el.batteryIconScale || 1)}px`,
+    fontSize: `${previewSecondaryPx.value * (el.batteryIconScale || 1)}px`,
   };
   if (el.batteryRotation) {
     style.transform = `rotate(${el.batteryRotation}deg)`;
@@ -3360,6 +3944,7 @@ watch(
 const isAddingDevice = ref(false);
 
 const openAddDeviceDialog = () => {
+  batteryEstimate.value = null;
   Object.assign(editingDevice, {
     id: undefined,
     name: '',
@@ -3392,6 +3977,19 @@ const openAddDeviceDialog = () => {
     battery_text_side: 'right',
     battery_icon_scale: 1,
     overlay_scale: 1,
+    overlay_font: 'noto_sans',
+    overlay_weight: 'medium',
+    show_names: false,
+    names_position: 'top-left',
+    name_format: 'first_last',
+    names_show_age: false,
+    names_max_len: 30,
+    show_location: false,
+    location_position: 'bottom-center',
+    location_max_len: 40,
+    show_description: false,
+    description_position: 'wide-bottom',
+    description_max_len: 80,
   });
   Object.assign(deviceConfig, {
     auto_rotate: false,
@@ -3421,9 +4019,76 @@ const editDevice = async (device: Device) => {
   isAddingDevice.value = false;
   deviceDialogTab.value = 'general';
   showEditDeviceDialog.value = true;
-  // Load device remote config
+  // Load device remote config + battery drain estimate
+  loadBatteryEstimate(device.id);
   await loadDeviceConfig(device.id);
 };
+
+const batteryEstimate = ref<BatteryEstimate | null>(null);
+const batteryLoading = ref(false);
+
+const loadBatteryEstimate = async (deviceId?: number) => {
+  batteryEstimate.value = null;
+  if (!deviceId) return;
+  batteryLoading.value = true;
+  try {
+    batteryEstimate.value = await getBatteryEstimate(deviceId);
+  } catch {
+    batteryEstimate.value = null;
+  } finally {
+    batteryLoading.value = false;
+  }
+};
+
+const batteryTrendLabel = computed(() => {
+  switch (batteryEstimate.value?.trend) {
+    case 'discharging':
+      return 'Discharging';
+    case 'charging':
+      return 'Charging';
+    case 'stable':
+      return 'Stable';
+    default:
+      return 'Collecting';
+  }
+});
+
+const batteryTrendColor = computed(() => {
+  switch (batteryEstimate.value?.trend) {
+    case 'discharging':
+      return 'warning';
+    case 'charging':
+      return 'success';
+    case 'stable':
+      return 'info';
+    default:
+      return 'grey';
+  }
+});
+
+const batteryDaysLabel = computed(() => {
+  const d = batteryEstimate.value?.days_remaining ?? -1;
+  if (d < 0) return '—';
+  if (d < 1) return `~${Math.round(d * 24)} h`;
+  if (d < 14) return `~${d.toFixed(1)} days`;
+  return `~${Math.round(d)} days`;
+});
+
+// SVG polyline points for the percent sparkline (0..100 x, 0..28 y inverted).
+const batterySparkline = computed(() => {
+  const pts = batteryEstimate.value?.recent ?? [];
+  if (pts.length < 2) return '';
+  const t0 = new Date(pts[0].sampled_at).getTime();
+  const t1 = new Date(pts[pts.length - 1].sampled_at).getTime();
+  const span = t1 - t0 || 1;
+  return pts
+    .map((p) => {
+      const x = ((new Date(p.sampled_at).getTime() - t0) / span) * 100;
+      const y = 28 - (Math.max(0, Math.min(100, p.percent)) / 100) * 28;
+      return `${x.toFixed(2)},${y.toFixed(2)}`;
+    })
+    .join(' ');
+});
 
 const saveDevice = async () => {
   if (!editingDevice.host) {
@@ -3471,6 +4136,20 @@ const saveDevice = async () => {
         battery_text_side: editingDevice.battery_text_side || 'right',
         battery_icon_scale: editingDevice.battery_icon_scale ?? 1,
         overlay_scale: editingDevice.overlay_scale ?? 1,
+        overlay_font: editingDevice.overlay_font || 'noto_sans',
+        overlay_weight: editingDevice.overlay_weight || 'medium',
+        show_names: editingDevice.show_names || false,
+        names_position: editingDevice.names_position || 'top-left',
+        name_format: editingDevice.name_format || 'first_last',
+        names_show_age: editingDevice.names_show_age || false,
+        names_max_len: editingDevice.names_max_len ?? 30,
+        show_location: editingDevice.show_location || false,
+        location_position: editingDevice.location_position || 'bottom-center',
+        location_max_len: editingDevice.location_max_len ?? 40,
+        show_description: editingDevice.show_description || false,
+        description_position:
+          editingDevice.description_position || 'wide-bottom',
+        description_max_len: editingDevice.description_max_len ?? 80,
       });
       await loadDevices();
       showMessage('Device added. Fetched settings from device.');
@@ -3517,6 +4196,20 @@ const saveDevice = async () => {
           battery_text_side: editingDevice.battery_text_side || 'right',
           battery_icon_scale: editingDevice.battery_icon_scale ?? 1,
           overlay_scale: editingDevice.overlay_scale ?? 1,
+          overlay_font: editingDevice.overlay_font || 'noto_sans',
+          overlay_weight: editingDevice.overlay_weight || 'medium',
+          show_names: editingDevice.show_names || false,
+          names_position: editingDevice.names_position || 'top-left',
+          name_format: editingDevice.name_format || 'first_last',
+          names_show_age: editingDevice.names_show_age || false,
+          names_max_len: editingDevice.names_max_len ?? 30,
+          show_location: editingDevice.show_location || false,
+          location_position: editingDevice.location_position || 'bottom-center',
+          location_max_len: editingDevice.location_max_len ?? 40,
+          show_description: editingDevice.show_description || false,
+          description_position:
+            editingDevice.description_position || 'wide-bottom',
+          description_max_len: editingDevice.description_max_len ?? 80,
           display_order: editingDevice.display_order || 'shuffle',
         }
       );
@@ -4346,54 +5039,72 @@ const getDeviceFromUA = (ua: string) => {
   background: linear-gradient(135deg, #6a7b8c 0%, #93a3b3 50%, #b9a48c 100%);
   box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.2);
 }
-.overlay-preview .op-slot {
+.overlay-preview .op-region {
   position: absolute;
+  left: 6px;
+  right: 6px;
   display: flex;
   flex-direction: column;
   gap: 4px;
-  max-width: calc(100% - 12px);
 }
-.overlay-preview .op-top-left {
+.overlay-preview .op-region-top {
   top: 6px;
-  left: 6px;
-  align-items: flex-start;
 }
-.overlay-preview .op-top-center {
-  top: 6px;
-  left: 50%;
-  transform: translateX(-50%);
-  align-items: center;
+.overlay-preview .op-region-bottom {
+  bottom: 6px;
 }
-.overlay-preview .op-top-right {
-  top: 6px;
-  right: 6px;
-  align-items: flex-end;
+.overlay-preview .op-corner-row {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: start;
+  gap: 6px;
 }
+.overlay-preview .op-region-bottom .op-corner-row {
+  align-items: end;
+}
+.overlay-preview .op-slot {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+  max-width: 100%;
+}
+.overlay-preview .op-top-left,
 .overlay-preview .op-bottom-left {
-  bottom: 6px;
-  left: 6px;
+  justify-self: start;
   align-items: flex-start;
 }
+.overlay-preview .op-top-center,
 .overlay-preview .op-bottom-center {
-  bottom: 6px;
-  left: 50%;
-  transform: translateX(-50%);
+  justify-self: center;
   align-items: center;
 }
+.overlay-preview .op-top-right,
 .overlay-preview .op-bottom-right {
-  bottom: 6px;
-  right: 6px;
+  justify-self: end;
   align-items: flex-end;
+}
+.overlay-preview .op-wide {
+  width: 100%;
+  align-items: stretch;
+}
+.overlay-preview .op-wide .op-chip {
+  width: 100%;
+  justify-content: center;
+  text-align: center;
+  white-space: normal;
 }
 .overlay-preview .op-chip {
   display: flex;
   align-items: center;
-  gap: 4px;
-  padding: 2px 6px;
-  border-radius: 5px;
+  /* em-based like the renderer chip so the chip shrinks/grows proportionally
+     with the (device-faithful) font size. */
+  gap: 0.4em;
+  padding: 0.25em 0.55em;
+  border-radius: 0.4em;
   background: rgba(0, 0, 0, 0.45);
   color: #fff;
-  line-height: 1.2;
+  line-height: 1.15;
   white-space: nowrap;
   font-weight: 600;
 }
@@ -4430,5 +5141,11 @@ const getDeviceFromUA = (ua: string) => {
 }
 .overlay-preview .op-chip.low .op-bat-fill {
   background: #e03b3b;
+}
+.battery-spark {
+  width: 100%;
+  height: 40px;
+  display: block;
+  opacity: 0.85;
 }
 </style>

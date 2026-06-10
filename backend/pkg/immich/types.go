@@ -13,6 +13,17 @@ type ExifInfo struct {
 	ExifImageHeight  int    `json:"exifImageHeight"`
 	Orientation      string `json:"orientation"` // EXIF orientation e.g. "1", "6", "Rotate 90 CW"
 	DateTimeOriginal string `json:"dateTimeOriginal"`
+	City             string `json:"city"`
+	State            string `json:"state"`
+	Country          string `json:"country"`
+	Description      string `json:"description"`
+}
+
+// Person is a face recognized in an asset. Returned by the per-asset detail
+// endpoint (GET /api/assets/{id}); album/search listings do NOT include people.
+type Person struct {
+	Name      string `json:"name"`
+	BirthDate string `json:"birthDate"` // "YYYY-MM-DD" or empty
 }
 
 // Asset represents an Immich media asset
@@ -22,6 +33,7 @@ type Asset struct {
 	OriginalFileName string   `json:"originalFileName"`
 	LocalDateTime    string   `json:"localDateTime"`
 	ExifInfo         ExifInfo `json:"exifInfo"`
+	People           []Person `json:"people"` // only populated by GetAsset
 }
 
 // AlbumDetail is the full album response including assets

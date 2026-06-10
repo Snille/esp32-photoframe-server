@@ -36,6 +36,12 @@ type Image struct {
 	ThumbnailKey    string         `json:"thumbnail_key"`                                                    // Cache key for Synology
 	ImmichAssetID   string         `gorm:"index:idx_images_source_immich,priority:2" json:"immich_asset_id"` // UUID for Immich assets
 	PhotoTakenAt    *time.Time     `json:"photo_taken_at"`                                                   // Original photo creation/taken date
+	// PeopleJSON is a JSON array of {"name","birthDate"} for faces recognized in
+	// the photo (Immich only). Location is a formatted "City, State, Country"
+	// string from EXIF (Immich only). Both empty for sources that lack metadata.
+	PeopleJSON      string         `json:"people_json" gorm:"column:people_json"`
+	Location        string         `json:"location"`
+	Description     string         `json:"description"` // photo description/caption (Immich exif description; gallery caption)
 	DisplayOrder    int            `json:"display_order"`                                                    // Manual sort position for devices in 'custom' order mode (lower = earlier)
 	CreatedAt       time.Time      `json:"created_at"`
 	DeletedAt       gorm.DeletedAt `gorm:"index" json:"-"`
@@ -102,6 +108,28 @@ type Device struct {
 	BatteryTextSide   string  `json:"battery_text_side" gorm:"default:'right'"` // which side of the icon the % text sits: left | right
 	BatteryIconScale  float64 `json:"battery_icon_scale" gorm:"default:1"` // size multiplier for the battery icon only (0.5–2.0), independent of text size
 	OverlayScale      float64 `json:"overlay_scale" gorm:"default:1"`     // size multiplier for overlay elements (0.5–2.0)
+	// Typeface for the floating overlay chips. OverlayFont is one of the keys in
+	// validOverlayFonts (mapped to a real installed family by the renderer);
+	// OverlayWeight is regular | medium | bold.
+	OverlayFont   string `json:"overlay_font" gorm:"default:'noto_sans'"`
+	OverlayWeight string `json:"overlay_weight" gorm:"default:'medium'"`
+	// People names overlay (from Immich face metadata). NameFormat is one of the
+	// keys in validNameFormats; NamesMaxLen caps the rendered string length (whole
+	// names that fit are kept, the rest collapse to "+N"); NamesShowAge appends the
+	// person's age at the photo date in parentheses. ShowLocation draws the photo's
+	// EXIF place. Both only apply on the photo_overlay layout.
+	ShowNames        bool   `json:"show_names" gorm:"default:0"`
+	NamesPosition    string `json:"names_position" gorm:"default:'top-left'"`
+	NameFormat       string `json:"name_format" gorm:"default:'first_last'"`
+	NamesShowAge     bool   `json:"names_show_age" gorm:"default:0"`
+	NamesMaxLen      int    `json:"names_max_len" gorm:"default:30"`
+	ShowLocation     bool   `json:"show_location" gorm:"default:0"`
+	LocationPosition string `json:"location_position" gorm:"default:'bottom-center'"`
+	LocationMaxLen   int    `json:"location_max_len" gorm:"default:40"`
+	// Photo description overlay (Immich exif description / gallery caption).
+	ShowDescription     bool   `json:"show_description" gorm:"default:0"`
+	DescriptionPosition string `json:"description_position" gorm:"default:'wide-bottom'"`
+	DescriptionMaxLen   int    `json:"description_max_len" gorm:"default:80"`
 	// Remote config sync fields (JSON blobs synced from/to device)
 	DeviceConfig             string    `json:"device_config" gorm:"default:'{}'"`
 	DeviceProcessingSettings string    `json:"device_processing_settings" gorm:"default:'{}'"`
@@ -148,12 +176,28 @@ type OverlaySettings struct {
 	BatteryTextSide   string
 	BatteryIconScale  float64
 	OverlayScale      float64
+	OverlayFont       string
+	OverlayWeight     string
+	ShowNames         bool
+	NamesPosition     string
+	NameFormat        string
+	NamesShowAge      bool
+	NamesMaxLen       int
+	ShowLocation        bool
+	LocationPosition    string
+	LocationMaxLen      int
+	ShowDescription     bool
+	DescriptionPosition string
+	DescriptionMaxLen   int
 }
 
 // validOverlayPositions is the set of placements the renderer understands.
+// wide-top / wide-bottom are full-width bands suited to long content (location,
+// names, description); the six corners hold compact chips.
 var validOverlayPositions = map[string]bool{
 	"top-left": true, "top-center": true, "top-right": true,
 	"bottom-left": true, "bottom-center": true, "bottom-right": true,
+	"wide-top": true, "wide-bottom": true,
 }
 
 // NormalizeOverlayPosition returns pos if it is a known placement, otherwise
@@ -218,11 +262,120 @@ func NormalizeBatteryIconScale(scale float64) float64 {
 	return NormalizeOverlayScale(scale)
 }
 
+// validOverlayFonts is the set of overlay typeface keys the renderer maps to a
+// real installed font family. The five families were picked for legibility on
+// low-contrast e-paper panels.
+var validOverlayFonts = map[string]bool{
+	"noto_sans":       true,
+	"inter":           true,
+	"dejavu_sans":     true,
+	"liberation_sans": true,
+	"dejavu_serif":    true,
+	"ole":             true,
+}
+
+// NormalizeOverlayFont returns the font key if known, otherwise the default
+// noto_sans. Keeps unknown/empty input from reaching the template.
+func NormalizeOverlayFont(font string) string {
+	if validOverlayFonts[font] {
+		return font
+	}
+	return "noto_sans"
+}
+
+// NormalizeOverlayWeight clamps the overlay font weight to a known value,
+// defaulting to medium.
+func NormalizeOverlayWeight(weight string) string {
+	switch weight {
+	case "regular", "medium", "bold":
+		return weight
+	default:
+		return "medium"
+	}
+}
+
+// validNameFormats lists the people-name rendering formats. Keys mirror the
+// WebUI dropdown.
+var validNameFormats = map[string]bool{
+	"first_last":    true, // "Anna Andersson"
+	"first_initial": true, // "Anna A."
+	"first":         true, // "Anna"
+	"last_first":    true, // "Andersson Anna"
+	"last_initial":  true, // "Andersson A."
+	"last":          true, // "Andersson"
+}
+
+// NormalizeNameFormat returns the format key if known, else the default
+// first_last.
+func NormalizeNameFormat(format string) string {
+	if validNameFormats[format] {
+		return format
+	}
+	return "first_last"
+}
+
+// NormalizeNamesMaxLen clamps the people-name string length budget to a sane
+// range, defaulting to 30 for zero/unset input.
+func NormalizeNamesMaxLen(n int) int {
+	if n <= 0 {
+		return 30
+	}
+	if n < 8 {
+		return 8
+	}
+	if n > 120 {
+		return 120
+	}
+	return n
+}
+
+// NormalizeLocationMaxLen clamps the location string length budget, defaulting
+// to 40 for zero/unset input.
+func NormalizeLocationMaxLen(n int) int {
+	if n <= 0 {
+		return 40
+	}
+	if n < 8 {
+		return 8
+	}
+	if n > 120 {
+		return 120
+	}
+	return n
+}
+
+// NormalizeDescriptionMaxLen clamps the description string length budget,
+// defaulting to 80. Descriptions can be long, so the ceiling is higher.
+func NormalizeDescriptionMaxLen(n int) int {
+	if n <= 0 {
+		return 80
+	}
+	if n < 8 {
+		return 8
+	}
+	if n > 240 {
+		return 240
+	}
+	return n
+}
+
 type DeviceHistory struct {
 	ID       uint      `gorm:"primaryKey" json:"id"`
 	DeviceID uint      `gorm:"index" json:"device_id"` // Foreign key to Device
 	ImageID  uint      `json:"image_id"`
 	ServedAt time.Time `json:"served_at"`
+}
+
+// BatterySample is one timestamped battery reading reported by a device on an
+// image fetch (X-Battery-Percentage / optional X-Battery-Voltage). The drain
+// estimator regresses these over a trailing window to derive %/day and the
+// estimated runtime left. VoltageMV is 0 when the firmware doesn't send it.
+type BatterySample struct {
+	ID        uint      `gorm:"primaryKey" json:"id"`
+	DeviceID  uint      `gorm:"index:idx_battery_samples_device_time" json:"device_id"`
+	SampledAt time.Time `gorm:"index:idx_battery_samples_device_time" json:"sampled_at"`
+	Percent   int       `json:"percent"`
+	VoltageMV int       `json:"voltage_mv"`
 }
 
 type UserSession struct {

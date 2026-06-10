@@ -68,6 +68,52 @@ type RenderOptions struct {
 	BatteryTextSide   string  // side of the icon the % text sits: right | left | top | bottom
 	BatteryIconScale  float64 // size multiplier for the battery icon only (0.5–2.0)
 	OverlayScale      float64 // size multiplier for overlay elements (0.5–2.0)
+	OverlayFont       string  // typeface key for overlay chips (see overlayFontFamily)
+	OverlayWeight     string  // regular | medium | bold
+	// People names + photo location overlays (Immich metadata). The caller
+	// formats Names (per device name-format/age/length) and Location into final
+	// strings; the renderer just places them. Both only show on photo_overlay.
+	ShowNames        bool
+	Names            string
+	NamesPosition    string
+	ShowLocation     bool
+	Location         string
+	LocationPosition string
+	ShowDescription     bool
+	Description         string
+	DescriptionPosition string
+}
+
+// overlayFontFamily maps an overlay font key to a CSS font-family stack. Every
+// family is installed in the container image (see Dockerfile). The fallbacks
+// keep text legible if a face ever fails to load.
+func overlayFontFamily(key string) string {
+	switch key {
+	case "inter":
+		return "'Inter', 'Noto Sans', sans-serif"
+	case "dejavu_sans":
+		return "'DejaVu Sans', 'Noto Sans', sans-serif"
+	case "liberation_sans":
+		return "'Liberation Sans', 'Arial', 'Noto Sans', sans-serif"
+	case "dejavu_serif":
+		return "'DejaVu Serif', 'Noto Serif', serif"
+	case "ole":
+		return "'Ole', cursive"
+	default: // noto_sans
+		return "'Noto Sans', 'Arial', sans-serif"
+	}
+}
+
+// overlayFontWeight maps an overlay weight key to a numeric CSS font-weight.
+func overlayFontWeight(key string) int {
+	switch key {
+	case "regular":
+		return 400
+	case "bold":
+		return 700
+	default: // medium
+		return 500
+	}
 }
 
 const browserIdleTimeout = 1 * time.Minute
@@ -306,7 +352,44 @@ func (s *RendererService) Render(opts RenderOptions) (image.Image, error) {
 		BatteryTextSide:   model.NormalizeBatteryTextSide(opts.BatteryTextSide),
 		BatteryIconScale:  model.NormalizeBatteryIconScale(opts.BatteryIconScale),
 		OverlayScale:      model.NormalizeOverlayScale(opts.OverlayScale),
+		// template.CSS marks this as known-safe CSS (it comes from a fixed
+		// whitelist, not user input). Without it, html/template's CSS sanitizer
+		// rewrites the quoted, comma-separated font list to "ZgotmplZ", so the
+		// chips silently fall back to the body font and the choice never applies.
+		OverlayFontFamily: template.CSS(overlayFontFamily(model.NormalizeOverlayFont(opts.OverlayFont))),
+		OverlayFontWeight: overlayFontWeight(model.NormalizeOverlayWeight(opts.OverlayWeight)),
+		ShowNames:         opts.ShowNames && opts.Names != "",
+		Names:             opts.Names,
+		NamesPosition:     model.NormalizeOverlayPosition(opts.NamesPosition, "top-left"),
+		ShowLocation:      opts.ShowLocation && opts.Location != "",
+		Location:          opts.Location,
+		LocationPosition:  model.NormalizeOverlayPosition(opts.LocationPosition, "bottom-center"),
+		ShowDescription:     opts.ShowDescription && opts.Description != "",
+		Description:         opts.Description,
+		DescriptionPosition: model.NormalizeOverlayPosition(opts.DescriptionPosition, "wide-bottom"),
 	}
+
+	// Determine whether the top/bottom corner rows hold any chip, so the wide
+	// band in each region can collapse into the corner row's place when empty.
+	used := map[string]bool{}
+	markUsed := func(show bool, pos string) {
+		if show {
+			used[pos] = true
+		}
+	}
+	ov := data.IsOverlayLayout
+	markUsed(ov && data.ShowDate, data.DatePosition)
+	markUsed(ov && data.ShowCalendar && data.NextEvent != nil, data.DatePosition)
+	markUsed(ov && data.ShowPhotoDate, data.PhotoDatePosition)
+	markUsed(ov && data.ShowWeather && data.Weather != nil, data.WeatherPosition)
+	markUsed(ov && data.ShowNames, data.NamesPosition)
+	markUsed(ov && data.ShowLocation, data.LocationPosition)
+	markUsed(ov && data.ShowDescription, data.DescriptionPosition)
+	markUsed(data.ShowBattery, data.BatteryPosition)
+	data.TopRowUsed = used["top-left"] || used["top-center"] || used["top-right"]
+	data.BottomRowUsed = used["bottom-left"] || used["bottom-center"] || used["bottom-right"]
+	data.WideTopUsed = used["wide-top"]
+	data.WideBottomUsed = used["wide-bottom"]
 
 	var htmlBuf bytes.Buffer
 	if err := s.tmpl.Execute(&htmlBuf, data); err != nil {
@@ -396,6 +479,25 @@ type templateData struct {
 	BatteryTextSide   string
 	BatteryIconScale  float64
 	OverlayScale      float64
+	OverlayFontFamily template.CSS
+	OverlayFontWeight int
+	ShowNames         bool
+	Names             string
+	NamesPosition     string
+	ShowLocation      bool
+	Location          string
+	LocationPosition  string
+	ShowDescription     bool
+	Description         string
+	DescriptionPosition string
+	// TopRowUsed/BottomRowUsed report whether any corner chip occupies the top
+	// or bottom corner row. When false, the wide band in that region collapses
+	// up/down into the corner row's place instead of leaving a blank row.
+	// WideTopUsed/WideBottomUsed gate the wide band so an empty one adds no gap.
+	TopRowUsed     bool
+	BottomRowUsed  bool
+	WideTopUsed    bool
+	WideBottomUsed bool
 }
 
 func imageToBase64(img image.Image) (string, error) {
@@ -528,22 +630,38 @@ const layoutTemplate = `
 {{- define "el_weather"}}{{if .Weather}}<div class="ov-chip weather"><span class="material-symbols-outlined">{{.Weather.IconName}}</span> {{printf "%.1f" .Weather.Temperature}}&deg;C &nbsp; {{.Weather.Humidity}}%</div>{{end}}{{end}}
 {{- define "el_calendar"}}{{if .NextEvent}}<div class="ov-chip event">{{formatEventTime .NextEvent}} &mdash; {{.NextEvent.Summary}}</div>{{end}}{{end}}
 {{- define "el_battery"}}<div class="ov-chip battery bat-rot-{{.BatteryRotation}} bat-text-{{.BatteryTextSide}}{{if le .BatteryPercent 15}} low{{end}}">{{if .ShowBatteryIcon}}<div class="battery-icon"><div class="battery-fill" style="width: {{.BatteryPercent}}%"></div></div>{{end}}{{if .ShowBatteryText}}<span class="battery-text">{{.BatteryPercent}}%</span>{{end}}</div>{{end}}
+{{- define "el_names"}}<div class="ov-chip names"><span class="material-symbols-outlined">group</span> {{.Names}}</div>{{end}}
+{{- define "el_location"}}<div class="ov-chip location"><span class="material-symbols-outlined">place</span> {{.Location}}</div>{{end}}
+{{- define "el_description"}}<div class="ov-chip description"><span class="material-symbols-outlined">notes</span> {{.Description}}</div>{{end}}
 {{- define "ov_slot"}}
   <div class="ov-slot {{.Pos}}">
     {{if and .D.IsOverlayLayout .D.ShowDate (eq .D.DatePosition .Pos)}}{{template "el_date" .D}}{{end}}
     {{if and .D.IsOverlayLayout .D.ShowCalendar (eq .D.DatePosition .Pos)}}{{template "el_calendar" .D}}{{end}}
     {{if and .D.IsOverlayLayout .D.ShowPhotoDate (eq .D.PhotoDatePosition .Pos)}}{{template "el_photodate" .D}}{{end}}
     {{if and .D.IsOverlayLayout .D.ShowWeather (eq .D.WeatherPosition .Pos)}}{{template "el_weather" .D}}{{end}}
+    {{if and .D.IsOverlayLayout .D.ShowNames (eq .D.NamesPosition .Pos)}}{{template "el_names" .D}}{{end}}
+    {{if and .D.IsOverlayLayout .D.ShowLocation (eq .D.LocationPosition .Pos)}}{{template "el_location" .D}}{{end}}
+    {{if and .D.IsOverlayLayout .D.ShowDescription (eq .D.DescriptionPosition .Pos)}}{{template "el_description" .D}}{{end}}
     {{if and .D.ShowBattery (eq .D.BatteryPosition .Pos)}}{{template "el_battery" .D}}{{end}}
   </div>
 {{- end}}
 {{- define "floating"}}<div class="floating">
-  {{template "ov_slot" (slot . "top-left")}}
-  {{template "ov_slot" (slot . "top-center")}}
-  {{template "ov_slot" (slot . "top-right")}}
-  {{template "ov_slot" (slot . "bottom-left")}}
-  {{template "ov_slot" (slot . "bottom-center")}}
-  {{template "ov_slot" (slot . "bottom-right")}}
+  <div class="float-region top">
+    {{if .TopRowUsed}}<div class="corner-row">
+      {{template "ov_slot" (slot . "top-left")}}
+      {{template "ov_slot" (slot . "top-center")}}
+      {{template "ov_slot" (slot . "top-right")}}
+    </div>{{end}}
+    {{if .WideTopUsed}}{{template "ov_slot" (slot . "wide-top")}}{{end}}
+  </div>
+  <div class="float-region bottom">
+    {{if .WideBottomUsed}}{{template "ov_slot" (slot . "wide-bottom")}}{{end}}
+    {{if .BottomRowUsed}}<div class="corner-row">
+      {{template "ov_slot" (slot . "bottom-left")}}
+      {{template "ov_slot" (slot . "bottom-center")}}
+      {{template "ov_slot" (slot . "bottom-right")}}
+    </div>{{end}}
+  </div>
 </div>{{end -}}
 <!DOCTYPE html>
 <html>
@@ -640,21 +758,51 @@ const layoutTemplate = `
     pointer-events: none;
     --ov-scale: {{printf "%.2f" .OverlayScale}};
     --bat-icon-scale: {{printf "%.2f" .BatteryIconScale}};
+    --ov-font: {{.OverlayFontFamily}};
+    --ov-weight: {{.OverlayFontWeight}};
   }
-  .ov-slot {
+  /* Two stacked regions (top, bottom), each a flex column of: a corner row
+     (3-cell grid: left / center / right) and a full-width band. Either is
+     omitted when empty, so the band collapses into the corner row's place when
+     no corner chip is shown. */
+  .float-region {
     position: absolute;
+    left: var(--padding);
+    right: var(--padding);
     display: flex;
     flex-direction: column;
     gap: calc(var(--gap) * 0.6);
-    max-width: calc(100% - var(--padding) * 2);
   }
-  .ov-slot.top-left      { top: var(--padding);    left: var(--padding);  align-items: flex-start; }
-  .ov-slot.top-center    { top: var(--padding);    left: 50%; transform: translateX(-50%); align-items: center; }
-  .ov-slot.top-right     { top: var(--padding);    right: var(--padding); align-items: flex-end; }
-  .ov-slot.bottom-left   { bottom: var(--padding); left: var(--padding);  align-items: flex-start; }
-  .ov-slot.bottom-center { bottom: var(--padding); left: 50%; transform: translateX(-50%); align-items: center; }
-  .ov-slot.bottom-right  { bottom: var(--padding); right: var(--padding); align-items: flex-end; }
+  .float-region.top    { top: var(--padding); }
+  .float-region.bottom { bottom: var(--padding); }
+  .corner-row {
+    display: grid;
+    grid-template-columns: 1fr auto 1fr;
+    align-items: start;
+    gap: var(--gap);
+  }
+  .float-region.bottom .corner-row { align-items: end; }
+  .ov-slot {
+    display: flex;
+    flex-direction: column;
+    gap: calc(var(--gap) * 0.6);
+    min-width: 0;
+    max-width: 100%;
+  }
+  .ov-slot.top-left,   .ov-slot.bottom-left   { justify-self: start;  align-items: flex-start; }
+  .ov-slot.top-center, .ov-slot.bottom-center { justify-self: center; align-items: center; }
+  .ov-slot.top-right,  .ov-slot.bottom-right  { justify-self: end;    align-items: flex-end; }
+  /* Full-width band for long content (location / names / description). */
+  .ov-slot.wide-top, .ov-slot.wide-bottom { width: 100%; align-items: stretch; }
+  .ov-slot.wide-top > .ov-chip, .ov-slot.wide-bottom > .ov-chip {
+    width: 100%;
+    max-width: 100%;
+    justify-content: center;
+    text-align: center;
+  }
 
+  /* All overlay chips share one look: same font family, size, weight and
+     opacity. Only icon glyphs and the event ellipsis differ structurally. */
   .ov-chip {
     display: flex;
     align-items: center;
@@ -665,14 +813,17 @@ const layoutTemplate = `
     color: #fff;
     line-height: 1.15;
     max-width: 100%;
+    font-family: var(--ov-font);
+    font-size: calc(var(--secondary-size) * var(--ov-scale));
+    font-weight: var(--ov-weight);
+    opacity: 1;
   }
-  .ov-chip.date { font-size: calc(var(--secondary-size) * var(--ov-scale)); font-weight: 600; }
-  .ov-chip.photo-date { font-size: calc(var(--secondary-size) * var(--ov-scale)); }
-  .ov-chip.photo-date .material-symbols-outlined { font-size: 1.1em; }
-  .ov-chip.weather { font-size: calc(var(--secondary-size) * var(--ov-scale)); font-weight: 600; }
-  .ov-chip.weather .material-symbols-outlined { font-size: 1.4em; }
-  .ov-chip.event { font-size: calc(var(--secondary-size) * var(--ov-scale)); opacity: 0.95; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; display: block; }
-  .ov-chip.battery { font-size: calc(var(--secondary-size) * var(--ov-scale)); font-weight: 600; }
+  /* Chip icons render slightly larger than the text, but their line box is
+     trimmed to the chip line-height (1.15) so no icon makes its chip taller
+     than a text-only chip. Every overlay field keeps the same background
+     height. The 0.25em chip padding absorbs the small visual overflow. */
+  .ov-chip .material-symbols-outlined { font-size: 1.3em; line-height: 0.88; }
+  .ov-chip.event { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; display: block; }
 
   /* Battery icon rotation. A 90/270-turned icon is 1.7em tall, so reserve
      vertical room via min-height to keep it inside the chip background. */
@@ -736,7 +887,9 @@ const layoutTemplate = `
     margin-bottom: var(--gap);
   }
 
-  .date {
+  /* Scoped to the info panel so it does not leak into the floating overlay
+     date chip (.ov-chip.date), which must stay uniform with the other chips. */
+  .info-panel .date {
     font-size: var(--heading-size);
     font-weight: 600;
   }

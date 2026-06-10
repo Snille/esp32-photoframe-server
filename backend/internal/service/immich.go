@@ -1,6 +1,7 @@
 package service
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log"
@@ -16,6 +17,38 @@ import (
 	"github.com/aitjcize/esp32-photoframe-server/backend/pkg/immich"
 	"gorm.io/gorm"
 )
+
+// formatImmichLocation joins the EXIF place fields into "City, State, Country",
+// skipping empty parts. Returns "" when no location data is present.
+func formatImmichLocation(exif immich.ExifInfo) string {
+	parts := make([]string, 0, 3)
+	for _, p := range []string{exif.City, exif.State, exif.Country} {
+		if s := strings.TrimSpace(p); s != "" {
+			parts = append(parts, s)
+		}
+	}
+	return strings.Join(parts, ", ")
+}
+
+// encodePeopleJSON serializes the named faces of an asset to the JSON blob
+// stored in Image.PeopleJSON. Unnamed faces are dropped (nothing to show).
+func encodePeopleJSON(people []immich.Person) string {
+	out := make([]Person, 0, len(people))
+	for _, p := range people {
+		if strings.TrimSpace(p.Name) == "" {
+			continue
+		}
+		out = append(out, Person{Name: p.Name, BirthDate: p.BirthDate})
+	}
+	if len(out) == 0 {
+		return ""
+	}
+	b, err := json.Marshal(out)
+	if err != nil {
+		return ""
+	}
+	return string(b)
+}
 
 type ImmichService struct {
 	db       *gorm.DB
@@ -193,6 +226,18 @@ func (s *ImmichService) ImportPhotos() error {
 			photoDate = parseImmichDate(asset.LocalDateTime)
 		}
 		img.PhotoTakenAt = photoDate
+
+		// Location + description come from the EXIF already in the listing.
+		img.Location = formatImmichLocation(asset.ExifInfo)
+		img.Description = strings.TrimSpace(asset.ExifInfo.Description)
+
+		// People (faces) are NOT in album/search listings — fetch the asset
+		// detail. Best-effort: a failure just leaves names empty for this photo.
+		if detail, derr := client.GetAsset(asset.ID); derr == nil {
+			img.PeopleJSON = encodePeopleJSON(detail.People)
+		} else {
+			log.Printf("Immich: people fetch failed for asset %s: %v", asset.ID, derr)
+		}
 
 		if err := s.db.Create(&img).Error; err != nil {
 			log.Printf("Failed to insert immich asset %s: %v", asset.ID, err)

@@ -60,6 +60,7 @@ type ImageHandler struct {
 	calendar       *gcalendar.Client
 	auth           *service.AuthService
 	db             *gorm.DB
+	battery        *service.BatteryService
 	dataDir        string
 }
 
@@ -74,6 +75,7 @@ func NewImageHandler(deps ImageHandlerDeps) *ImageHandler {
 		calendar:       deps.Calendar,
 		auth:           deps.Auth,
 		db:             deps.DB,
+		battery:        service.NewBatteryService(deps.DB),
 		dataDir:        deps.DataDir,
 	}
 }
@@ -120,6 +122,9 @@ func (h *ImageHandler) ServeImage(c echo.Context) error {
 	showPhotoDate := false
 	showWeather := false
 	showBattery := false
+	showNames := false
+	showLocation := false
+	showDescription := false
 	var lat, lon float64
 
 	if deviceFound {
@@ -131,6 +136,9 @@ func (h *ImageHandler) ServeImage(c echo.Context) error {
 		showPhotoDate = device.ShowPhotoDate
 		showWeather = device.ShowWeather
 		showBattery = device.ShowBattery
+		showNames = device.ShowNames
+		showLocation = device.ShowLocation
+		showDescription = device.ShowDescription
 		lat = device.WeatherLat
 		lon = device.WeatherLon
 	}
@@ -145,6 +153,21 @@ func (h *ImageHandler) ServeImage(c echo.Context) error {
 		}
 	}
 	showBattery = showBattery && batteryPercent >= 0 && batteryPercent <= 100
+
+	// Log a battery sample for the drain estimate whenever a real device fetch
+	// carries a reading (independent of the show-battery overlay toggle). The
+	// optional X-Battery-Voltage header (millivolts) gives a finer signal than
+	// the coarse percentage when present. Throttled + async so it never delays
+	// or fails the image response.
+	if deviceFound && batteryPercent >= 0 && batteryPercent <= 100 {
+		voltageMV := 0
+		if vStr := c.Request().Header.Get("X-Battery-Voltage"); vStr != "" {
+			if v, err := strconv.Atoi(vStr); err == nil {
+				voltageMV = v
+			}
+		}
+		go h.battery.RecordSample(device.ID, batteryPercent, voltageMV)
+	}
 
 	// ALWAYS overrides logical resolution/orientation from Headers if present
 	if wStr := c.Request().Header.Get("X-Display-Width"); wStr != "" {
@@ -329,8 +352,23 @@ func (h *ImageHandler) ServeImage(c echo.Context) error {
 	}
 
 	// 2. Render layout (photo + overlay + calendar)
-	needsOverlay := showDate || showPhotoDate || showWeather || showCalendar || showBattery
+	needsOverlay := showDate || showPhotoDate || showWeather || showCalendar || showBattery || showNames || showLocation || showDescription
 	var imgWithOverlay image.Image
+
+	// People-names + location + description strings, formatted per device
+	// settings from the served photo's metadata (Immich/gallery; empty else).
+	namesStr := ""
+	if showNames {
+		namesStr = service.FormatPeople(sourceResp.PeopleJSON, photoTakenAt, device.NameFormat, device.NamesShowAge, device.NamesMaxLen)
+	}
+	locationStr := ""
+	if showLocation {
+		locationStr = service.FormatLocation(sourceResp.Location, device.LocationMaxLen)
+	}
+	descriptionStr := ""
+	if showDescription {
+		descriptionStr = service.FormatDescription(sourceResp.Description, device.DescriptionMaxLen)
+	}
 
 	if needsOverlay {
 		var weatherData *weather.CurrentWeather
@@ -393,6 +431,17 @@ func (h *ImageHandler) ServeImage(c echo.Context) error {
 			BatteryTextSide:   device.BatteryTextSide,
 			BatteryIconScale:  device.BatteryIconScale,
 			OverlayScale:      device.OverlayScale,
+			OverlayFont:       device.OverlayFont,
+			OverlayWeight:     device.OverlayWeight,
+			ShowNames:         showNames,
+			Names:             namesStr,
+			NamesPosition:     device.NamesPosition,
+			ShowLocation:      showLocation,
+			Location:          locationStr,
+			LocationPosition:  device.LocationPosition,
+			ShowDescription:     showDescription,
+			Description:         descriptionStr,
+			DescriptionPosition: device.DescriptionPosition,
 		})
 		if renderErr != nil {
 			return c.JSON(http.StatusInternalServerError, map[string]string{"error": "render failed: " + renderErr.Error()})

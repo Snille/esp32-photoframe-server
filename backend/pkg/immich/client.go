@@ -129,6 +129,24 @@ func (c *Client) GetAlbumAssets(albumID string) ([]Asset, error) {
 	return album.Assets, nil
 }
 
+// GetAsset fetches the full detail for one asset, including the recognized
+// people (faces) — which album/search listings omit.
+func (c *Client) GetAsset(assetID string) (*Asset, error) {
+	resp, err := c.do("GET", "/api/assets/"+assetID)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("api returned status: %d", resp.StatusCode)
+	}
+	var asset Asset
+	if err := json.NewDecoder(resp.Body).Decode(&asset); err != nil {
+		return nil, err
+	}
+	return &asset, nil
+}
+
 // GetThumbnail fetches thumbnail bytes for an asset.
 // size is "thumbnail" (small) or "preview" (large).
 func (c *Client) GetThumbnail(assetID, size string) ([]byte, error) {

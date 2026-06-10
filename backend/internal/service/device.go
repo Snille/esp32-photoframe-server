@@ -153,6 +153,19 @@ func (s *DeviceService) AddDevice(host string, enableCollage, showDate, showPhot
 		BatteryTextSide:          model.NormalizeBatteryTextSide(overlay.BatteryTextSide),
 		BatteryIconScale:         model.NormalizeBatteryIconScale(overlay.BatteryIconScale),
 		OverlayScale:             model.NormalizeOverlayScale(overlay.OverlayScale),
+		OverlayFont:              model.NormalizeOverlayFont(overlay.OverlayFont),
+		OverlayWeight:            model.NormalizeOverlayWeight(overlay.OverlayWeight),
+		ShowNames:                overlay.ShowNames,
+		NamesPosition:            model.NormalizeOverlayPosition(overlay.NamesPosition, "top-left"),
+		NameFormat:               model.NormalizeNameFormat(overlay.NameFormat),
+		NamesShowAge:             overlay.NamesShowAge,
+		NamesMaxLen:              model.NormalizeNamesMaxLen(overlay.NamesMaxLen),
+		ShowLocation:             overlay.ShowLocation,
+		LocationPosition:         model.NormalizeOverlayPosition(overlay.LocationPosition, "bottom-center"),
+		LocationMaxLen:           model.NormalizeLocationMaxLen(overlay.LocationMaxLen),
+		ShowDescription:          overlay.ShowDescription,
+		DescriptionPosition:      model.NormalizeOverlayPosition(overlay.DescriptionPosition, "wide-bottom"),
+		DescriptionMaxLen:        model.NormalizeDescriptionMaxLen(overlay.DescriptionMaxLen),
 		DeviceConfig:             deviceConfig,
 		DeviceProcessingSettings: deviceProc,
 		DeviceColorPalette:       devicePalette,
@@ -219,6 +232,19 @@ func (s *DeviceService) UpdateDevice(id uint, name, host, orientation string, en
 	device.BatteryTextSide = model.NormalizeBatteryTextSide(overlay.BatteryTextSide)
 	device.BatteryIconScale = model.NormalizeBatteryIconScale(overlay.BatteryIconScale)
 	device.OverlayScale = model.NormalizeOverlayScale(overlay.OverlayScale)
+	device.OverlayFont = model.NormalizeOverlayFont(overlay.OverlayFont)
+	device.OverlayWeight = model.NormalizeOverlayWeight(overlay.OverlayWeight)
+	device.ShowNames = overlay.ShowNames
+	device.NamesPosition = model.NormalizeOverlayPosition(overlay.NamesPosition, "top-left")
+	device.NameFormat = model.NormalizeNameFormat(overlay.NameFormat)
+	device.NamesShowAge = overlay.NamesShowAge
+	device.NamesMaxLen = model.NormalizeNamesMaxLen(overlay.NamesMaxLen)
+	device.ShowLocation = overlay.ShowLocation
+	device.LocationPosition = model.NormalizeOverlayPosition(overlay.LocationPosition, "bottom-center")
+	device.LocationMaxLen = model.NormalizeLocationMaxLen(overlay.LocationMaxLen)
+	device.ShowDescription = overlay.ShowDescription
+	device.DescriptionPosition = model.NormalizeOverlayPosition(overlay.DescriptionPosition, "wide-bottom")
+	device.DescriptionMaxLen = model.NormalizeDescriptionMaxLen(overlay.DescriptionMaxLen)
 
 	if err := s.db.Save(&device).Error; err != nil {
 		return nil, err
@@ -292,14 +318,15 @@ func (s *DeviceService) DeleteDevice(id uint) error {
 // --- Push Logic ---
 
 // PushToDevice resolves a device ID to a host and pushes the image.
-// photoTakenAt (may be nil) feeds the photo-date overlay.
-func (s *DeviceService) PushToDevice(deviceID uint, imagePath string, photoTakenAt *time.Time) error {
+// photoTakenAt (may be nil) feeds the photo-date overlay; peopleJSON/location
+// (may be empty) feed the names/location overlays.
+func (s *DeviceService) PushToDevice(deviceID uint, imagePath string, photoTakenAt *time.Time, peopleJSON, location, description string) error {
 	var device model.Device
 	if err := s.db.First(&device, deviceID).Error; err != nil {
 		return errors.New("device not found")
 	}
 
-	if err := s.PushToHost(&device, imagePath, nil, photoTakenAt); err != nil {
+	if err := s.PushToHost(&device, imagePath, nil, photoTakenAt, peopleJSON, location, description); err != nil {
 		return err
 	}
 
@@ -309,7 +336,7 @@ func (s *DeviceService) PushToDevice(deviceID uint, imagePath string, photoTaken
 // PushToHost processes an image file and pushes it to a target host
 // This encapsulates the logic previously in Telegram bot
 // Now includes fetching device parameters if configured
-func (s *DeviceService) PushToHost(device *model.Device, imagePath string, extraOpts map[string]string, photoTakenAt *time.Time) error {
+func (s *DeviceService) PushToHost(device *model.Device, imagePath string, extraOpts map[string]string, photoTakenAt *time.Time, peopleJSON, location, description string) error {
 	// 0. Fetch system info to determine firmware version and optionally device parameters
 	processingOpts := make(map[string]string)
 	for k, v := range extraOpts {
@@ -377,7 +404,23 @@ func (s *DeviceService) PushToHost(device *model.Device, imagePath string, extra
 	}
 	showBattery := device.ShowBattery && batteryPercent >= 0 && batteryPercent <= 100
 
-	needsOverlay := device.ShowDate || device.ShowPhotoDate || device.ShowWeather || device.ShowCalendar || showBattery
+	showNames := device.ShowNames
+	showLocation := device.ShowLocation
+	namesStr := ""
+	if showNames {
+		namesStr = FormatPeople(peopleJSON, photoTakenAt, device.NameFormat, device.NamesShowAge, device.NamesMaxLen)
+	}
+	locationStr := ""
+	if showLocation {
+		locationStr = FormatLocation(location, device.LocationMaxLen)
+	}
+	showDescription := device.ShowDescription
+	descriptionStr := ""
+	if showDescription {
+		descriptionStr = FormatDescription(description, device.DescriptionMaxLen)
+	}
+
+	needsOverlay := device.ShowDate || device.ShowPhotoDate || device.ShowWeather || device.ShowCalendar || showBattery || showNames || showLocation || showDescription
 	var finalImg image.Image
 
 	if needsOverlay {
@@ -450,6 +493,17 @@ func (s *DeviceService) PushToHost(device *model.Device, imagePath string, extra
 			BatteryTextSide:   device.BatteryTextSide,
 			BatteryIconScale:  device.BatteryIconScale,
 			OverlayScale:      device.OverlayScale,
+			OverlayFont:       device.OverlayFont,
+			OverlayWeight:     device.OverlayWeight,
+			ShowNames:         showNames,
+			Names:             namesStr,
+			NamesPosition:     device.NamesPosition,
+			ShowLocation:      showLocation,
+			Location:          locationStr,
+			LocationPosition:  device.LocationPosition,
+			ShowDescription:     showDescription,
+			Description:         descriptionStr,
+			DescriptionPosition: device.DescriptionPosition,
 		})
 		if renderErr != nil {
 			return fmt.Errorf("render failed: %w", renderErr)

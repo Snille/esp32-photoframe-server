@@ -65,6 +65,16 @@ type Response struct {
 	// surfaced so the handler can render the photo-date overlay. Nil for
 	// sources where it doesn't apply.
 	PhotoTakenAt *time.Time
+
+	// PeopleJSON / Location carry the served photo's face + place metadata
+	// (Immich only) so the handler can render the names / location overlays.
+	// Empty for sources without that metadata.
+	PeopleJSON string
+	Location   string
+
+	// Description is the photo's caption/description (Immich exif description,
+	// or a gallery upload's caption). Empty when none.
+	Description string
 }
 
 // Source is the plugin interface every image source implements. Each Source

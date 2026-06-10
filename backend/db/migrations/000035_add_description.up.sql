@@ -1,0 +1,4 @@
+ALTER TABLE images ADD COLUMN description TEXT NOT NULL DEFAULT '';
+ALTER TABLE devices ADD COLUMN show_description BOOLEAN NOT NULL DEFAULT 0;
+ALTER TABLE devices ADD COLUMN description_position TEXT NOT NULL DEFAULT 'wide-bottom';
+ALTER TABLE devices ADD COLUMN description_max_len INTEGER NOT NULL DEFAULT 80;

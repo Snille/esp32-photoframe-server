@@ -1,0 +1,9 @@
+ALTER TABLE devices DROP COLUMN show_names;
+ALTER TABLE devices DROP COLUMN names_position;
+ALTER TABLE devices DROP COLUMN name_format;
+ALTER TABLE devices DROP COLUMN names_show_age;
+ALTER TABLE devices DROP COLUMN names_max_len;
+ALTER TABLE devices DROP COLUMN show_location;
+ALTER TABLE devices DROP COLUMN location_position;
+ALTER TABLE images DROP COLUMN people_json;
+ALTER TABLE images DROP COLUMN location;

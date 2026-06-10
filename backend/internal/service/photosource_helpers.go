@@ -80,10 +80,18 @@ func RunDBPhotoFlow(
 	}
 
 	resp := &imagesource.Response{Image: img, ImageIDs: ids}
-	if req.Device != nil && req.Device.ShowPhotoDate && len(ids) > 0 && ids[0] != 0 {
+	if req.Device != nil && len(ids) > 0 && ids[0] != 0 &&
+		(req.Device.ShowPhotoDate || req.Device.ShowNames || req.Device.ShowLocation || req.Device.ShowDescription) {
 		var stored model.Image
-		if e := db.Select("photo_taken_at").First(&stored, ids[0]).Error; e == nil {
+		if e := db.Select("photo_taken_at", "people_json", "location", "description", "caption").First(&stored, ids[0]).Error; e == nil {
 			resp.PhotoTakenAt = stored.PhotoTakenAt
+			resp.PeopleJSON = stored.PeopleJSON
+			resp.Location = stored.Location
+			// Prefer a real description; fall back to a user-set gallery caption.
+			resp.Description = stored.Description
+			if resp.Description == "" {
+				resp.Description = stored.Caption
+			}
 		}
 	}
 	return resp, nil

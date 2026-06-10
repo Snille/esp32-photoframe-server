@@ -303,7 +303,7 @@ func (s *PickerService) ProcessSessionItems(sessionID string) (int, error) {
 			UserID:      1,                        // Default user
 			Status:      "pending",
 			CreatedAt:   time.Now(),
-			Caption:     "From Google Photos",
+			Caption:     "", // Google Picker provides no useful caption
 			Width:       width,
 			Height:      height,
 			Orientation: orientation,

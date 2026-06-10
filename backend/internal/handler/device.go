@@ -20,6 +20,7 @@ type DeviceHandler struct {
 	deviceService   *service.DeviceService
 	synologyService *service.SynologyService
 	immichService   *service.ImmichService
+	battery         *service.BatteryService
 	db              *gorm.DB
 }
 
@@ -28,6 +29,7 @@ func NewDeviceHandler(deviceService *service.DeviceService, synologyService *ser
 		deviceService:   deviceService,
 		synologyService: synologyService,
 		immichService:   immichService,
+		battery:         service.NewBatteryService(db),
 		db:              db,
 	}
 }
@@ -69,6 +71,19 @@ func (h *DeviceHandler) AddDevice(c echo.Context) error {
 		BatteryTextSide   string  `json:"battery_text_side"`
 		BatteryIconScale  float64 `json:"battery_icon_scale"`
 		OverlayScale      float64 `json:"overlay_scale"`
+		OverlayFont       string  `json:"overlay_font"`
+		OverlayWeight     string  `json:"overlay_weight"`
+		ShowNames         bool    `json:"show_names"`
+		NamesPosition     string  `json:"names_position"`
+		NameFormat        string  `json:"name_format"`
+		NamesShowAge      bool    `json:"names_show_age"`
+		NamesMaxLen       int     `json:"names_max_len"`
+		ShowLocation      bool    `json:"show_location"`
+		LocationPosition  string  `json:"location_position"`
+		LocationMaxLen    int     `json:"location_max_len"`
+		ShowDescription     bool   `json:"show_description"`
+		DescriptionPosition string `json:"description_position"`
+		DescriptionMaxLen   int    `json:"description_max_len"`
 	}
 	if err := c.Bind(&req); err != nil {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid request"})
@@ -92,6 +107,19 @@ func (h *DeviceHandler) AddDevice(c echo.Context) error {
 		BatteryTextSide:   req.BatteryTextSide,
 		BatteryIconScale:  req.BatteryIconScale,
 		OverlayScale:      req.OverlayScale,
+		OverlayFont:       req.OverlayFont,
+		OverlayWeight:     req.OverlayWeight,
+		ShowNames:         req.ShowNames,
+		NamesPosition:     req.NamesPosition,
+		NameFormat:        req.NameFormat,
+		NamesShowAge:      req.NamesShowAge,
+		NamesMaxLen:       req.NamesMaxLen,
+		ShowLocation:      req.ShowLocation,
+		LocationPosition:  req.LocationPosition,
+		LocationMaxLen:    req.LocationMaxLen,
+		ShowDescription:     req.ShowDescription,
+		DescriptionPosition: req.DescriptionPosition,
+		DescriptionMaxLen:   req.DescriptionMaxLen,
 	})
 	if err != nil {
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": err.Error()})
@@ -133,6 +161,19 @@ func (h *DeviceHandler) UpdateDevice(c echo.Context) error {
 		BatteryTextSide   string  `json:"battery_text_side"`
 		BatteryIconScale  float64 `json:"battery_icon_scale"`
 		OverlayScale      float64 `json:"overlay_scale"`
+		OverlayFont       string  `json:"overlay_font"`
+		OverlayWeight     string  `json:"overlay_weight"`
+		ShowNames         bool    `json:"show_names"`
+		NamesPosition     string  `json:"names_position"`
+		NameFormat        string  `json:"name_format"`
+		NamesShowAge      bool    `json:"names_show_age"`
+		NamesMaxLen       int     `json:"names_max_len"`
+		ShowLocation      bool    `json:"show_location"`
+		LocationPosition  string  `json:"location_position"`
+		LocationMaxLen    int     `json:"location_max_len"`
+		ShowDescription     bool   `json:"show_description"`
+		DescriptionPosition string `json:"description_position"`
+		DescriptionMaxLen   int    `json:"description_max_len"`
 	}
 	if err := c.Bind(&req); err != nil {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid request"})
@@ -152,6 +193,19 @@ func (h *DeviceHandler) UpdateDevice(c echo.Context) error {
 		BatteryTextSide:   req.BatteryTextSide,
 		BatteryIconScale:  req.BatteryIconScale,
 		OverlayScale:      req.OverlayScale,
+		OverlayFont:       req.OverlayFont,
+		OverlayWeight:     req.OverlayWeight,
+		ShowNames:         req.ShowNames,
+		NamesPosition:     req.NamesPosition,
+		NameFormat:        req.NameFormat,
+		NamesShowAge:      req.NamesShowAge,
+		NamesMaxLen:       req.NamesMaxLen,
+		ShowLocation:      req.ShowLocation,
+		LocationPosition:  req.LocationPosition,
+		LocationMaxLen:    req.LocationMaxLen,
+		ShowDescription:     req.ShowDescription,
+		DescriptionPosition: req.DescriptionPosition,
+		DescriptionMaxLen:   req.DescriptionMaxLen,
 	})
 	if err != nil {
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": err.Error()})
@@ -173,6 +227,15 @@ func (h *DeviceHandler) RefreshDevice(c echo.Context) error {
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": errMsg})
 	}
 	return c.JSON(http.StatusOK, device)
+}
+
+// GET /api/devices/:id/battery
+// Returns the derived drain estimate (%/day, days remaining, trend) plus the
+// recent samples for a sparkline. Built from the X-Battery-Percentage readings
+// the device reports on each image fetch — no external measurement hardware.
+func (h *DeviceHandler) BatteryEstimate(c echo.Context) error {
+	id, _ := strconv.Atoi(c.Param("id"))
+	return c.JSON(http.StatusOK, h.battery.Estimate(uint(id)))
 }
 
 // DELETE /api/devices/:id
@@ -198,6 +261,7 @@ func (h *DeviceHandler) PushToDevice(c echo.Context) error {
 	imagePath := req.URL
 	var tempFile string         // If we create a temp file, we must clean it up
 	var photoTakenAt *time.Time // Original capture date, for the photo-date overlay
+	var peopleJSON, location, description string // Metadata for the names/location/description overlays
 
 	if req.ImageID != 0 {
 		var img model.Image
@@ -205,6 +269,12 @@ func (h *DeviceHandler) PushToDevice(c echo.Context) error {
 			return c.JSON(http.StatusNotFound, map[string]string{"error": "image not found"})
 		}
 		photoTakenAt = img.PhotoTakenAt
+		peopleJSON = img.PeopleJSON
+		location = img.Location
+		description = img.Description
+		if description == "" {
+			description = img.Caption
+		}
 
 		if img.Source == model.SourceSynologyPhotos {
 			// Download to temporary file
@@ -261,7 +331,7 @@ func (h *DeviceHandler) PushToDevice(c echo.Context) error {
 	}
 
 	// Push
-	if err := h.deviceService.PushToDevice(uint(deviceID), imagePath, photoTakenAt); err != nil {
+	if err := h.deviceService.PushToDevice(uint(deviceID), imagePath, photoTakenAt, peopleJSON, location, description); err != nil {
 		errMsg := err.Error()
 		if strings.Contains(errMsg, "not reachable") || strings.Contains(errMsg, "failed to resolve") {
 			return c.JSON(http.StatusServiceUnavailable, map[string]string{

@@ -53,6 +53,9 @@ RUN apk add --no-cache \
     font-noto \
     font-noto-emoji \
     font-noto-cjk \
+    ttf-dejavu \
+    font-inter \
+    font-liberation \
     nodejs \
     npm \
     chromium \
@@ -69,6 +72,12 @@ RUN mkdir -p /app/bin /app/static /app/data
 RUN wget -O /tmp/MaterialSymbolsOutlined.ttf https://github.com/google/material-design-icons/raw/master/variablefont/MaterialSymbolsOutlined%5BFILL%2CGRAD%2Copsz%2Cwght%5D.ttf && \
     mkdir -p /usr/share/fonts/material && \
     mv /tmp/MaterialSymbolsOutlined.ttf /usr/share/fonts/material/ && \
+    fc-cache -f
+
+# Download and install "Ole" (handwritten Google Font) as a distinctive overlay
+# typeface option. Single weight (Regular); bold/medium are synthesized.
+RUN mkdir -p /usr/share/fonts/ole && \
+    wget -O /usr/share/fonts/ole/Ole-Regular.ttf https://github.com/google/fonts/raw/main/ofl/ole/Ole-Regular.ttf && \
     fc-cache -f
 
 # Copy Binary

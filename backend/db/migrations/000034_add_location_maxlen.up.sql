@@ -1,0 +1,1 @@
+ALTER TABLE devices ADD COLUMN location_max_len INTEGER NOT NULL DEFAULT 40;
