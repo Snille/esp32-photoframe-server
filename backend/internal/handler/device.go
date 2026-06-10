@@ -62,6 +62,7 @@ func (h *DeviceHandler) AddDevice(c echo.Context) error {
 		DateFormat    string  `json:"date_format"`
 		ShowBattery   bool    `json:"show_battery"`
 		DisplayOrder  string  `json:"display_order"`
+		ImmichAlbumIDs    string `json:"immich_album_ids"`
 		DatePosition      string `json:"date_position"`
 		PhotoDatePosition string `json:"photo_date_position"`
 		WeatherPosition   string `json:"weather_position"`
@@ -84,6 +85,7 @@ func (h *DeviceHandler) AddDevice(c echo.Context) error {
 		ShowDescription     bool   `json:"show_description"`
 		DescriptionPosition string `json:"description_position"`
 		DescriptionMaxLen   int    `json:"description_max_len"`
+		OverlayHiddenIcons  string `json:"overlay_hidden_icons"`
 	}
 	if err := c.Bind(&req); err != nil {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid request"})
@@ -97,7 +99,7 @@ func (h *DeviceHandler) AddDevice(c echo.Context) error {
 		req.Layout = model.LayoutPhotoOverlay
 	}
 
-	device, err := h.deviceService.AddDevice(req.Host, req.EnableCollage, req.ShowDate, req.ShowPhotoDate, req.ShowWeather, req.WeatherLat, req.WeatherLon, req.Layout, req.DisplayMode, req.ShowCalendar, req.CalendarID, req.DateFormat, req.ShowBattery, req.DisplayOrder, model.OverlaySettings{
+	device, err := h.deviceService.AddDevice(req.Host, req.EnableCollage, req.ShowDate, req.ShowPhotoDate, req.ShowWeather, req.WeatherLat, req.WeatherLon, req.Layout, req.DisplayMode, req.ShowCalendar, req.CalendarID, req.DateFormat, req.ShowBattery, req.DisplayOrder, req.ImmichAlbumIDs, model.OverlaySettings{
 		DatePosition:      req.DatePosition,
 		PhotoDatePosition: req.PhotoDatePosition,
 		WeatherPosition:   req.WeatherPosition,
@@ -120,9 +122,15 @@ func (h *DeviceHandler) AddDevice(c echo.Context) error {
 		ShowDescription:     req.ShowDescription,
 		DescriptionPosition: req.DescriptionPosition,
 		DescriptionMaxLen:   req.DescriptionMaxLen,
+		OverlayHiddenIcons:  req.OverlayHiddenIcons,
 	})
 	if err != nil {
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": err.Error()})
+	}
+	// Pull in the newly-selected Immich albums (import + membership) in the
+	// background so the frame's chosen photos become available.
+	if device.ImmichAlbumIDs != "" && h.immichService != nil {
+		go h.immichService.ImportPhotos()
 	}
 	return c.JSON(http.StatusCreated, device)
 }
@@ -152,6 +160,7 @@ func (h *DeviceHandler) UpdateDevice(c echo.Context) error {
 		DateFormat    string  `json:"date_format"`
 		ShowBattery   bool    `json:"show_battery"`
 		DisplayOrder  string  `json:"display_order"`
+		ImmichAlbumIDs    string `json:"immich_album_ids"`
 		DatePosition      string `json:"date_position"`
 		PhotoDatePosition string `json:"photo_date_position"`
 		WeatherPosition   string `json:"weather_position"`
@@ -174,6 +183,7 @@ func (h *DeviceHandler) UpdateDevice(c echo.Context) error {
 		ShowDescription     bool   `json:"show_description"`
 		DescriptionPosition string `json:"description_position"`
 		DescriptionMaxLen   int    `json:"description_max_len"`
+		OverlayHiddenIcons  string `json:"overlay_hidden_icons"`
 	}
 	if err := c.Bind(&req); err != nil {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid request"})
@@ -183,7 +193,7 @@ func (h *DeviceHandler) UpdateDevice(c echo.Context) error {
 		req.Layout = model.LayoutPhotoOverlay
 	}
 
-	device, err := h.deviceService.UpdateDevice(uint(id), req.Name, req.Host, req.Orientation, req.EnableCollage, req.ShowDate, req.ShowPhotoDate, req.ShowWeather, req.WeatherLat, req.WeatherLon, req.AIProvider, req.AIModel, req.AIPrompt, req.Layout, req.DisplayMode, req.ShowCalendar, req.CalendarID, req.DateFormat, req.ShowBattery, req.DisplayOrder, model.OverlaySettings{
+	device, err := h.deviceService.UpdateDevice(uint(id), req.Name, req.Host, req.Orientation, req.EnableCollage, req.ShowDate, req.ShowPhotoDate, req.ShowWeather, req.WeatherLat, req.WeatherLon, req.AIProvider, req.AIModel, req.AIPrompt, req.Layout, req.DisplayMode, req.ShowCalendar, req.CalendarID, req.DateFormat, req.ShowBattery, req.DisplayOrder, req.ImmichAlbumIDs, model.OverlaySettings{
 		DatePosition:      req.DatePosition,
 		PhotoDatePosition: req.PhotoDatePosition,
 		WeatherPosition:   req.WeatherPosition,
@@ -206,9 +216,14 @@ func (h *DeviceHandler) UpdateDevice(c echo.Context) error {
 		ShowDescription:     req.ShowDescription,
 		DescriptionPosition: req.DescriptionPosition,
 		DescriptionMaxLen:   req.DescriptionMaxLen,
+		OverlayHiddenIcons:  req.OverlayHiddenIcons,
 	})
 	if err != nil {
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": err.Error()})
+	}
+	// Import any newly-selected Immich albums (+ membership) in the background.
+	if device.ImmichAlbumIDs != "" && h.immichService != nil {
+		go h.immichService.ImportPhotos()
 	}
 	return c.JSON(http.StatusOK, device)
 }

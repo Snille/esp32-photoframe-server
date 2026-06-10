@@ -107,6 +107,10 @@ export interface Device {
   show_description?: boolean;
   description_position?: string;
   description_max_len?: number;
+  // Comma-separated Immich album IDs this frame is restricted to (empty = all).
+  immich_album_ids?: string;
+  // Comma-separated overlay element keys whose icon is hidden (empty = all shown).
+  overlay_hidden_icons?: string;
   created_at: string;
   model?: any;
 }
@@ -154,6 +158,8 @@ export const addDevice = async (params: {
   show_description?: boolean;
   description_position?: string;
   description_max_len?: number;
+  immich_album_ids?: string;
+  overlay_hidden_icons?: string;
 }) => {
   const response = await api.post('devices', params);
   return response.data;
@@ -206,6 +212,8 @@ export const updateDevice = async (
     description_position?: string;
     description_max_len?: number;
     display_order?: string;
+    immich_album_ids?: string;
+    overlay_hidden_icons?: string;
   }
 ) => {
   const response = await api.put(`/devices/${id}`, {
@@ -250,6 +258,8 @@ export const updateDevice = async (
     description_position: overlayPositions?.description_position || 'wide-bottom',
     description_max_len: overlayPositions?.description_max_len ?? 80,
     display_order: overlayPositions?.display_order || 'shuffle',
+    immich_album_ids: overlayPositions?.immich_album_ids ?? '',
+    overlay_hidden_icons: overlayPositions?.overlay_hidden_icons ?? '',
   });
   return response.data;
 };

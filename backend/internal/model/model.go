@@ -1,6 +1,7 @@
 package model
 
 import (
+	"strings"
 	"time"
 
 	"gorm.io/gorm"
@@ -130,6 +131,14 @@ type Device struct {
 	ShowDescription     bool   `json:"show_description" gorm:"default:0"`
 	DescriptionPosition string `json:"description_position" gorm:"default:'wide-bottom'"`
 	DescriptionMaxLen   int    `json:"description_max_len" gorm:"default:80"`
+	// Per-device Immich album filter: comma-separated Immich album UUIDs. When
+	// set, this frame only shows photos that belong to one of these albums
+	// (using the same global Immich connection). Empty = all Immich photos.
+	ImmichAlbumIDs string `json:"immich_album_ids" gorm:"default:''"`
+	// Comma-separated overlay element keys whose leading icon is hidden
+	// (photo_date, weather, names, location, description). Empty = all icons
+	// shown. Lets a frame run a clean text-only chip (e.g. a Description slogan).
+	OverlayHiddenIcons string `json:"overlay_hidden_icons" gorm:"default:''"`
 	// Remote config sync fields (JSON blobs synced from/to device)
 	DeviceConfig             string    `json:"device_config" gorm:"default:'{}'"`
 	DeviceProcessingSettings string    `json:"device_processing_settings" gorm:"default:'{}'"`
@@ -189,6 +198,7 @@ type OverlaySettings struct {
 	ShowDescription     bool
 	DescriptionPosition string
 	DescriptionMaxLen   int
+	OverlayHiddenIcons  string
 }
 
 // validOverlayPositions is the set of placements the renderer understands.
@@ -359,6 +369,64 @@ func NormalizeDescriptionMaxLen(n int) int {
 	return n
 }
 
+// NormalizeImmichAlbumIDs trims and de-duplicates a comma-separated list of
+// Immich album IDs into a canonical "id,id,id" string (order preserved, blanks
+// dropped). Empty means "all Immich photos".
+func NormalizeImmichAlbumIDs(s string) string {
+	return strings.Join(ParseImmichAlbumIDs(s), ",")
+}
+
+// ParseImmichAlbumIDs splits the stored comma-separated album list into a clean
+// slice of non-empty, de-duplicated IDs.
+func ParseImmichAlbumIDs(s string) []string {
+	var out []string
+	seen := map[string]bool{}
+	for _, part := range strings.Split(s, ",") {
+		id := strings.TrimSpace(part)
+		if id == "" || seen[id] {
+			continue
+		}
+		seen[id] = true
+		out = append(out, id)
+	}
+	return out
+}
+
+// validOverlayIconKeys are the overlay elements that draw a leading icon and can
+// therefore have it hidden. Date and calendar have no icon; battery has its own
+// style control.
+var validOverlayIconKeys = map[string]bool{
+	"photo_date": true, "weather": true, "names": true,
+	"location": true, "description": true,
+}
+
+// NormalizeOverlayHiddenIcons keeps only valid, de-duplicated element keys in a
+// canonical comma-separated string.
+func NormalizeOverlayHiddenIcons(s string) string {
+	var out []string
+	seen := map[string]bool{}
+	for _, part := range strings.Split(s, ",") {
+		k := strings.TrimSpace(part)
+		if k == "" || seen[k] || !validOverlayIconKeys[k] {
+			continue
+		}
+		seen[k] = true
+		out = append(out, k)
+	}
+	return strings.Join(out, ",")
+}
+
+// OverlayIconHidden reports whether the given element's icon is hidden per the
+// stored comma-separated list.
+func OverlayIconHidden(hidden, key string) bool {
+	for _, part := range strings.Split(hidden, ",") {
+		if strings.TrimSpace(part) == key {
+			return true
+		}
+	}
+	return false
+}
+
 type DeviceHistory struct {
 	ID       uint      `gorm:"primaryKey" json:"id"`
 	DeviceID uint      `gorm:"index" json:"device_id"` // Foreign key to Device
@@ -377,6 +445,16 @@ type BatterySample struct {
 	Percent   int       `json:"percent"`
 	VoltageMV int       `json:"voltage_mv"`
 }
+
+// ImmichImageAlbum records that an Immich-sourced image belongs to a given
+// Immich album. An asset can be in several albums, so this is a join table.
+// Used to filter a device's photo pool to its selected albums.
+type ImmichImageAlbum struct {
+	ImageID       uint   `gorm:"primaryKey" json:"image_id"`
+	ImmichAlbumID string `gorm:"primaryKey;index:idx_immich_image_albums_album" json:"immich_album_id"`
+}
+
+func (ImmichImageAlbum) TableName() string { return "immich_image_albums" }
 
 type UserSession struct {
 	ID        uint      `gorm:"primaryKey" json:"id"`

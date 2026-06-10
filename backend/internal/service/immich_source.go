@@ -24,8 +24,19 @@ func NewImmichSource(db *gorm.DB, immich *ImmichService) imagesource.Source {
 func (s *immichSource) Name() string { return model.SourceImmich }
 
 func (s *immichSource) Fetch(req *imagesource.Request) (*imagesource.Response, error) {
+	// If this frame has Immich albums selected, restrict its pool to assets in
+	// those albums (via the membership join table). Empty = all Immich photos.
+	var albumScope func(*gorm.DB) *gorm.DB
+	if req.Device != nil {
+		if ids := model.ParseImmichAlbumIDs(req.Device.ImmichAlbumIDs); len(ids) > 0 {
+			albumScope = func(q *gorm.DB) *gorm.DB {
+				return q.Where(
+					"id IN (SELECT image_id FROM immich_image_albums WHERE immich_album_id IN ?)", ids)
+			}
+		}
+	}
 	pick := func(orientation string, exclude []uint) (model.Image, error) {
-		return PickRandomDBPhoto(s.db, model.SourceImmich, orientation, exclude)
+		return PickRandomDBPhoto(s.db, model.SourceImmich, orientation, exclude, albumScope)
 	}
 	load := func(item model.Image) (image.Image, error) {
 		data, err := s.immich.DownloadPhoto(item.ImmichAssetID)
@@ -35,5 +46,5 @@ func (s *immichSource) Fetch(req *imagesource.Request) (*imagesource.Response, e
 		img, _, err := image.Decode(bytes.NewReader(data))
 		return img, err
 	}
-	return RunDBPhotoFlow(req, s.db, model.SourceImmich, pick, load)
+	return RunDBPhotoFlow(req, s.db, model.SourceImmich, pick, load, albumScope)
 }

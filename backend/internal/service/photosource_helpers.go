@@ -36,12 +36,15 @@ type PhotoLoader func(item model.Image) (image.Image, error)
 // the device, otherwise pick + load one photo, then look up PhotoTakenAt
 // if the device shows photo dates. The two callbacks (pick / load) are
 // the per-source bits.
+// scope is an optional set of extra WHERE-clause builders applied to the photo
+// pool (e.g. an Immich per-device album filter). Most sources pass none.
 func RunDBPhotoFlow(
 	req *imagesource.Request,
 	db *gorm.DB,
 	source string,
 	pick PhotoPicker,
 	load PhotoLoader,
+	scope ...func(*gorm.DB) *gorm.DB,
 ) (*imagesource.Response, error) {
 	var img image.Image
 	var ids []uint
@@ -55,7 +58,7 @@ func RunDBPhotoFlow(
 	case req.Device != nil:
 		// Ordered single-photo selection (shuffle / chronological / custom).
 		var item model.Image
-		item, err = pickOrderedPhoto(db, req.Device, source)
+		item, err = pickOrderedPhoto(db, req.Device, source, scope...)
 		if err != nil {
 			return nil, err
 		}
@@ -101,13 +104,18 @@ func RunDBPhotoFlow(
 // optionally filtered by orientation ("landscape" / "portrait" — "auto" is
 // always matched alongside) and excluding ids. Generic over the four sources
 // that follow the source = ? filter shape (gallery, immich, synology, google).
-func PickRandomDBPhoto(db *gorm.DB, source, orientationFilter string, excludeIDs []uint) (model.Image, error) {
+func PickRandomDBPhoto(db *gorm.DB, source, orientationFilter string, excludeIDs []uint, scope ...func(*gorm.DB) *gorm.DB) (model.Image, error) {
 	query := db.Order("RANDOM()").Where("source = ?", source)
 	if len(excludeIDs) > 0 {
 		query = query.Where("id NOT IN ?", excludeIDs)
 	}
 	if orientationFilter != "" {
 		query = query.Where("orientation IN ?", []string{orientationFilter, "auto"})
+	}
+	for _, fn := range scope {
+		if fn != nil {
+			query = fn(query)
+		}
 	}
 	var item model.Image
 	err := query.First(&item).Error
@@ -126,10 +134,15 @@ func PickRandomDBPhoto(db *gorm.DB, source, orientationFilter string, excludeIDs
 //
 // The cursor is derived from DeviceHistory (the most recent served photo for
 // this device+source), so no separate per-device position needs persisting.
-func pickOrderedPhoto(db *gorm.DB, device *model.Device, source string) (model.Image, error) {
+func pickOrderedPhoto(db *gorm.DB, device *model.Device, source string, scope ...func(*gorm.DB) *gorm.DB) (model.Image, error) {
 	mode := model.NormalizeDisplayOrder(device.DisplayOrder)
 
 	base := db.Model(&model.Image{}).Where("source = ?", source)
+	for _, fn := range scope {
+		if fn != nil {
+			base = fn(base)
+		}
+	}
 	var ids []uint
 	switch mode {
 	case model.DisplayOrderChronoNewest:

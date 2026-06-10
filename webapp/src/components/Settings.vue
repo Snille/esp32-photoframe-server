@@ -577,10 +577,24 @@
                           label="Sync Mode"
                           variant="outlined"
                           density="compact"
-                          hint="What to pull from Immich"
-                          persistent-hint
+                          hide-details
                           @update:model-value="saveSettingsInternal()"
                         ></v-select>
+                        <v-alert
+                          :type="
+                            form.immich_source_mode === 'all'
+                              ? 'warning'
+                              : 'info'
+                          "
+                          variant="tonal"
+                          density="compact"
+                          class="mt-2 text-body-2"
+                        >
+                          {{
+                            immichSourceModeHelp[form.immich_source_mode] ||
+                            immichSourceModeHelp['album']
+                          }}
+                        </v-alert>
                       </v-col>
                     </v-row>
 
@@ -1448,6 +1462,26 @@
                               :disabled="!deviceConfig.auto_rotate"
                             ></v-select>
 
+                            <!-- This server + Immich: per-frame album filter -->
+                            <v-select
+                              v-if="useThisServer && selectedSource === 'immich'"
+                              v-model="immichAlbumIdsArray"
+                              :items="deviceImmichAlbumOptions"
+                              label="Immich albums (this frame)"
+                              placeholder="All Immich photos"
+                              persistent-placeholder
+                              multiple
+                              chips
+                              closable-chips
+                              variant="outlined"
+                              density="compact"
+                              class="mb-2 ml-8"
+                              :loading="immichStore.loading"
+                              :disabled="!deviceConfig.auto_rotate"
+                              hint="Leave empty to show all synced Immich photos. Selecting albums limits this frame to those albums (same Immich connection)."
+                              persistent-hint
+                            ></v-select>
+
                             <!-- This server: display order -->
                             <v-select
                               v-if="useThisServer"
@@ -1853,6 +1887,15 @@
                                   density="compact"
                                   hide-details
                                 ></v-select>
+                                <v-checkbox
+                                  :model-value="!isIconHidden('photo_date')"
+                                  @update:model-value="
+                                    (v: any) => setIconShown('photo_date', !!v)
+                                  "
+                                  label="Show icon"
+                                  density="compact"
+                                  hide-details
+                                ></v-checkbox>
                               </v-col>
                               <v-col
                                 v-if="editingDevice.show_weather"
@@ -1869,6 +1912,15 @@
                                   density="compact"
                                   hide-details
                                 ></v-select>
+                                <v-checkbox
+                                  :model-value="!isIconHidden('weather')"
+                                  @update:model-value="
+                                    (v: any) => setIconShown('weather', !!v)
+                                  "
+                                  label="Show icon"
+                                  density="compact"
+                                  hide-details
+                                ></v-checkbox>
                               </v-col>
                               <v-col
                                 v-if="editingDevice.show_names"
@@ -1885,6 +1937,15 @@
                                   density="compact"
                                   hide-details
                                 ></v-select>
+                                <v-checkbox
+                                  :model-value="!isIconHidden('names')"
+                                  @update:model-value="
+                                    (v: any) => setIconShown('names', !!v)
+                                  "
+                                  label="Show icon"
+                                  density="compact"
+                                  hide-details
+                                ></v-checkbox>
                               </v-col>
                               <v-col
                                 v-if="editingDevice.show_location"
@@ -1901,6 +1962,15 @@
                                   density="compact"
                                   hide-details
                                 ></v-select>
+                                <v-checkbox
+                                  :model-value="!isIconHidden('location')"
+                                  @update:model-value="
+                                    (v: any) => setIconShown('location', !!v)
+                                  "
+                                  label="Show icon"
+                                  density="compact"
+                                  hide-details
+                                ></v-checkbox>
                               </v-col>
                               <v-col
                                 v-if="editingDevice.show_description"
@@ -1917,6 +1987,15 @@
                                   density="compact"
                                   hide-details
                                 ></v-select>
+                                <v-checkbox
+                                  :model-value="!isIconHidden('description')"
+                                  @update:model-value="
+                                    (v: any) => setIconShown('description', !!v)
+                                  "
+                                  label="Show icon"
+                                  density="compact"
+                                  hide-details
+                                ></v-checkbox>
                               </v-col>
                               <v-col
                                 v-if="editingDevice.show_battery"
@@ -2905,6 +2984,46 @@ const displayOrderOptions = [
   { title: 'Chronological — oldest first', value: 'chrono_oldest' },
   { title: 'Custom order (set in Gallery)', value: 'custom' },
 ];
+
+// Per-frame Immich album selection (shown when the source is Immich). The
+// album list comes from the global Immich connection, already sorted A–Z by the
+// server. Stored on the device as a comma-separated id list.
+const deviceImmichAlbumOptions = computed(() =>
+  (immichStore.albums || []).map((a: any) => ({
+    title: a.assetCount != null ? `${a.albumName} (${a.assetCount})` : a.albumName,
+    value: a.id,
+  }))
+);
+const immichAlbumIdsArray = computed<string[]>({
+  get() {
+    return (editingDevice.immich_album_ids || '')
+      .split(',')
+      .map((s) => s.trim())
+      .filter((s) => s.length > 0);
+  },
+  set(ids: string[]) {
+    editingDevice.immich_album_ids = ids.join(',');
+  },
+});
+
+// Per-chip icon visibility. overlay_hidden_icons is a CSV of element keys whose
+// leading icon is hidden; the checkbox reads as "Show icon" (the inverse).
+const isIconHidden = (key: string): boolean =>
+  (editingDevice.overlay_hidden_icons || '')
+    .split(',')
+    .map((s) => s.trim())
+    .includes(key);
+const setIconShown = (key: string, shown: boolean) => {
+  const set = new Set(
+    (editingDevice.overlay_hidden_icons || '')
+      .split(',')
+      .map((s) => s.trim())
+      .filter((s) => s.length > 0)
+  );
+  if (shown) set.delete(key);
+  else set.add(key);
+  editingDevice.overlay_hidden_icons = Array.from(set).join(',');
+};
 // Wake-button gesture actions (must match firmware action ids).
 const buttonActionOptions = [
   { title: 'Do nothing', value: 'none' },
@@ -3694,7 +3813,7 @@ const previewElements = computed<PreviewEl[]>(() => {
       key: 'pdate',
       pos: editingDevice.photo_date_position || 'bottom-left',
       kind: 'photo',
-      emoji: '📷',
+      emoji: isIconHidden('photo_date') ? undefined : '📷',
       // Photo date is always rendered as "Jan 02, 2006" by the server.
       text: formatGoDate('Jan 02, 2006', now),
     });
@@ -3704,7 +3823,7 @@ const previewElements = computed<PreviewEl[]>(() => {
       key: 'weather',
       pos: editingDevice.weather_position || 'bottom-right',
       kind: 'weather',
-      emoji: '☀️',
+      emoji: isIconHidden('weather') ? undefined : '☀️',
       // Renderer shows temperature AND humidity, e.g. "21.0°C  45%".
       text: '21.0°C  45%',
     });
@@ -3714,7 +3833,7 @@ const previewElements = computed<PreviewEl[]>(() => {
       key: 'names',
       pos: editingDevice.names_position || 'top-left',
       kind: 'names',
-      emoji: '👥',
+      emoji: isIconHidden('names') ? undefined : '👥',
       text: sampleNamesText(),
     });
   }
@@ -3723,7 +3842,7 @@ const previewElements = computed<PreviewEl[]>(() => {
       key: 'location',
       pos: editingDevice.location_position || 'bottom-center',
       kind: 'location',
-      emoji: '📍',
+      emoji: isIconHidden('location') ? undefined : '📍',
       text: 'Björnås, Skåne, Sweden',
     });
   }
@@ -3734,7 +3853,7 @@ const previewElements = computed<PreviewEl[]>(() => {
       key: 'description',
       pos: editingDevice.description_position || 'wide-bottom',
       kind: 'description',
-      emoji: '📝',
+      emoji: isIconHidden('description') ? undefined : '📝',
       text:
         sample.length > max ? sample.slice(0, max - 1).trimEnd() + '…' : sample,
     });
@@ -3945,8 +4064,13 @@ const isAddingDevice = ref(false);
 
 const openAddDeviceDialog = () => {
   batteryEstimate.value = null;
+  if (!immichStore.albums || immichStore.albums.length === 0) {
+    immichStore.fetchAlbums().catch(() => {});
+  }
   Object.assign(editingDevice, {
     id: undefined,
+    immich_album_ids: '',
+    overlay_hidden_icons: '',
     name: '',
     host: '',
     width: 0,
@@ -4021,6 +4145,10 @@ const editDevice = async (device: Device) => {
   showEditDeviceDialog.value = true;
   // Load device remote config + battery drain estimate
   loadBatteryEstimate(device.id);
+  // Populate the Immich album picker (best-effort; only matters for Immich frames).
+  if (!immichStore.albums || immichStore.albums.length === 0) {
+    immichStore.fetchAlbums().catch(() => {});
+  }
   await loadDeviceConfig(device.id);
 };
 
@@ -4150,6 +4278,8 @@ const saveDevice = async () => {
         description_position:
           editingDevice.description_position || 'wide-bottom',
         description_max_len: editingDevice.description_max_len ?? 80,
+        immich_album_ids: editingDevice.immich_album_ids || '',
+        overlay_hidden_icons: editingDevice.overlay_hidden_icons || '',
       });
       await loadDevices();
       showMessage('Device added. Fetched settings from device.');
@@ -4211,6 +4341,8 @@ const saveDevice = async () => {
             editingDevice.description_position || 'wide-bottom',
           description_max_len: editingDevice.description_max_len ?? 80,
           display_order: editingDevice.display_order || 'shuffle',
+          immich_album_ids: editingDevice.immich_album_ids || '',
+          overlay_hidden_icons: editingDevice.overlay_hidden_icons || '',
         }
       );
 
@@ -4386,11 +4518,23 @@ const immichAlbumOptions = computed(() => {
 });
 
 const immichSourceModeOptions = [
+  { title: 'Per-device albums', value: 'device_albums' },
   { title: 'One album', value: 'album' },
-  { title: 'Entire library', value: 'all' },
   { title: 'Favorites only', value: 'favorites' },
   { title: 'Memories (on this day)', value: 'memories' },
+  { title: 'Entire library', value: 'all' },
 ];
+
+// Per-mode explanation shown under the Sync Mode dropdown.
+const immichSourceModeHelp: Record<string, string> = {
+  device_albums:
+    'Only syncs the album(s) each frame selects (Devices → edit → Auto Rotate → "Immich albums"). Nothing is pulled globally — ideal when every frame shows its own album. A frame with no album selected will have no photos.',
+  album:
+    'Syncs one album as a shared pool. Frames with no album of their own show this album. Frames can still narrow to their own album(s) in the device settings.',
+  favorites: 'Syncs the assets you have marked as Favorite in Immich.',
+  memories: 'Syncs your "on this day" memories across years.',
+  all: '⚠️ Syncs your ENTIRE Immich library — this can be tens of thousands of photos. Only use this on small libraries. For multiple frames with different albums, choose "Per-device albums" instead.',
+};
 
 const autoSyncIntervalOptions = [
   { title: 'Every 15 minutes', value: 15 },

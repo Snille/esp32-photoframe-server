@@ -442,6 +442,7 @@ func (h *ImageHandler) ServeImage(c echo.Context) error {
 			ShowDescription:     showDescription,
 			Description:         descriptionStr,
 			DescriptionPosition: device.DescriptionPosition,
+			OverlayHiddenIcons:  device.OverlayHiddenIcons,
 		})
 		if renderErr != nil {
 			return c.JSON(http.StatusInternalServerError, map[string]string{"error": "render failed: " + renderErr.Error()})

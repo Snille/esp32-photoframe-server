@@ -82,6 +82,9 @@ type RenderOptions struct {
 	ShowDescription     bool
 	Description         string
 	DescriptionPosition string
+	// OverlayHiddenIcons is a comma-separated list of element keys whose leading
+	// icon is suppressed (photo_date, weather, names, location, description).
+	OverlayHiddenIcons string
 }
 
 // overlayFontFamily maps an overlay font key to a CSS font-family stack. Every
@@ -367,6 +370,11 @@ func (s *RendererService) Render(opts RenderOptions) (image.Image, error) {
 		ShowDescription:     opts.ShowDescription && opts.Description != "",
 		Description:         opts.Description,
 		DescriptionPosition: model.NormalizeOverlayPosition(opts.DescriptionPosition, "wide-bottom"),
+		ShowPhotoDateIcon:   !model.OverlayIconHidden(opts.OverlayHiddenIcons, "photo_date"),
+		ShowWeatherIcon:     !model.OverlayIconHidden(opts.OverlayHiddenIcons, "weather"),
+		ShowNamesIcon:       !model.OverlayIconHidden(opts.OverlayHiddenIcons, "names"),
+		ShowLocationIcon:    !model.OverlayIconHidden(opts.OverlayHiddenIcons, "location"),
+		ShowDescriptionIcon: !model.OverlayIconHidden(opts.OverlayHiddenIcons, "description"),
 	}
 
 	// Determine whether the top/bottom corner rows hold any chip, so the wide
@@ -490,6 +498,12 @@ type templateData struct {
 	ShowDescription     bool
 	Description         string
 	DescriptionPosition string
+	// Per-chip icon visibility (true = draw the leading icon).
+	ShowPhotoDateIcon   bool
+	ShowWeatherIcon     bool
+	ShowNamesIcon       bool
+	ShowLocationIcon    bool
+	ShowDescriptionIcon bool
 	// TopRowUsed/BottomRowUsed report whether any corner chip occupies the top
 	// or bottom corner row. When false, the wide band in that region collapses
 	// up/down into the corner row's place instead of leaving a blank row.
@@ -626,13 +640,13 @@ func init() {
 // The HTML/CSS template for all 3 layouts
 const layoutTemplate = `
 {{- define "el_date"}}<div class="ov-chip date">{{.DateStr}}</div>{{end}}
-{{- define "el_photodate"}}<div class="ov-chip photo-date"><span class="material-symbols-outlined">photo_camera</span> {{.PhotoDateStr}}</div>{{end}}
-{{- define "el_weather"}}{{if .Weather}}<div class="ov-chip weather"><span class="material-symbols-outlined">{{.Weather.IconName}}</span> {{printf "%.1f" .Weather.Temperature}}&deg;C &nbsp; {{.Weather.Humidity}}%</div>{{end}}{{end}}
+{{- define "el_photodate"}}<div class="ov-chip photo-date">{{if .ShowPhotoDateIcon}}<span class="material-symbols-outlined">photo_camera</span> {{end}}{{.PhotoDateStr}}</div>{{end}}
+{{- define "el_weather"}}{{if .Weather}}<div class="ov-chip weather">{{if .ShowWeatherIcon}}<span class="material-symbols-outlined">{{.Weather.IconName}}</span> {{end}}{{printf "%.1f" .Weather.Temperature}}&deg;C &nbsp; {{.Weather.Humidity}}%</div>{{end}}{{end}}
 {{- define "el_calendar"}}{{if .NextEvent}}<div class="ov-chip event">{{formatEventTime .NextEvent}} &mdash; {{.NextEvent.Summary}}</div>{{end}}{{end}}
 {{- define "el_battery"}}<div class="ov-chip battery bat-rot-{{.BatteryRotation}} bat-text-{{.BatteryTextSide}}{{if le .BatteryPercent 15}} low{{end}}">{{if .ShowBatteryIcon}}<div class="battery-icon"><div class="battery-fill" style="width: {{.BatteryPercent}}%"></div></div>{{end}}{{if .ShowBatteryText}}<span class="battery-text">{{.BatteryPercent}}%</span>{{end}}</div>{{end}}
-{{- define "el_names"}}<div class="ov-chip names"><span class="material-symbols-outlined">group</span> {{.Names}}</div>{{end}}
-{{- define "el_location"}}<div class="ov-chip location"><span class="material-symbols-outlined">place</span> {{.Location}}</div>{{end}}
-{{- define "el_description"}}<div class="ov-chip description"><span class="material-symbols-outlined">notes</span> {{.Description}}</div>{{end}}
+{{- define "el_names"}}<div class="ov-chip names">{{if .ShowNamesIcon}}<span class="material-symbols-outlined">group</span> {{end}}{{.Names}}</div>{{end}}
+{{- define "el_location"}}<div class="ov-chip location">{{if .ShowLocationIcon}}<span class="material-symbols-outlined">place</span> {{end}}{{.Location}}</div>{{end}}
+{{- define "el_description"}}<div class="ov-chip description">{{if .ShowDescriptionIcon}}<span class="material-symbols-outlined">notes</span> {{end}}{{.Description}}</div>{{end}}
 {{- define "ov_slot"}}
   <div class="ov-slot {{.Pos}}">
     {{if and .D.IsOverlayLayout .D.ShowDate (eq .D.DatePosition .Pos)}}{{template "el_date" .D}}{{end}}

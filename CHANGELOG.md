@@ -1,5 +1,19 @@
 # Changelog
 
+## v1.12.0
+
+### Added
+- **Per-device Immich albums**: each frame can be restricted to one or more Immich albums from the same global connection (Devices → edit → Auto Rotate → "Immich albums"). A frame with none selected shows all synced Immich photos. Albums are imported and their membership tracked so the filter is exact; selecting albums on a frame triggers a background import of just those albums.
+- **New global Sync Mode "Per-device albums"**: syncs only the albums frames have selected — nothing is pulled globally. Ideal for several frames each showing a different album, and avoids dragging in an entire (e.g. 60 000-photo) library. Each Sync Mode now shows an explanatory note, and "Entire library" carries a size warning.
+- **Per-chip overlay icon toggle**: the leading icon on the Photo Date, Weather, Names, Location and Description chips can each be hidden independently (Overlay tab → "Show icon"). Lets a frame run a clean, text-only chip — e.g. a Description "slogan" in the Ole font with no icon.
+
+### Changed
+- The Immich album list is now sorted alphabetically (case-insensitive) in both the global and per-frame pickers (was creation order).
+
+### Database
+- Migration `000037`: `devices.immich_album_ids` + `immich_image_albums` membership table.
+- Migration `000038`: `devices.overlay_hidden_icons`.
+
 ## v1.11.1
 
 ### Fixed
