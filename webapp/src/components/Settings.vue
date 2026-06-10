@@ -2339,6 +2339,13 @@
                             ~{{ batteryEstimate.drain_per_day.toFixed(1) }} %/day
                             · est.
                             <strong>{{ batteryDaysLabel }}</strong> remaining
+                            <span class="text-medium-emphasis">
+                              ({{
+                                batteryEstimate.basis === 'voltage'
+                                  ? 'from voltage'
+                                  : 'from %'
+                              }})</span
+                            >
                           </div>
                           <div
                             v-else-if="batteryEstimate.trend === 'charging'"

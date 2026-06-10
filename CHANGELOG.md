@@ -1,5 +1,10 @@
 # Changelog
 
+## v1.12.1
+
+### Changed
+- **Battery drain estimate now uses voltage when available**: if the frame reports its battery voltage (`X-Battery-Voltage`, firmware ≥ 2.9.2), the estimate regresses a voltage-derived state-of-charge through a LiPo discharge curve instead of the firmware's coarse integer percentage — a smoother, finer signal, so the %/day and days-remaining settle faster and jitter less. Falls back to the percentage when no voltage is reported. The Power tab notes which basis was used ("from voltage" / "from %").
+
 ## v1.12.0
 
 ### Added

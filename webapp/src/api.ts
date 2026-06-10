@@ -283,6 +283,7 @@ export interface BatteryEstimate {
   window_start: string;
   last_sampled_at: string;
   recent: BatterySample[];
+  basis: 'voltage' | 'percent';
 }
 
 export const getBatteryEstimate = async (id: number): Promise<BatteryEstimate> => {

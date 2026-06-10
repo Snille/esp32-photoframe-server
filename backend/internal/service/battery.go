@@ -77,11 +77,50 @@ type BatteryEstimate struct {
 	WindowStart      time.Time             `json:"window_start"`
 	LastSampledAt    time.Time             `json:"last_sampled_at"`
 	Recent           []model.BatterySample `json:"recent"`
+	// Basis reports what the drain regression ran on: "voltage" (finer, via the
+	// LiPo curve) when the frame reports mV, else "percent".
+	Basis string `json:"basis"`
 }
 
-// Estimate regresses percent over time across the trailing window.
+// lipoCurve maps a single-cell LiPo resting voltage (mV) to an approximate
+// state-of-charge (%). The pack voltage sags under the WiFi/refresh load the
+// frame reports at, so absolute SoC isn't exact — but the curve is monotonic,
+// so the slope over time (the drain) is far smoother than the firmware's coarse
+// integer percentage. Points are interpolated linearly; outside the range it
+// clamps to 0/100.
+var lipoCurve = []struct{ mv, soc float64 }{
+	{4200, 100}, {4150, 95}, {4110, 90}, {4080, 85}, {4020, 80},
+	{3980, 75}, {3950, 70}, {3910, 65}, {3870, 60}, {3850, 55},
+	{3840, 50}, {3820, 45}, {3800, 40}, {3790, 35}, {3770, 30},
+	{3750, 25}, {3730, 20}, {3710, 15}, {3690, 10}, {3610, 5}, {3270, 0},
+}
+
+// voltageToSoC converts a battery voltage (mV) to an estimated state-of-charge
+// percentage via lipoCurve (linear interpolation, clamped to [0,100]).
+func voltageToSoC(mv int) float64 {
+	v := float64(mv)
+	if v >= lipoCurve[0].mv {
+		return 100
+	}
+	last := lipoCurve[len(lipoCurve)-1]
+	if v <= last.mv {
+		return 0
+	}
+	for i := 0; i < len(lipoCurve)-1; i++ {
+		hi, lo := lipoCurve[i], lipoCurve[i+1]
+		if v <= hi.mv && v >= lo.mv {
+			frac := (v - lo.mv) / (hi.mv - lo.mv)
+			return lo.soc + frac*(hi.soc-lo.soc)
+		}
+	}
+	return 0
+}
+
+// Estimate regresses state-of-charge over time across the trailing window. When
+// the samples carry battery voltage (newer firmware), it regresses a voltage-
+// derived SoC (finer, smoother) instead of the coarse firmware percentage.
 func (s *BatteryService) Estimate(deviceID uint) BatteryEstimate {
-	est := BatteryEstimate{Trend: "insufficient", DaysRemaining: -1, Recent: []model.BatterySample{}}
+	est := BatteryEstimate{Trend: "insufficient", DaysRemaining: -1, Recent: []model.BatterySample{}, Basis: "percent"}
 
 	var samples []model.BatterySample
 	if err := s.db.Where("device_id = ? AND sampled_at >= ?", deviceID, time.Now().Add(-batteryWindow)).
@@ -107,28 +146,65 @@ func (s *BatteryService) Estimate(deviceID uint) BatteryEstimate {
 		est.Recent = samples
 	}
 
-	span := last.SampledAt.Sub(samples[0].SampledAt)
-	if len(samples) < 2 || span < batteryMinSpan {
-		return est // not enough to read a trend yet; current % still shown
+	// Prefer voltage when the latest reading has it and enough samples carry it.
+	withV := 0
+	for _, sm := range samples {
+		if sm.VoltageMV > 0 {
+			withV++
+		}
+	}
+	useVoltage := last.VoltageMV > 0 && withV >= 2
+	if useVoltage {
+		est.Basis = "voltage"
 	}
 
-	// Least-squares slope of percent vs. elapsed days, ref = first sample.
-	t0 := samples[0].SampledAt
-	var n, sumX, sumY, sumXY, sumXX float64
+	// Build the (time, y) series. In voltage mode only points that carry a
+	// reading are used; y is the voltage-derived SoC. Otherwise y is the
+	// firmware percentage.
+	type pt struct{ x, y float64 }
+	var pts []pt
+	var t0 time.Time
 	for _, sm := range samples {
-		x := sm.SampledAt.Sub(t0).Hours() / 24.0
+		if useVoltage && sm.VoltageMV <= 0 {
+			continue // skip pre-voltage samples so the slope isn't mixed
+		}
+		if t0.IsZero() {
+			t0 = sm.SampledAt
+		}
 		y := float64(sm.Percent)
+		if useVoltage {
+			y = voltageToSoC(sm.VoltageMV)
+		}
+		pts = append(pts, pt{x: sm.SampledAt.Sub(t0).Hours() / 24.0, y: y})
+	}
+
+	currentY := float64(last.Percent)
+	if useVoltage {
+		currentY = voltageToSoC(last.VoltageMV)
+	}
+
+	span := time.Duration(0)
+	if len(pts) >= 2 {
+		span = time.Duration(pts[len(pts)-1].x * float64(24*time.Hour))
+	}
+	if len(pts) < 2 || span < batteryMinSpan {
+		return est // not enough to read a trend yet; current values still shown
+	}
+
+	// Least-squares slope of SoC vs. elapsed days.
+	var n, sumX, sumY, sumXY, sumXX float64
+	for _, p := range pts {
 		n++
-		sumX += x
-		sumY += y
-		sumXY += x * y
-		sumXX += x * x
+		sumX += p.x
+		sumY += p.y
+		sumXY += p.x * p.y
+		sumXX += p.x * p.x
 	}
 	denom := n*sumXX - sumX*sumX
 	if denom == 0 {
 		return est
 	}
-	slope := (n*sumXY - sumX*sumY) / denom // %/day, negative when discharging
+	slope := (n*sumXY - sumX*sumY) / denom // SoC %/day, negative when discharging
 
 	drain := -slope
 	est.DrainPerDay = drain
@@ -136,7 +212,7 @@ func (s *BatteryService) Estimate(deviceID uint) BatteryEstimate {
 	case drain > batteryFlatThreshold:
 		est.Trend = "discharging"
 		if drain > 0 {
-			est.DaysRemaining = float64(last.Percent) / drain
+			est.DaysRemaining = currentY / drain
 		}
 	case drain < -batteryFlatThreshold:
 		est.Trend = "charging"
