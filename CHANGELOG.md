@@ -1,5 +1,29 @@
 # Changelog
 
+## v1.11.1
+
+### Fixed
+- **Wide overlay bands hug their text**: the two full-width band placements (`wide-top` / `wide-bottom`) no longer draw a full-width background bar when the field is short. The band stays centered but its chip now grows from the centre to fit its content, only reaching full width (then wrapping) for long text.
+
+## v1.11.0
+
+### Added
+- **Overlay settings moved to their own device-dialog tab** (out from under Auto Rotate), with a live preview that mirrors the renderer.
+- **Per-device overlay font and weight**: pick one of five e-paper-legible families and Regular / Medium / Bold for all overlay chips. All chips now share one uniform look (font, size, weight, opacity).
+- **People-names overlay** from Immich face metadata: placeable chip with six name formats (Förnamn Efternamn / Förnamn E. / Förnamn / Efternamn Förnamn / Efternamn F. / Efternamn), an optional age (computed at the photo's date) in parentheses, comma-separated names, and a max-length cap that keeps whole names then collapses the rest to "+N".
+- **Location overlay** from Immich EXIF (city / state / country), with its own length cap.
+- **Description overlay** from Immich EXIF description (gallery uploads fall back to their caption), with its own length cap.
+- **Two full-width band placements** (`wide-top` / `wide-bottom`) suited to long fields, in addition to the six corner slots. When no corner chip is present the band collapses into the corner row's position.
+- **Battery drain estimate** (no external hardware): the level the frame reports on each image fetch (`X-Battery-Percentage`, plus optional `X-Battery-Voltage`) is sampled per wake and regressed over a 14-day window into a %/day drain and an estimated runtime, shown with a sparkline in the device dialog's Power tab. New `GET /api/devices/:id/battery`.
+
+### Fixed
+- All overlay fields now render with identical typography (previously the date and weather chips could differ in size).
+- The "From Google Photos" junk caption is no longer written as a description.
+
+### Database
+- Migrations `000032`–`000035`: overlay font/weight; people + location; location length; description.
+- Migration `000036`: `battery_samples` table (per-device timestamped level/voltage).
+
 ## v1.10.0
 
 ### Added

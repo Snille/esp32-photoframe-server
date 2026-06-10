@@ -792,10 +792,12 @@ const layoutTemplate = `
   .ov-slot.top-left,   .ov-slot.bottom-left   { justify-self: start;  align-items: flex-start; }
   .ov-slot.top-center, .ov-slot.bottom-center { justify-self: center; align-items: center; }
   .ov-slot.top-right,  .ov-slot.bottom-right  { justify-self: end;    align-items: flex-end; }
-  /* Full-width band for long content (location / names / description). */
-  .ov-slot.wide-top, .ov-slot.wide-bottom { width: 100%; align-items: stretch; }
+  /* Centered band for long content (location / names / description). The slot
+     spans the full width and centers its chip, but the chip itself only grows
+     to fit its text — expanding symmetrically from the centre — and caps at the
+     full width (then the text wraps) rather than always drawing a full-width bar. */
+  .ov-slot.wide-top, .ov-slot.wide-bottom { width: 100%; align-items: center; }
   .ov-slot.wide-top > .ov-chip, .ov-slot.wide-bottom > .ov-chip {
-    width: 100%;
     max-width: 100%;
     justify-content: center;
     text-align: center;

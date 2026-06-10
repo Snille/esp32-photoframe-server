@@ -5086,10 +5086,10 @@ const getDeviceFromUA = (ua: string) => {
 }
 .overlay-preview .op-wide {
   width: 100%;
-  align-items: stretch;
+  align-items: center;
 }
 .overlay-preview .op-wide .op-chip {
-  width: 100%;
+  max-width: 100%;
   justify-content: center;
   text-align: center;
   white-space: normal;
