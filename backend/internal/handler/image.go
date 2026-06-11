@@ -84,6 +84,12 @@ func (h *ImageHandler) ServeImage(c echo.Context) error {
 	// Get source from route parameter
 	source := c.Param("source")
 
+	// preview=1 is a non-mutating render for the companion app: no device
+	// history write, no battery sample, and the source pick must not persist
+	// state. The app may still send X-Battery-Percentage so the battery badge
+	// renders in the preview.
+	preview := c.QueryParam("preview") == "1"
+
 	// 1. Identify Device and Determine Settings
 	// Three-tier identification: token DeviceID → X-Hostname → client IP
 	var device model.Device
@@ -159,7 +165,7 @@ func (h *ImageHandler) ServeImage(c echo.Context) error {
 	// optional X-Battery-Voltage header (millivolts) gives a finer signal than
 	// the coarse percentage when present. Throttled + async so it never delays
 	// or fails the image response.
-	if deviceFound && batteryPercent >= 0 && batteryPercent <= 100 {
+	if deviceFound && !preview && batteryPercent >= 0 && batteryPercent <= 100 {
 		voltageMV := 0
 		if vStr := c.Request().Header.Get("X-Battery-Voltage"); vStr != "" {
 			if v, err := strconv.Atoi(vStr); err == nil {
@@ -261,10 +267,6 @@ func (h *ImageHandler) ServeImage(c echo.Context) error {
 			}
 		}
 	}
-	// preview=1 renders a non-mutating "what's on the wall" image for the
-	// companion app: skips the device-history write below and tells the source
-	// pick not to persist any state (shuffle-seed bump).
-	preview := c.QueryParam("preview") == "1"
 	sourceResp, err := h.sources.Fetch(source, &imagesource.Request{
 		Device:       devicePtr,
 		Source:       source,
