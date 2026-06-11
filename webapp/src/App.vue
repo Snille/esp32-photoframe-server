@@ -12,6 +12,13 @@
           title="Server version"
           >{{ serverVersion }}</span
         >
+        <v-btn
+          icon="mdi-cellphone-arrow-down"
+          variant="text"
+          href="/app"
+          target="_blank"
+          title="Get the Android app"
+        ></v-btn>
         <v-menu>
           <template #activator="{ props }">
             <v-btn

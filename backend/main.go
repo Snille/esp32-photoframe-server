@@ -2,6 +2,7 @@ package main
 
 import (
 	"log"
+	"net/http"
 	"os"
 	"path/filepath"
 
@@ -378,6 +379,48 @@ func main() {
 
 	// 3. Serve favicon from the root of the static dir
 	e.File("/favicon.svg", filepath.Join(staticDir, "favicon.svg"))
+
+	// 3.5. Android companion app download (server-hosted APK).
+	// Drop the built APK at <DATA_DIR>/app.apk; a phone installs it by browsing
+	// to /app and tapping Download. Public (LAN convenience, no auth).
+	apkPath := filepath.Join(dataDir, "app.apk")
+	e.GET("/app/photoframe.apk", func(c echo.Context) error {
+		if _, err := os.Stat(apkPath); err != nil {
+			return c.String(http.StatusNotFound, "App not uploaded yet")
+		}
+		c.Response().Header().Set(echo.HeaderContentType, "application/vnd.android.package-archive")
+		c.Response().Header().Set(echo.HeaderContentDisposition, `attachment; filename="photoframe.apk"`)
+		return c.File(apkPath)
+	})
+	e.GET("/app", func(c echo.Context) error {
+		available := false
+		if info, err := os.Stat(apkPath); err == nil {
+			available = info.Size() > 0
+		}
+		var btn string
+		if available {
+			btn = `<a class="btn" href="/app/photoframe.apk">Download APK</a>`
+		} else {
+			btn = `<p class="muted">No app uploaded yet. Place the APK at DATA_DIR/app.apk on the server.</p>`
+		}
+		html := `<!doctype html><html lang="en"><head><meta charset="utf-8">` +
+			`<meta name="viewport" content="width=device-width,initial-scale=1">` +
+			`<title>PhotoFrame App</title><style>` +
+			`body{font-family:system-ui,sans-serif;margin:0;min-height:100vh;display:flex;` +
+			`align-items:center;justify-content:center;background:#1e1e1e;color:#eee}` +
+			`.card{max-width:420px;padding:32px;text-align:center}` +
+			`h1{font-size:1.4rem;margin:0 0 8px}.muted{color:#aaa;font-size:.9rem}` +
+			`.btn{display:inline-block;margin:24px 0 16px;padding:14px 28px;border-radius:10px;` +
+			`background:#2f9852;color:#fff;text-decoration:none;font-weight:600}` +
+			`ol{text-align:left;color:#bbb;font-size:.85rem;line-height:1.6}` +
+			`</style></head><body><div class="card"><h1>PhotoFrame companion app</h1>` +
+			`<p class="muted">Android · server mode</p>` + btn +
+			`<ol><li>Tap <b>Download APK</b> above.</li>` +
+			`<li>Open the downloaded file; allow “install from this source” if prompted.</li>` +
+			`<li>In the app, connect to this server and log in.</li></ol>` +
+			`</div></body></html>`
+		return c.HTML(http.StatusOK, html)
+	})
 
 	// 4. SPA Fallback: Any other route not matched (api is already handled) goes to index.html
 	e.GET("/*", func(c echo.Context) error {
