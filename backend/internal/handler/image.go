@@ -261,6 +261,10 @@ func (h *ImageHandler) ServeImage(c echo.Context) error {
 			}
 		}
 	}
+	// preview=1 renders a non-mutating "what's on the wall" image for the
+	// companion app: skips the device-history write below and tells the source
+	// pick not to persist any state (shuffle-seed bump).
+	preview := c.QueryParam("preview") == "1"
 	sourceResp, err := h.sources.Fetch(source, &imagesource.Request{
 		Device:       devicePtr,
 		Source:       source,
@@ -270,6 +274,7 @@ func (h *ImageHandler) ServeImage(c echo.Context) error {
 		NativeHeight: nativeH,
 		Orientation:  orientation,
 		ExcludeIDs:   excludeIDs,
+		Preview:      preview,
 	})
 	if err != nil {
 		if strings.Contains(err.Error(), "invalid source filter") {
@@ -307,8 +312,8 @@ func (h *ImageHandler) ServeImage(c echo.Context) error {
 		return c.Blob(http.StatusOK, "image/png", body)
 	}
 
-	// 1.6. Record History
-	if deviceFound && len(servedImageIDs) > 0 {
+	// 1.6. Record History (skipped for non-mutating preview renders)
+	if deviceFound && !preview && len(servedImageIDs) > 0 {
 		go func(devID uint, imgIDs []uint) {
 			rows := make([]model.DeviceHistory, 0, len(imgIDs))
 			now := time.Now()

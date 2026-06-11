@@ -58,7 +58,7 @@ func RunDBPhotoFlow(
 	case req.Device != nil:
 		// Ordered single-photo selection (shuffle / chronological / custom).
 		var item model.Image
-		item, err = pickOrderedPhoto(db, req.Device, source, scope...)
+		item, err = pickOrderedPhoto(db, req.Device, source, req.Preview, scope...)
 		if err != nil {
 			return nil, err
 		}
@@ -134,7 +134,7 @@ func PickRandomDBPhoto(db *gorm.DB, source, orientationFilter string, excludeIDs
 //
 // The cursor is derived from DeviceHistory (the most recent served photo for
 // this device+source), so no separate per-device position needs persisting.
-func pickOrderedPhoto(db *gorm.DB, device *model.Device, source string, scope ...func(*gorm.DB) *gorm.DB) (model.Image, error) {
+func pickOrderedPhoto(db *gorm.DB, device *model.Device, source string, preview bool, scope ...func(*gorm.DB) *gorm.DB) (model.Image, error) {
 	mode := model.NormalizeDisplayOrder(device.DisplayOrder)
 
 	base := db.Model(&model.Image{}).Where("source = ?", source)
@@ -172,9 +172,15 @@ func pickOrderedPhoto(db *gorm.DB, device *model.Device, source string, scope ..
 				// Completed a full pass through the library.
 				next = 0
 				if mode == model.DisplayOrderShuffle {
-					device.ShuffleSeed++
-					db.Model(device).Update("shuffle_seed", device.ShuffleSeed)
-					deterministicShuffle(ids, device.ShuffleSeed)
+					// Next cycle's order. A preview must reflect what the next
+					// real pull will show, so compute it with the bumped seed —
+					// but never persist the bump for a preview (read-only).
+					seed := device.ShuffleSeed + 1
+					if !preview {
+						device.ShuffleSeed = seed
+						db.Model(device).Update("shuffle_seed", seed)
+					}
+					deterministicShuffle(ids, seed)
 				}
 			}
 		}

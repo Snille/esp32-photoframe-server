@@ -43,6 +43,11 @@ type Request struct {
 	NativeHeight int
 	Orientation  string
 	ExcludeIDs   []uint
+	// Preview marks a non-mutating render (e.g. the app's "what's on the wall"
+	// preview): the picked photo must match what the next real pull would show,
+	// but the pick must not persist any state (no shuffle-seed bump). The
+	// handler also skips the device-history write for preview requests.
+	Preview bool
 }
 
 // Response is what a Source produces.
