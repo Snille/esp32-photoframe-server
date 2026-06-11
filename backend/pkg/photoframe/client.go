@@ -517,18 +517,16 @@ func (c *Client) FetchPalette() (string, error) {
 	return string(body), nil
 }
 
-func (c *Client) PushConfig(config map[string]interface{}) error {
+// postJSON POSTs a JSON body to a device endpoint (e.g. /api/config,
+// /api/settings/processing, /api/settings/palette). Shared by the Push* config
+// helpers so host resolution + request boilerplate lives in one place.
+func (c *Client) postJSON(path string, jsonData []byte) error {
 	ip, err := c.resolveHost(c.host)
 	if err != nil {
 		return fmt.Errorf("failed to resolve device %s: %w", c.host, err)
 	}
 
-	url := fmt.Sprintf("http://%s/api/config", ip)
-
-	jsonData, err := json.Marshal(config)
-	if err != nil {
-		return fmt.Errorf("failed to marshal config: %w", err)
-	}
+	url := fmt.Sprintf("http://%s%s", ip, path)
 
 	req, err := http.NewRequest("POST", url, bytes.NewBuffer(jsonData))
 	if err != nil {
@@ -548,4 +546,26 @@ func (c *Client) PushConfig(config map[string]interface{}) error {
 	}
 
 	return nil
+}
+
+func (c *Client) PushConfig(config map[string]interface{}) error {
+	jsonData, err := json.Marshal(config)
+	if err != nil {
+		return fmt.Errorf("failed to marshal config: %w", err)
+	}
+	return c.postJSON("/api/config", jsonData)
+}
+
+// PushProcessingSettings pushes the device's image-processing settings to its
+// /api/settings/processing endpoint. The body is the same JSON shape the device
+// dialog saves (exposure, saturation, toneMode, …).
+func (c *Client) PushProcessingSettings(settings json.RawMessage) error {
+	return c.postJSON("/api/settings/processing", settings)
+}
+
+// PushPalette pushes the device's color palette to its /api/settings/palette
+// endpoint. The body is the same JSON shape the device dialog saves
+// ({ black: {r,g,b}, white: {…}, … }).
+func (c *Client) PushPalette(palette json.RawMessage) error {
+	return c.postJSON("/api/settings/palette", palette)
 }

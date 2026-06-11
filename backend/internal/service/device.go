@@ -532,6 +532,30 @@ func (s *DeviceService) PushToHost(device *model.Device, imagePath string, extra
 		opts[k] = v
 	}
 
+	// Apply the device's saved processing settings and color palette so a
+	// server-initiated push renders identically to the device's own pull path
+	// (image.go reads these from the X-Processing-Settings / X-Color-Palette
+	// request headers). Without this, pushes always used library defaults and
+	// silently ignored the configured preset and palette.
+	if device.DeviceProcessingSettings != "" && device.DeviceProcessingSettings != "{}" {
+		var settings photoframe.ProcessingSettings
+		if err := json.Unmarshal([]byte(device.DeviceProcessingSettings), &settings); err != nil {
+			log.Printf("Failed to parse processing settings for device %d: %v", device.ID, err)
+		} else {
+			var palette *photoframe.Palette
+			if device.DeviceColorPalette != "" && device.DeviceColorPalette != "{}" {
+				palette = &photoframe.Palette{}
+				if err := json.Unmarshal([]byte(device.DeviceColorPalette), palette); err != nil {
+					log.Printf("Failed to parse color palette for device %d: %v", device.ID, err)
+					palette = nil
+				}
+			}
+			for k, v := range s.processor.MapProcessingSettings(&settings, palette) {
+				opts[k] = v
+			}
+		}
+	}
+
 	processedData, thumbData, err := s.processor.ProcessImage(finalImg, opts)
 	if err != nil {
 		return fmt.Errorf("processing failed: %w", err)

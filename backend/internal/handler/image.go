@@ -475,23 +475,48 @@ func (h *ImageHandler) ServeImage(c echo.Context) error {
 		procOptions["format"] = "png"
 	}
 
-	// 3.5. Parse X-Processing-Settings header if present
+	// 3.5. Resolve processing settings.
+	// The server-stored config is authoritative when present: it's what the
+	// device dialog edits, and it matches what the push path renders with.
+	// Relying on the device-sent X-Processing-Settings header instead would
+	// render with stale values whenever config-sync hasn't reached the device
+	// yet (timestamp gate) — so pull/button refreshes ignored the configured
+	// preset. Fall back to the header for standalone/unmanaged devices that
+	// have no server-stored config.
 	var settings *photoframe.ProcessingSettings
-	if settingsStr := c.Request().Header.Get("X-Processing-Settings"); settingsStr != "" {
+	if deviceFound && device.DeviceProcessingSettings != "" && device.DeviceProcessingSettings != "{}" {
 		settings = &photoframe.ProcessingSettings{}
-		if err := json.Unmarshal([]byte(settingsStr), settings); err != nil {
-			fmt.Printf("Failed to parse X-Processing-Settings header: %v\n", err)
+		if err := json.Unmarshal([]byte(device.DeviceProcessingSettings), settings); err != nil {
+			fmt.Printf("Failed to parse stored processing settings for device %d: %v\n", device.ID, err)
 			settings = nil
 		}
 	}
+	if settings == nil {
+		if settingsStr := c.Request().Header.Get("X-Processing-Settings"); settingsStr != "" {
+			settings = &photoframe.ProcessingSettings{}
+			if err := json.Unmarshal([]byte(settingsStr), settings); err != nil {
+				fmt.Printf("Failed to parse X-Processing-Settings header: %v\n", err)
+				settings = nil
+			}
+		}
+	}
 
-	// 3.6. Parse X-Color-Palette header if present
+	// 3.6. Resolve color palette (same server-authoritative rule as above).
 	var palette *photoframe.Palette
-	if paletteStr := c.Request().Header.Get("X-Color-Palette"); paletteStr != "" {
+	if deviceFound && device.DeviceColorPalette != "" && device.DeviceColorPalette != "{}" {
 		palette = &photoframe.Palette{}
-		if err := json.Unmarshal([]byte(paletteStr), palette); err != nil {
-			fmt.Printf("Failed to parse X-Color-Palette header: %v\n", err)
+		if err := json.Unmarshal([]byte(device.DeviceColorPalette), palette); err != nil {
+			fmt.Printf("Failed to parse stored color palette for device %d: %v\n", device.ID, err)
 			palette = nil
+		}
+	}
+	if palette == nil {
+		if paletteStr := c.Request().Header.Get("X-Color-Palette"); paletteStr != "" {
+			palette = &photoframe.Palette{}
+			if err := json.Unmarshal([]byte(paletteStr), palette); err != nil {
+				fmt.Printf("Failed to parse X-Color-Palette header: %v\n", err)
+				palette = nil
+			}
 		}
 	}
 
@@ -690,14 +715,35 @@ func (h *ImageHandler) UpdateDeviceConfig(c echo.Context) error {
 
 	h.db.Model(&device).Updates(updates)
 
-	// Attempt to push config to device directly. Only when the caller actually
-	// sent a config (not a processing/palette-only update), and push the full
-	// merged map so the device receives every field, not just the edited ones.
+	// Push the saved settings to the device directly so an awake frame updates
+	// its NVS immediately — keeping the device's own webapp and the dialog's
+	// "Sync from device" truthful. Each kind goes to its matching endpoint:
+	// config is pushed as the full merged map (so the device receives every
+	// field, not just the edited ones); processing settings and palette are
+	// pushed as the raw saved JSON. Anything that doesn't reach an asleep frame
+	// still rides the config-sync header on its next image fetch, and rendering
+	// is already server-authoritative regardless. A single failure (device
+	// asleep/unreachable) marks the whole save "offline".
 	pushResult := "synced"
-	if device.Host != "" && len(req.Config) > 0 && len(configMap) > 0 {
-		if err := photoframe.NewClient(device.Host).PushConfig(configMap); err != nil {
-			log.Printf("Could not push config to device %s: %v (will sync on next image fetch)", device.Host, err)
-			pushResult = "offline"
+	if device.Host != "" {
+		client := photoframe.NewClient(device.Host)
+		if len(req.Config) > 0 && len(configMap) > 0 {
+			if err := client.PushConfig(configMap); err != nil {
+				log.Printf("Could not push config to device %s: %v (will sync on next image fetch)", device.Host, err)
+				pushResult = "offline"
+			}
+		}
+		if len(req.ProcessingSettings) > 0 {
+			if err := client.PushProcessingSettings(req.ProcessingSettings); err != nil {
+				log.Printf("Could not push processing settings to device %s: %v (will sync on next image fetch)", device.Host, err)
+				pushResult = "offline"
+			}
+		}
+		if len(req.ColorPalette) > 0 {
+			if err := client.PushPalette(req.ColorPalette); err != nil {
+				log.Printf("Could not push palette to device %s: %v (will sync on next image fetch)", device.Host, err)
+				pushResult = "offline"
+			}
 		}
 	}
 

@@ -1,5 +1,15 @@
 # Changelog
 
+## v1.14.0
+
+### Fixed
+- **Saved processing preset and colour palette now apply on every path.** A server-initiated push rendered with library defaults — it never read the device's saved processing settings or palette — so the configured preset (e.g. Grayscale) and any palette calibration were silently ignored on pushes. `PushToHost` now applies the stored settings, exactly like the pull path.
+- **Pull/button refreshes now render from the server's stored settings, not the frame's stale headers.** The frame echoes its own NVS settings back in `X-Processing-Settings` / `X-Color-Palette`; when config-sync hadn't reached the frame yet, those were stale and a button refresh ignored the configured preset. The server now treats its stored config as authoritative when present (falling back to the frame's headers only for standalone/unmanaged frames), so push and pull render identically.
+
+### Changed
+- **Saving now pushes processing settings and palette straight to an awake frame**, not just the device config. New `/api/settings/processing` and `/api/settings/palette` client calls mean a Save updates the frame's NVS immediately — keeping the frame's own WebUI and the dialog's "Sync from device" truthful — instead of waiting for the lazy config-sync header on the next image fetch.
+- **Processing-preset detection tolerates float drift**: values synced back from a frame come through its 32-bit-float NVS (e.g. `1.4` → `1.4000000953…`), which an exact comparison mislabelled as "Custom". Detection now compares numbers with a small epsilon, so a synced-from-device preset is recognised correctly.
+
 ## v1.13.0
 
 ### Added

@@ -3244,6 +3244,13 @@ const detectProcessingPreset = () => {
       if (!(k in preset)) return true; // Skip keys not in this preset
       const pv = (preset as any)[k];
       const dv = (deviceProcessing as any)[k];
+      // Numeric fields drift through the device's float32 NVS round-trip
+      // (e.g. 1.4 comes back as 1.4000000953…), so an exact === check would
+      // mislabel a synced-from-device preset as "Custom". Compare with a small
+      // epsilon — preset values differ by ≥0.1, far above any drift.
+      if (typeof pv === 'number' && typeof dv === 'number') {
+        return Math.abs(pv - dv) < 1e-3;
+      }
       return pv === dv;
     });
     if (matches) {
