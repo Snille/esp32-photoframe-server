@@ -2,13 +2,7 @@
   <v-app>
     <v-app-bar color="primary" density="compact">
       <template #prepend>
-        <v-img
-          src="/favicon.svg"
-          alt="PhotoFrame Server"
-          width="32"
-          height="32"
-          class="ml-2"
-        />
+        <AppLogo :size="32" class="ml-2" />
       </template>
       <v-app-bar-title class="ml-4">ESP32 PhotoFrame Server</v-app-bar-title>
       <template v-slot:append>
@@ -76,6 +70,7 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue';
 import { useTheme } from 'vuetify';
+import AppLogo from './components/AppLogo.vue';
 import Settings from './components/Settings.vue';
 import Login from './components/Login.vue';
 import Setup from './components/Setup.vue';
