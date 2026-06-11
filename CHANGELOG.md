@@ -1,5 +1,17 @@
 # Changelog
 
+## v1.13.0
+
+### Added
+- **Download the Android companion app from the server**: a new `/app` page (and `/app/photoframe.apk`) serves the app's APK so a phone can install it by browsing to the server — no sideload transfer needed. A link next to the theme switcher in the app bar opens it. Drop the built APK at `<DATA_DIR>/app.apk` to enable it (the page shows a hint until then).
+- **Non-mutating frame preview** (`/image/<source>?preview=1`): renders exactly what a frame shows next — overlays and all — **without** advancing the frame's display-order sequence, writing history, or recording a battery sample. This powers the companion app's live "what's on the wall" preview, which works even while the frame is asleep.
+
+### Changed
+- **Theme-following app-bar logo**: the photoframe logo now follows the active theme (its shell, sun and horizon take the theme's primary colour) instead of being a fixed terracotta mark; the sky inside the frame is a constant light blue.
+
+### Fixed
+- The battery badge now renders in the companion app's preview: the preview accepts an `X-Battery-Percentage` reading (which the server needs to draw the badge) while still recording no battery sample, so it stays non-mutating.
+
 ## v1.12.1
 
 ### Changed
