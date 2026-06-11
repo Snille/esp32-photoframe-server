@@ -111,6 +111,13 @@ export interface Device {
   immich_album_ids?: string;
   // Comma-separated overlay element keys whose icon is hidden (empty = all shown).
   overlay_hidden_icons?: string;
+  // Id of the most recent served-image thumbnail, served via
+  // /served-image-thumbnail/:id — drives the Devices-list current-image preview.
+  current_thumb_id?: string;
+  // Latest battery estimate, attached by the ListDevices handler.
+  battery_percent?: number; // -1 = no data yet
+  battery_days_remaining?: number; // -1 = unknown
+  battery_trend?: string;
   created_at: string;
   model?: any;
 }

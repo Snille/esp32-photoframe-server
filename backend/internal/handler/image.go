@@ -25,6 +25,7 @@ import (
 	"github.com/aitjcize/esp32-photoframe-server/backend/internal/service"
 	"github.com/aitjcize/esp32-photoframe-server/backend/pkg/gcalendar"
 	"github.com/aitjcize/esp32-photoframe-server/backend/pkg/googlephotos"
+	"github.com/aitjcize/esp32-photoframe-server/backend/pkg/imageops"
 	"github.com/aitjcize/esp32-photoframe-server/backend/pkg/photoframe"
 	"github.com/aitjcize/esp32-photoframe-server/backend/pkg/weather"
 	"github.com/labstack/echo/v4"
@@ -411,41 +412,41 @@ func (h *ImageHandler) ServeImage(c echo.Context) error {
 
 		var renderErr error
 		imgWithOverlay, renderErr = h.renderer.Render(service.RenderOptions{
-			Layout:        layout,
-			DisplayMode:   displayMode,
-			Width:         logicalW,
-			Height:        logicalH,
-			NativeWidth:   nativeW,
-			NativeHeight:  nativeH,
-			Photo:         img,
-			ShowDate:      showDate,
-			ShowPhotoDate: showPhotoDate,
-			PhotoDate:     photoTakenAt,
-			ShowWeather:   showWeather,
-			Weather:       weatherData,
-			ShowCalendar:   showCalendar,
-			Events:         events,
-			Timezone:       deviceTimezone,
-			DateFormat:     device.DateFormat,
-			ShowBattery:       showBattery,
-			BatteryPercent:    batteryPercent,
-			DatePosition:      device.DatePosition,
-			PhotoDatePosition: device.PhotoDatePosition,
-			WeatherPosition:   device.WeatherPosition,
-			BatteryPosition:   device.BatteryPosition,
-			BatteryStyle:      device.BatteryStyle,
-			BatteryRotation:   device.BatteryRotation,
-			BatteryTextSide:   device.BatteryTextSide,
-			BatteryIconScale:  device.BatteryIconScale,
-			OverlayScale:      device.OverlayScale,
-			OverlayFont:       device.OverlayFont,
-			OverlayWeight:     device.OverlayWeight,
-			ShowNames:         showNames,
-			Names:             namesStr,
-			NamesPosition:     device.NamesPosition,
-			ShowLocation:      showLocation,
-			Location:          locationStr,
-			LocationPosition:  device.LocationPosition,
+			Layout:              layout,
+			DisplayMode:         displayMode,
+			Width:               logicalW,
+			Height:              logicalH,
+			NativeWidth:         nativeW,
+			NativeHeight:        nativeH,
+			Photo:               img,
+			ShowDate:            showDate,
+			ShowPhotoDate:       showPhotoDate,
+			PhotoDate:           photoTakenAt,
+			ShowWeather:         showWeather,
+			Weather:             weatherData,
+			ShowCalendar:        showCalendar,
+			Events:              events,
+			Timezone:            deviceTimezone,
+			DateFormat:          device.DateFormat,
+			ShowBattery:         showBattery,
+			BatteryPercent:      batteryPercent,
+			DatePosition:        device.DatePosition,
+			PhotoDatePosition:   device.PhotoDatePosition,
+			WeatherPosition:     device.WeatherPosition,
+			BatteryPosition:     device.BatteryPosition,
+			BatteryStyle:        device.BatteryStyle,
+			BatteryRotation:     device.BatteryRotation,
+			BatteryTextSide:     device.BatteryTextSide,
+			BatteryIconScale:    device.BatteryIconScale,
+			OverlayScale:        device.OverlayScale,
+			OverlayFont:         device.OverlayFont,
+			OverlayWeight:       device.OverlayWeight,
+			ShowNames:           showNames,
+			Names:               namesStr,
+			NamesPosition:       device.NamesPosition,
+			ShowLocation:        showLocation,
+			Location:            locationStr,
+			LocationPosition:    device.LocationPosition,
 			ShowDescription:     showDescription,
 			Description:         descriptionStr,
 			DescriptionPosition: device.DescriptionPosition,
@@ -526,7 +527,7 @@ func (h *ImageHandler) ServeImage(c echo.Context) error {
 	}
 
 	log.Println("Processing image with options: ", procOptions)
-	processedBytes, thumbBytes, err := h.processor.ProcessImage(imgWithOverlay, procOptions)
+	processedBytes, _, err := h.processor.ProcessImage(imgWithOverlay, procOptions)
 	if err != nil {
 		fmt.Printf("Processor failed: %v\n", err)
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "processor service failed: " + err.Error()})
@@ -544,14 +545,36 @@ func (h *ImageHandler) ServeImage(c echo.Context) error {
 		processedBytes = rawBytes
 	}
 
-	// 4. Cache Thumbnail & Set Headers
-	if thumbBytes != nil {
+	// 4. Cache Thumbnail & Set Headers.
+	// Build the preview from the *processed* (dithered) output so it truthfully
+	// shows grayscale / palette / tone. The converter's own -t thumbnail is
+	// snapshotted pre-dither and ignores those filters.
+	thumbFormat := "epdgz"
+	if rawEPD {
+		thumbFormat = "raw"
+	} else if firmwareVersion == "" || !photoframe.SupportsEPDGZ(firmwareVersion) {
+		thumbFormat = "png"
+	}
+	rotateThumb := logicalW != nativeW || logicalH != nativeH
+	if previewJPEG, terr := imageops.ProcessedToThumbnailJPEG(processedBytes, thumbFormat, nativeW, nativeH, 400, rotateThumb); terr != nil {
+		fmt.Printf("Failed to build preview thumbnail: %v\n", terr)
+	} else {
 		thumbID := fmt.Sprintf("%d", time.Now().UnixNano())
 		thumbPath := filepath.Join(h.dataDir, fmt.Sprintf("thumb_%s.jpg", thumbID))
-
-		if err := os.WriteFile(thumbPath, thumbBytes, 0644); err == nil {
+		if err := os.WriteFile(thumbPath, previewJPEG, 0644); err == nil {
 			thumbnailUrl := fmt.Sprintf("http://%s/served-image-thumbnail/%s", c.Request().Host, thumbID)
 			c.Response().Header().Set("X-Thumbnail-URL", thumbnailUrl)
+
+			// Remember this as the frame's current image so the Devices list can
+			// show a live miniature. Skip preview renders (they don't change what
+			// the frame displays), and delete the previous per-device thumbnail so
+			// these files don't pile up.
+			if deviceFound && !preview {
+				if device.CurrentThumbID != "" && device.CurrentThumbID != thumbID {
+					os.Remove(filepath.Join(h.dataDir, fmt.Sprintf("thumb_%s.jpg", device.CurrentThumbID)))
+				}
+				h.db.Model(&device).Update("current_thumb_id", thumbID)
+			}
 		} else {
 			fmt.Printf("Failed to save served thumbnail: %v\n", err)
 		}
@@ -840,7 +863,6 @@ func (h *ImageHandler) GetServedImageThumbnail(c echo.Context) error {
 
 	return c.Blob(http.StatusOK, "image/jpeg", data)
 }
-
 
 // applyConfigSyncHeader sets the X-Config-Payload response header when the
 // server's stored device config is newer than what the device most recently

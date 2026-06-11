@@ -214,6 +214,7 @@ func main() {
 		Weather:        weatherClient,
 		Calendar:       calendarClient,
 		CalendarGoogle: googleCalendarClient,
+		DataDir:        dataDir,
 	})
 	deviceHandler := handler.NewDeviceHandler(deviceService, synologyService, immichService, database)
 

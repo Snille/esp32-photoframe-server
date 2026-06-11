@@ -1224,14 +1224,47 @@
               <v-table v-else density="comfortable" class="border rounded">
                 <thead>
                   <tr>
+                    <th>Now</th>
                     <th>Name</th>
                     <th>Model</th>
                     <th>Host</th>
+                    <th>Battery</th>
                     <th class="text-right">Action</th>
                   </tr>
                 </thead>
                 <tbody>
                   <tr v-for="device in availableDevices" :key="device.id">
+                    <td>
+                      <v-img
+                        v-if="device.current_thumb_id"
+                        :src="getServedThumbUrl(device.current_thumb_id)"
+                        width="80"
+                        height="50"
+                        cover
+                        class="rounded my-1 bg-surface-variant"
+                        title="Current image on the frame"
+                      >
+                        <template #error>
+                          <div
+                            class="d-flex align-center justify-center fill-height"
+                          >
+                            <v-icon color="grey" size="small"
+                              >mdi-image-off-outline</v-icon
+                            >
+                          </div>
+                        </template>
+                      </v-img>
+                      <div
+                        v-else
+                        class="d-flex align-center justify-center rounded my-1 bg-surface-variant"
+                        style="width: 80px; height: 50px"
+                        title="No image served yet"
+                      >
+                        <v-icon color="grey" size="small"
+                          >mdi-image-outline</v-icon
+                        >
+                      </div>
+                    </td>
                     <td>{{ device.name }}</td>
                     <td>
                       {{
@@ -1240,6 +1273,29 @@
                     </td>
                     <td>
                       {{ device.host }}
+                    </td>
+                    <td>
+                      <div
+                        v-if="(device.battery_percent ?? -1) >= 0"
+                        class="d-flex align-center"
+                        :title="batteryTitle(device)"
+                      >
+                        <v-icon
+                          size="small"
+                          :color="batteryColor(device.battery_percent!)"
+                          >{{ batteryIcon(device.battery_percent!) }}</v-icon
+                        >
+                        <span
+                          class="ml-1"
+                          :class="
+                            device.battery_percent! <= 15
+                              ? 'text-error'
+                              : 'text-medium-emphasis'
+                          "
+                          >{{ device.battery_percent }}%</span
+                        >
+                      </div>
+                      <span v-else class="text-grey">—</span>
                     </td>
                     <td class="text-right">
                       <v-btn
@@ -1261,7 +1317,7 @@
                     </td>
                   </tr>
                   <tr v-if="availableDevices.length === 0">
-                    <td colspan="4" class="text-center text-grey py-4">
+                    <td colspan="6" class="text-center text-grey py-4">
                       No devices added.
                     </td>
                   </tr>
@@ -2890,7 +2946,7 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted, reactive, ref, computed, watch } from 'vue';
+import { onMounted, onUnmounted, reactive, ref, computed, watch } from 'vue';
 import { useSettingsStore } from '../stores/settings';
 import { useSynologyStore } from '../stores/synology';
 import { useImmichStore } from '../stores/immich';
@@ -4445,6 +4501,62 @@ const loadDevices = async () => {
   } finally {
     deviceListLoading.value = false;
   }
+};
+
+// Silent refresh for the auto-poll (no spinner flicker). The edit dialog uses a
+// separate editingDevice copy, so refreshing the list never disrupts editing.
+const refreshDevicesSilently = async () => {
+  try {
+    availableDevices.value = await listDevices();
+  } catch (e) {
+    /* transient — keep the last good list */
+  }
+};
+
+// Poll the Devices list so the current-image thumbnail and battery status track
+// the frames as they check in. Only while the Devices tab is showing and the
+// tab is visible, to avoid needless load.
+let deviceRefreshTimer: ReturnType<typeof setInterval> | null = null;
+onMounted(() => {
+  deviceRefreshTimer = setInterval(() => {
+    if (activeMainTab.value === 'devices' && document.visibilityState === 'visible') {
+      refreshDevicesSilently();
+    }
+  }, 30000);
+});
+onUnmounted(() => {
+  if (deviceRefreshTimer) clearInterval(deviceRefreshTimer);
+});
+
+// Build the public /served-image-thumbnail/<id> URL for the current-image
+// preview. Mirrors getImageUrl's origin/add-on-port logic since the thumbnail
+// route lives on the same server (ingress port 8123 can't serve it directly).
+const getServedThumbUrl = (thumbId: string) => {
+  const path = `served-image-thumbnail/${thumbId}`;
+  const { protocol, hostname, port } = window.location;
+  const addonPort = import.meta.env.VITE_ADDON_PORT || '9607';
+  if (protocol === 'https:') return `${window.location.origin}/${path}`;
+  if (port && port !== '8123' && port !== addonPort) {
+    return `${window.location.origin}/${path}`;
+  }
+  return `${protocol}//${hostname}:${addonPort}/${path}`;
+};
+
+const batteryColor = (p: number) =>
+  p <= 15 ? 'error' : p <= 40 ? 'warning' : 'success';
+
+const batteryIcon = (p: number) => {
+  if (p >= 95) return 'mdi-battery';
+  if (p < 10) return 'mdi-battery-alert-variant-outline';
+  return `mdi-battery-${Math.round(p / 10) * 10}`; // mdi-battery-10 .. -90
+};
+
+const batteryTitle = (device: Device) => {
+  const days = device.battery_days_remaining ?? -1;
+  if (days > 0) {
+    return `Battery ${device.battery_percent}% · ~${days.toFixed(1)} days remaining`;
+  }
+  return `Battery ${device.battery_percent}%`;
 };
 
 const removeDevice = async (id: number) => {

@@ -144,7 +144,11 @@ type Device struct {
 	DeviceProcessingSettings string    `json:"device_processing_settings" gorm:"default:'{}'"`
 	DeviceColorPalette       string    `json:"device_color_palette" gorm:"default:'{}'"`
 	ConfigLastUpdated        int64     `json:"config_last_updated" gorm:"default:0"`
-	CreatedAt                time.Time `json:"created_at"`
+	// CurrentThumbID is the id (unix-nano filename stem) of the most recent
+	// served-image thumbnail for this frame, served via /served-image-thumbnail/:id.
+	// Lets the Devices list show a miniature of what's currently on the frame.
+	CurrentThumbID string    `json:"current_thumb_id" gorm:"default:''"`
+	CreatedAt      time.Time `json:"created_at"`
 }
 
 const (

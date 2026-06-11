@@ -10,11 +10,13 @@ import (
 	"io"
 	"log"
 	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/aitjcize/esp32-photoframe-server/backend/internal/model"
 	"github.com/aitjcize/esp32-photoframe-server/backend/pkg/gcalendar"
 	"github.com/aitjcize/esp32-photoframe-server/backend/pkg/googlephotos"
+	"github.com/aitjcize/esp32-photoframe-server/backend/pkg/imageops"
 	"github.com/aitjcize/esp32-photoframe-server/backend/pkg/photoframe"
 	"github.com/aitjcize/esp32-photoframe-server/backend/pkg/weather"
 	"gorm.io/gorm"
@@ -28,6 +30,7 @@ type DeviceServiceDeps struct {
 	Weather        *weather.Client
 	Calendar       *gcalendar.Client
 	CalendarGoogle *googlephotos.Client
+	DataDir        string
 }
 
 type DeviceService struct {
@@ -38,6 +41,7 @@ type DeviceService struct {
 	weather        *weather.Client
 	calendar       *gcalendar.Client
 	calendarGoogle *googlephotos.Client
+	dataDir        string
 }
 
 func NewDeviceService(deps DeviceServiceDeps) *DeviceService {
@@ -49,6 +53,7 @@ func NewDeviceService(deps DeviceServiceDeps) *DeviceService {
 		weather:        deps.Weather,
 		calendar:       deps.Calendar,
 		calendarGoogle: deps.CalendarGoogle,
+		dataDir:        deps.DataDir,
 	}
 }
 
@@ -470,41 +475,41 @@ func (s *DeviceService) PushToHost(device *model.Device, imagePath string, extra
 
 		var renderErr error
 		finalImg, renderErr = s.renderer.Render(RenderOptions{
-			Layout:        layout,
-			DisplayMode:   displayMode,
-			Width:         logicalW,
-			Height:        logicalH,
-			NativeWidth:   nativeW,
-			NativeHeight:  nativeH,
-			Photo:         srcImg,
-			ShowDate:      device.ShowDate,
-			ShowPhotoDate: device.ShowPhotoDate,
-			PhotoDate:     photoTakenAt,
-			ShowWeather:   device.ShowWeather,
-			Weather:       weatherData,
-			ShowCalendar:  device.ShowCalendar,
-			Events:        events,
-			Timezone:      deviceTimezone,
-			DateFormat:    device.DateFormat,
-			ShowBattery:       showBattery,
-			BatteryPercent:    batteryPercent,
-			DatePosition:      device.DatePosition,
-			PhotoDatePosition: device.PhotoDatePosition,
-			WeatherPosition:   device.WeatherPosition,
-			BatteryPosition:   device.BatteryPosition,
-			BatteryStyle:      device.BatteryStyle,
-			BatteryRotation:   device.BatteryRotation,
-			BatteryTextSide:   device.BatteryTextSide,
-			BatteryIconScale:  device.BatteryIconScale,
-			OverlayScale:      device.OverlayScale,
-			OverlayFont:       device.OverlayFont,
-			OverlayWeight:     device.OverlayWeight,
-			ShowNames:         showNames,
-			Names:             namesStr,
-			NamesPosition:     device.NamesPosition,
-			ShowLocation:      showLocation,
-			Location:          locationStr,
-			LocationPosition:  device.LocationPosition,
+			Layout:              layout,
+			DisplayMode:         displayMode,
+			Width:               logicalW,
+			Height:              logicalH,
+			NativeWidth:         nativeW,
+			NativeHeight:        nativeH,
+			Photo:               srcImg,
+			ShowDate:            device.ShowDate,
+			ShowPhotoDate:       device.ShowPhotoDate,
+			PhotoDate:           photoTakenAt,
+			ShowWeather:         device.ShowWeather,
+			Weather:             weatherData,
+			ShowCalendar:        device.ShowCalendar,
+			Events:              events,
+			Timezone:            deviceTimezone,
+			DateFormat:          device.DateFormat,
+			ShowBattery:         showBattery,
+			BatteryPercent:      batteryPercent,
+			DatePosition:        device.DatePosition,
+			PhotoDatePosition:   device.PhotoDatePosition,
+			WeatherPosition:     device.WeatherPosition,
+			BatteryPosition:     device.BatteryPosition,
+			BatteryStyle:        device.BatteryStyle,
+			BatteryRotation:     device.BatteryRotation,
+			BatteryTextSide:     device.BatteryTextSide,
+			BatteryIconScale:    device.BatteryIconScale,
+			OverlayScale:        device.OverlayScale,
+			OverlayFont:         device.OverlayFont,
+			OverlayWeight:       device.OverlayWeight,
+			ShowNames:           showNames,
+			Names:               namesStr,
+			NamesPosition:       device.NamesPosition,
+			ShowLocation:        showLocation,
+			Location:            locationStr,
+			LocationPosition:    device.LocationPosition,
 			ShowDescription:     showDescription,
 			Description:         descriptionStr,
 			DescriptionPosition: device.DescriptionPosition,
@@ -559,6 +564,33 @@ func (s *DeviceService) PushToHost(device *model.Device, imagePath string, extra
 	processedData, thumbData, err := s.processor.ProcessImage(finalImg, opts)
 	if err != nil {
 		return fmt.Errorf("processing failed: %w", err)
+	}
+
+	// Record the rendered image as the frame's current thumbnail so the Devices
+	// list shows what a server-initiated push put on the frame (the pull path
+	// does the same in image.go). Built from the *processed* (dithered) output
+	// so it truthfully reflects grayscale / palette / tone. Served publicly via
+	// /served-image-thumbnail/:id.
+	if s.dataDir != "" {
+		thumbFormat := "epdgz"
+		if opts["format"] == "png" {
+			thumbFormat = "png"
+		}
+		rotateThumb := logicalW != nativeW || logicalH != nativeH
+		if previewJPEG, terr := imageops.ProcessedToThumbnailJPEG(processedData, thumbFormat, nativeW, nativeH, 400, rotateThumb); terr != nil {
+			log.Printf("Failed to build current thumbnail for device %d: %v", device.ID, terr)
+		} else {
+			thumbID := fmt.Sprintf("%d", time.Now().UnixNano())
+			thumbPath := filepath.Join(s.dataDir, fmt.Sprintf("thumb_%s.jpg", thumbID))
+			if writeErr := os.WriteFile(thumbPath, previewJPEG, 0644); writeErr == nil {
+				if device.CurrentThumbID != "" && device.CurrentThumbID != thumbID {
+					os.Remove(filepath.Join(s.dataDir, fmt.Sprintf("thumb_%s.jpg", device.CurrentThumbID)))
+				}
+				s.db.Model(device).Update("current_thumb_id", thumbID)
+			} else {
+				log.Printf("Failed to save current thumbnail for device %d: %v", device.ID, writeErr)
+			}
+		}
 	}
 
 	if rawEPD {

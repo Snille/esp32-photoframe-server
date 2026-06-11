@@ -1,5 +1,13 @@
 # Changelog
 
+## v1.15.0
+
+### Added
+- **Live status in the Devices list**: each row now shows a **miniature of the image currently on the frame** and its **battery status** (percent + icon, red at ≤15%, with days-remaining on hover) — the same battery data as the device's Power tab, at a glance. The list auto-refreshes every 30 s while the Devices tab is open. Migration 000039 adds `devices.current_thumb_id`.
+
+### Fixed
+- **The Devices-list miniature truthfully reflects the applied processing** (grayscale, palette, tone). It is built from the frame's actual dithered output (decoding the Spectra-6 EPD buffer, or the dithered PNG) rather than the converter's own thumbnail, which is snapshotted pre-dither and ignored those filters. The same fix makes the companion app's `X-Thumbnail-URL` truthful. The miniature is un-rotated from native panel layout back to the viewing orientation.
+
 ## v1.14.0
 
 ### Fixed

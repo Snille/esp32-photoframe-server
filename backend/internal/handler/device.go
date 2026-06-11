@@ -42,7 +42,31 @@ func (h *DeviceHandler) ListDevices(c echo.Context) error {
 	if err != nil {
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": err.Error()})
 	}
-	return c.JSON(http.StatusOK, devices)
+
+	// Enrich each device with its latest battery estimate so the Devices list
+	// can show battery status (and a current-image thumbnail via the device's
+	// CurrentThumbID) without a per-row API call.
+	type deviceListItem struct {
+		model.Device
+		BatteryPercent       int     `json:"battery_percent"`        // -1 = no data yet
+		BatteryDaysRemaining float64 `json:"battery_days_remaining"` // -1 = unknown
+		BatteryTrend         string  `json:"battery_trend"`
+	}
+	items := make([]deviceListItem, 0, len(devices))
+	for _, d := range devices {
+		est := h.battery.Estimate(d.ID)
+		pct := -1
+		if est.HasData {
+			pct = est.CurrentPercent
+		}
+		items = append(items, deviceListItem{
+			Device:               d,
+			BatteryPercent:       pct,
+			BatteryDaysRemaining: est.DaysRemaining,
+			BatteryTrend:         est.Trend,
+		})
+	}
+	return c.JSON(http.StatusOK, items)
 }
 
 // POST /api/devices
