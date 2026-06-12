@@ -315,6 +315,72 @@ export const pushToDevice = async (deviceID: number, imageID: number) => {
   return response.data;
 };
 
+export const pushPublicArtToDevice = async (
+  deviceID: number,
+  candidate: unknown,
+  composition: unknown
+) => {
+  const response = await api.post(`/devices/${deviceID}/push`, {
+    public_art: {
+      candidate,
+      composition,
+    },
+  });
+  return response.data;
+};
+
+// ── Public Art ──────────────────────────────────────────────────────────────
+
+export type PublicArtSearchConfig = {
+  provider?: string;
+  query?: string;
+  orientation?: string;
+  min_image_long_edge?: number;
+  preferred_image_long_edge?: number;
+  limit?: number;
+};
+
+export const searchPublicArt = async (config: PublicArtSearchConfig) => {
+  const response = await api.post('public-art/search', config);
+  return response.data;
+};
+
+export const selectPublicArt = async (
+  candidate: unknown,
+  composition: unknown
+) => {
+  const response = await api.post('public-art/select', {
+    candidate,
+    composition,
+  });
+  return response.data;
+};
+
+export const clearPublicArtSelection = async () => {
+  const response = await api.delete('public-art/select');
+  return response.data;
+};
+
+const apiBase = () => (api.defaults.baseURL || 'api').replace(/\/$/, '');
+
+// Public (no-auth) image endpoints — used directly as <img> src.
+export const publicArtThumbnailSrc = (candidate: {
+  image_url?: string;
+  thumbnail_url?: string;
+}) => {
+  const params = new URLSearchParams();
+  if (candidate.image_url) params.set('candidate_image_url', candidate.image_url);
+  if (candidate.thumbnail_url)
+    params.set('candidate_thumbnail_url', candidate.thumbnail_url);
+  return `${apiBase()}/public-art/thumbnail?${params.toString()}`;
+};
+
+export const publicArtPreviewSrc = (params: Record<string, string>) => {
+  return `${apiBase()}/public-art/preview?${new URLSearchParams(
+    params
+  ).toString()}`;
+};
+
 export const getDeviceConfig = async (id: number) => {
   const response = await api.get(`/devices/${id}/config`);
   return response.data;

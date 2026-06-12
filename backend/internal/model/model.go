@@ -19,6 +19,7 @@ const (
 	SourceURLProxy       = "url_proxy"
 	SourceAIGeneration   = "ai_generation"
 	SourceImmich         = "immich"
+	SourcePublicArt      = "public_art"
 	SourceFractal        = "fractal"
 	SourceDLA            = "dla"
 )
@@ -511,4 +512,19 @@ type GenerativeState struct {
 	Source    string    `gorm:"primaryKey" json:"source"`
 	State     []byte    `json:"-"`
 	UpdatedAt time.Time `json:"updated_at"`
+}
+
+// PublicArtServingHistory tracks which artworks have been served to a device
+// within a deduplication window, so auto-rotate cycles don't repeat the same
+// artwork too soon.
+type PublicArtServingHistory struct {
+	ID        uint      `gorm:"primaryKey" json:"id"`
+	DeviceID  uint      `gorm:"index:idx_pah_device_served,priority:1" json:"device_id"`
+	Source    string    `gorm:"column:source;not null" json:"source"`         // e.g. "aic", "rijksmuseum"
+	ArtworkID string    `gorm:"column:artwork_id;not null" json:"artwork_id"` // e.g. "aic:12345"
+	ServedAt  time.Time `gorm:"index:idx_pah_device_served,priority:2" json:"served_at"`
+}
+
+func (PublicArtServingHistory) TableName() string {
+	return "public_art_serving_history"
 }

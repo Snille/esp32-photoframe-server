@@ -53,6 +53,7 @@
               <v-tab value="synology_photos">Synology</v-tab>
               <v-tab value="url">URL Proxy</v-tab>
               <v-tab value="ai_generation">AI Generation</v-tab>
+              <v-tab value="public_art">Public Art</v-tab>
             </v-tabs>
 
             <v-text-field
@@ -964,6 +965,36 @@
                   </v-expansion-panels>
 
                   <v-btn color="primary" @click="save">Save AI Settings</v-btn>
+                </v-card-text>
+              </v-window-item>
+
+              <!-- Public Art -->
+              <v-window-item value="public_art">
+                <v-card-text>
+                  <v-alert type="info" variant="tonal" class="mb-4" density="compact">
+                    Public-domain / open-access artwork from museum collections
+                    (Art Institute of Chicago, Cleveland Museum of Art). Point a
+                    frame's source at <code>public_art</code> to auto-rotate by
+                    the query below, or lock a single artwork from the search.
+                  </v-alert>
+
+                  <v-text-field
+                    :model-value="getImageUrl('public_art')"
+                    label="Image Endpoint URL (for firmware config)"
+                    readonly
+                    variant="outlined"
+                    density="compact"
+                    append-inner-icon="mdi-content-copy"
+                    @click:append-inner="copyToClipboard(getImageUrl('public_art'))"
+                    class="mb-4"
+                  ></v-text-field>
+
+                  <PublicArtPanel
+                    :form="form"
+                    :devices="availableDevices"
+                    :save="saveSettingsInternal"
+                    @message="(m: string, e?: boolean) => showMessage(m, e)"
+                  />
                 </v-card-text>
               </v-window-item>
             </v-window>
@@ -3023,6 +3054,7 @@ import {
 } from '../api';
 import Gallery from './Gallery.vue';
 import ConfirmDialog from './ConfirmDialog.vue';
+import PublicArtPanel from './PublicArtPanel.vue';
 
 const store = useSettingsStore();
 const synologyStore = useSynologyStore();
@@ -3074,6 +3106,7 @@ const sourceTitles: Record<string, string> = {
   synology_photos: 'Synology Photos',
   url_proxy: 'URL Proxy',
   ai_generation: 'AI Generation',
+  public_art: 'Public Art',
   fractal: 'Fractal (Mandelbrot zoom)',
   dla: 'DLA (diffusion-limited aggregation)',
 };
@@ -3279,6 +3312,14 @@ const deviceConfig = reactive<Record<string, any>>({
   ha_url: '',
   openai_api_key: '',
   google_api_key: '',
+  minimax_global_api_key: '',
+  minimax_china_api_key: '',
+  // Public Art (Cleveland Museum open-access artwork source)
+  public_art_provider: 'cma',
+  public_art_query: 'art',
+  public_art_orientation: 'auto',
+  public_art_min_image_long_edge: 1600,
+  public_art_preferred_image_long_edge: 2000,
 });
 
 // Device processing settings (synced remotely)
@@ -4803,10 +4844,32 @@ onMounted(async () => {
     ),
     openai_api_key: store.settings.openai_api_key || '',
     google_api_key: store.settings.google_api_key || '',
+    minimax_global_api_key: store.settings.minimax_global_api_key || '',
+    minimax_china_api_key: store.settings.minimax_china_api_key || '',
     comfyui_host: store.settings.comfyui_host || '',
     comfyui_workflow: store.settings.comfyui_workflow || '',
     device_image_base_url: store.settings.device_image_base_url || '',
   });
+
+  // Public Art config is stored server-side as a single JSON blob
+  // (public_art_config) consumed by the auto-rotate source. Unpack it into
+  // the individual form fields the Public Art tab edits.
+  try {
+    const pa = store.settings.public_art_config
+      ? JSON.parse(store.settings.public_art_config)
+      : {};
+    form.public_art_provider = 'cma';
+    form.public_art_query = pa.query || 'art';
+    form.public_art_orientation =
+      pa.orientation === 'landscape' || pa.orientation === 'portrait'
+        ? pa.orientation
+        : 'auto';
+    form.public_art_min_image_long_edge = pa.min_image_long_edge || 1600;
+    form.public_art_preferred_image_long_edge =
+      pa.preferred_image_long_edge || 2000;
+  } catch (e) {
+    console.error('Failed to parse public_art_config', e);
+  }
 
   // Load cached albums if available
   if (store.settings.synology_albums_cache) {
@@ -4900,9 +4963,24 @@ const saveSettingsInternal = async () => {
     ),
     openai_api_key: form.openai_api_key,
     google_api_key: form.google_api_key,
+    minimax_global_api_key: form.minimax_global_api_key,
+    minimax_china_api_key: form.minimax_china_api_key,
     comfyui_host: form.comfyui_host,
     comfyui_workflow: form.comfyui_workflow,
     device_image_base_url: (form.device_image_base_url || '').trim(),
+    public_art_config: JSON.stringify({
+      provider: form.public_art_provider || 'cma',
+      query: form.public_art_query || 'art',
+      // Only persist an explicit orientation; auto/any defer to the frame.
+      orientation:
+        form.public_art_orientation === 'landscape' ||
+        form.public_art_orientation === 'portrait'
+          ? form.public_art_orientation
+          : '',
+      min_image_long_edge: Number(form.public_art_min_image_long_edge) || 1600,
+      preferred_image_long_edge:
+        Number(form.public_art_preferred_image_long_edge) || 2000,
+    }),
   });
 };
 

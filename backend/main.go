@@ -11,6 +11,7 @@ import (
 	"github.com/aitjcize/esp32-photoframe-server/backend/internal/imagesource"
 	"github.com/aitjcize/esp32-photoframe-server/backend/internal/middleware"
 	"github.com/aitjcize/esp32-photoframe-server/backend/internal/model"
+	"github.com/aitjcize/esp32-photoframe-server/backend/internal/publicart"
 	"github.com/aitjcize/esp32-photoframe-server/backend/internal/service"
 	"github.com/aitjcize/esp32-photoframe-server/backend/pkg/gcalendar"
 	"github.com/aitjcize/esp32-photoframe-server/backend/pkg/googlephotos"
@@ -179,6 +180,16 @@ func main() {
 	aiGenerationService := service.NewAIGenerationService(settingsService)
 	// Initialize Generative (procedural) Service — fractal / DLA / …
 	generativeService := service.NewGenerativeService(database)
+	// Initialize Public Art Service — server-side open-access museum artwork
+	// from the Cleveland Museum of Art (open API + CDN, no key, reliable for
+	// both browse thumbnails and the frame's hourly pull).
+	publicArtService := publicart.NewService(publicart.ServiceOptions{
+		Provider:       publicart.NewCMAProvider("", nil),
+		ConfigProvider: publicart.NewSettingsConfigProvider(settingsService),
+		Settings:       settingsService,
+		CacheDir:       filepath.Join(dataDir, "public_art_cache"),
+		HistoryDB:      publicart.NewDedupHistoryDB(database),
+	})
 
 	// Image-source registry: every image source — synthetic and library —
 	// registers here as its own plugin. The order below mirrors the order
@@ -191,6 +202,7 @@ func main() {
 	sourceRegistry.Register(service.NewSynologyPhotosSource(database, synologyService))
 	sourceRegistry.Register(service.NewURLProxySource(database))
 	sourceRegistry.Register(service.NewAIGenerationSource(aiGenerationService))
+	sourceRegistry.Register(service.NewPublicArtSource(publicArtService))
 	sourceRegistry.Register(service.NewFractalSource(generativeService))
 	sourceRegistry.Register(service.NewDLASource(generativeService))
 
@@ -248,6 +260,7 @@ func main() {
 		DB:             database,
 		DataDir:        dataDir,
 	})
+	pah := handler.NewPublicArtHandler(publicArtService, settingsService)
 	ch := handler.NewCalendarHandler(googleCalendarClient, calendarClient)
 	ah := handler.NewAuthHandler(authService)
 
@@ -288,6 +301,12 @@ func main() {
 	// Let's protect main image endpoint.
 	e.GET("/served-image-thumbnail/:id", ih.GetServedImageThumbnail)
 	e.GET("/served-image-full/:id", ih.GetServedImageFull)
+
+	// Public Art thumbnail/preview — only fetches from public external museum
+	// IIIF URLs and writes nothing to the DB, so no auth is needed. These are
+	// GET image endpoints because the browser loads them through an <img> tag.
+	e.GET("/api/public-art/thumbnail", pah.Thumbnail)
+	e.GET("/api/public-art/preview", pah.Preview)
 
 	// Device Config Sync (Protected - device token or session auth)
 	e.POST("/api/device-config/sync", ih.SyncDeviceConfig, authMiddleware)
@@ -332,6 +351,12 @@ func main() {
 	protectedApi.GET("/gallery/urls", gh.ListURLSources)
 	protectedApi.PUT("/gallery/urls/:id", gh.UpdateURLSource)
 	protectedApi.DELETE("/gallery/urls/:id", gh.DeleteURLSource)
+
+	// Public Art (Protected)
+	protectedApi.POST("/public-art/search", pah.Search)
+	protectedApi.POST("/public-art/select", pah.Select)
+	protectedApi.DELETE("/public-art/select", pah.ClearSelection)
+	protectedApi.POST("/public-art/preview", pah.Preview)
 
 	// Google Picker (Protected)
 	protectedApi.GET("/google/picker/session", googleHandler.CreatePickerSession)
