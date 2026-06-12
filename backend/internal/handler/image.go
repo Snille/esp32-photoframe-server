@@ -49,6 +49,7 @@ type ImageHandlerDeps struct {
 	Auth           *service.AuthService
 	DB             *gorm.DB
 	DataDir        string
+	MQTT           *service.MQTTService
 }
 
 type ImageHandler struct {
@@ -62,6 +63,7 @@ type ImageHandler struct {
 	auth           *service.AuthService
 	db             *gorm.DB
 	battery        *service.BatteryService
+	mqtt           *service.MQTTService
 	dataDir        string
 }
 
@@ -77,6 +79,7 @@ func NewImageHandler(deps ImageHandlerDeps) *ImageHandler {
 		auth:           deps.Auth,
 		db:             deps.DB,
 		battery:        service.NewBatteryService(deps.DB),
+		mqtt:           deps.MQTT,
 		dataDir:        deps.DataDir,
 	}
 }
@@ -174,6 +177,13 @@ func (h *ImageHandler) ServeImage(c echo.Context) error {
 			}
 		}
 		go h.battery.RecordSample(device.ID, batteryPercent, voltageMV)
+	}
+
+	// Notify the MQTT bridge that this frame just checked in, so Home Assistant
+	// gets fresh battery / current-image / last-seen state. No-op when MQTT is
+	// disabled; the publish is delayed + async so it never affects the response.
+	if deviceFound && !preview && h.mqtt != nil {
+		h.mqtt.NotifyDeviceUpdated(device.ID)
 	}
 
 	// ALWAYS overrides logical resolution/orientation from Headers if present

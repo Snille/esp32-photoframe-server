@@ -24,6 +24,7 @@ type DeviceHandler struct {
 	synologyService *service.SynologyService
 	immichService   *service.ImmichService
 	battery         *service.BatteryService
+	mqtt            *service.MQTTService
 	db              *gorm.DB
 }
 
@@ -36,6 +37,10 @@ func NewDeviceHandler(deviceService *service.DeviceService, synologyService *ser
 		db:              db,
 	}
 }
+
+// SetMQTT wires the optional MQTT bridge so device CRUD can refresh / clean up
+// Home Assistant entities.
+func (h *DeviceHandler) SetMQTT(m *service.MQTTService) { h.mqtt = m }
 
 // ... existing methods ... (List, Add, Update, Delete, Push)
 
@@ -159,6 +164,9 @@ func (h *DeviceHandler) AddDevice(c echo.Context) error {
 	if device.ImmichAlbumIDs != "" && h.immichService != nil {
 		go h.immichService.ImportPhotos()
 	}
+	if h.mqtt != nil {
+		h.mqtt.NotifyDeviceUpdated(device.ID)
+	}
 	return c.JSON(http.StatusCreated, device)
 }
 
@@ -252,6 +260,9 @@ func (h *DeviceHandler) UpdateDevice(c echo.Context) error {
 	if device.ImmichAlbumIDs != "" && h.immichService != nil {
 		go h.immichService.ImportPhotos()
 	}
+	if h.mqtt != nil {
+		h.mqtt.NotifyDeviceUpdated(device.ID)
+	}
 	return c.JSON(http.StatusOK, device)
 }
 
@@ -285,6 +296,9 @@ func (h *DeviceHandler) DeleteDevice(c echo.Context) error {
 	id, _ := strconv.Atoi(c.Param("id"))
 	if err := h.deviceService.DeleteDevice(uint(id)); err != nil {
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": err.Error()})
+	}
+	if h.mqtt != nil {
+		h.mqtt.RemoveDevice(uint(id))
 	}
 	return c.JSON(http.StatusOK, map[string]string{"status": "deleted"})
 }

@@ -35,6 +35,7 @@
         <v-tabs v-model="activeMainTab" color="primary" grow>
           <v-tab value="devices">Devices</v-tab>
           <v-tab value="datasources">Data Sources</v-tab>
+          <v-tab value="homeassistant">Home Assistant</v-tab>
           <v-tab value="security">Security</v-tab>
         </v-tabs>
 
@@ -1218,6 +1219,132 @@
               </v-table>
             </v-card-text>
           </v-window-item>
+
+          <!-- Home Assistant (MQTT) Tab -->
+          <v-window-item value="homeassistant">
+            <v-card-text>
+              <v-alert type="info" variant="tonal" density="compact" class="mb-4">
+                Publish each frame to your Home Assistant MQTT broker (e.g. the
+                Mosquitto add-on) using HA's MQTT discovery. Each frame appears
+                as a device with <strong>battery</strong>, <strong>days
+                remaining</strong>, <strong>last seen</strong>,
+                <strong>source</strong> and <strong>current image</strong>
+                entities — ready for automations. The server is a plain MQTT
+                client; it does not need to run as an HA add-on.
+              </v-alert>
+
+              <div class="d-flex align-center ga-3 mb-4">
+                <v-switch
+                  v-model="form.mqtt_enabled"
+                  color="primary"
+                  label="Enable MQTT bridge"
+                  hide-details
+                  density="compact"
+                  @update:model-value="saveSettingsInternal()"
+                ></v-switch>
+                <v-chip
+                  :color="mqttStatus.connected ? 'success' : (form.mqtt_enabled ? 'warning' : 'grey')"
+                  variant="tonal"
+                  size="small"
+                >
+                  <v-icon
+                    :icon="mqttStatus.connected ? 'mdi-lan-connect' : 'mdi-lan-disconnect'"
+                    start
+                    size="small"
+                  ></v-icon>
+                  {{ mqttStatus.connected ? 'Connected' : (form.mqtt_enabled ? 'Not connected' : 'Disabled') }}
+                </v-chip>
+                <v-btn
+                  variant="text"
+                  size="small"
+                  prepend-icon="mdi-refresh"
+                  @click="refreshMqttStatus"
+                >
+                  Refresh
+                </v-btn>
+              </div>
+
+              <v-row>
+                <v-col cols="12" md="7">
+                  <v-text-field
+                    v-model="form.mqtt_host"
+                    label="Broker host"
+                    placeholder="e.g. 192.168.1.10 or homeassistant.local"
+                    variant="outlined"
+                    density="compact"
+                    prepend-inner-icon="mdi-server-network"
+                  ></v-text-field>
+                </v-col>
+                <v-col cols="12" md="5">
+                  <v-text-field
+                    v-model.number="form.mqtt_port"
+                    label="Broker port"
+                    type="number"
+                    placeholder="1883"
+                    variant="outlined"
+                    density="compact"
+                  ></v-text-field>
+                </v-col>
+              </v-row>
+              <v-row>
+                <v-col cols="12" md="6">
+                  <v-text-field
+                    v-model="form.mqtt_username"
+                    label="MQTT username"
+                    variant="outlined"
+                    density="compact"
+                    autocomplete="off"
+                  ></v-text-field>
+                </v-col>
+                <v-col cols="12" md="6">
+                  <v-text-field
+                    v-model="form.mqtt_password"
+                    label="MQTT password"
+                    type="password"
+                    variant="outlined"
+                    density="compact"
+                    autocomplete="new-password"
+                  ></v-text-field>
+                </v-col>
+              </v-row>
+
+              <v-expansion-panels variant="accordion" class="mb-4">
+                <v-expansion-panel title="Advanced (topics)">
+                  <v-expansion-panel-text>
+                    <v-row>
+                      <v-col cols="12" md="6">
+                        <v-text-field
+                          v-model="form.mqtt_discovery_prefix"
+                          label="Discovery prefix"
+                          placeholder="homeassistant"
+                          variant="outlined"
+                          density="compact"
+                          hint="Must match HA's MQTT discovery prefix (default homeassistant)."
+                          persistent-hint
+                        ></v-text-field>
+                      </v-col>
+                      <v-col cols="12" md="6">
+                        <v-text-field
+                          v-model="form.mqtt_base_topic"
+                          label="Base topic"
+                          placeholder="esp32photoframe"
+                          variant="outlined"
+                          density="compact"
+                          hint="Root for this server's state/image topics."
+                          persistent-hint
+                        ></v-text-field>
+                      </v-col>
+                    </v-row>
+                  </v-expansion-panel-text>
+                </v-expansion-panel>
+              </v-expansion-panels>
+
+              <v-btn color="primary" prepend-icon="mdi-content-save" @click="saveMqttSettings">
+                Save &amp; Connect
+              </v-btn>
+            </v-card-text>
+          </v-window-item>
+
           <!-- Devices Tab -->
           <v-window-item value="devices">
             <v-card-text>
@@ -3051,6 +3178,7 @@ import {
   listCalendars,
   googleCalendarLogin,
   googleCalendarLogout,
+  getMqttStatus,
 } from '../api';
 import Gallery from './Gallery.vue';
 import ConfirmDialog from './ConfirmDialog.vue';
@@ -3064,6 +3192,29 @@ const authStore = useAuthStore();
 const galleryStore = useGalleryStore();
 const activeMainTab = ref('devices');
 const activeDataSourceTab = ref('gallery');
+
+// Home Assistant / MQTT bridge connection status (polled for the Settings tab).
+const mqttStatus = reactive({ enabled: false, connected: false });
+const refreshMqttStatus = async () => {
+  try {
+    const s = await getMqttStatus();
+    mqttStatus.enabled = s.enabled;
+    mqttStatus.connected = s.connected;
+  } catch {
+    mqttStatus.connected = false;
+  }
+};
+const saveMqttSettings = async () => {
+  await saveSettingsInternal();
+  showMessage('MQTT settings saved — connecting…');
+  // Give the bridge a moment to (re)connect, then reflect status.
+  setTimeout(refreshMqttStatus, 1500);
+  setTimeout(refreshMqttStatus, 4000);
+};
+watch(activeMainTab, (t) => {
+  if (t === 'homeassistant') refreshMqttStatus();
+});
+
 const galleryTab = ref('gallery');
 const confirmDialog = ref();
 
@@ -3314,6 +3465,14 @@ const deviceConfig = reactive<Record<string, any>>({
   google_api_key: '',
   minimax_global_api_key: '',
   minimax_china_api_key: '',
+  // Home Assistant MQTT bridge
+  mqtt_enabled: false,
+  mqtt_host: '',
+  mqtt_port: 1883,
+  mqtt_username: '',
+  mqtt_password: '',
+  mqtt_discovery_prefix: 'homeassistant',
+  mqtt_base_topic: 'esp32photoframe',
   // Public Art (Cleveland Museum open-access artwork source)
   public_art_provider: 'cma',
   public_art_query: 'art',
@@ -4849,6 +5008,13 @@ onMounted(async () => {
     comfyui_host: store.settings.comfyui_host || '',
     comfyui_workflow: store.settings.comfyui_workflow || '',
     device_image_base_url: store.settings.device_image_base_url || '',
+    mqtt_enabled: store.settings.mqtt_enabled === 'true',
+    mqtt_host: store.settings.mqtt_host || '',
+    mqtt_port: parseInt(store.settings.mqtt_port || '1883'),
+    mqtt_username: store.settings.mqtt_username || '',
+    mqtt_password: store.settings.mqtt_password || '',
+    mqtt_discovery_prefix: store.settings.mqtt_discovery_prefix || 'homeassistant',
+    mqtt_base_topic: store.settings.mqtt_base_topic || 'esp32photoframe',
   });
 
   // Public Art config is stored server-side as a single JSON blob
@@ -4968,6 +5134,13 @@ const saveSettingsInternal = async () => {
     comfyui_host: form.comfyui_host,
     comfyui_workflow: form.comfyui_workflow,
     device_image_base_url: (form.device_image_base_url || '').trim(),
+    mqtt_enabled: String(form.mqtt_enabled),
+    mqtt_host: (form.mqtt_host || '').trim(),
+    mqtt_port: String(form.mqtt_port || 1883),
+    mqtt_username: form.mqtt_username || '',
+    mqtt_password: form.mqtt_password || '',
+    mqtt_discovery_prefix: (form.mqtt_discovery_prefix || 'homeassistant').trim(),
+    mqtt_base_topic: (form.mqtt_base_topic || 'esp32photoframe').trim(),
     public_art_config: JSON.stringify({
       provider: form.public_art_provider || 'cma',
       query: form.public_art_query || 'art',

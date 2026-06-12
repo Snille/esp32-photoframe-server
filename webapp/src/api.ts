@@ -381,6 +381,14 @@ export const publicArtPreviewSrc = (params: Record<string, string>) => {
   ).toString()}`;
 };
 
+export const getMqttStatus = async (): Promise<{
+  enabled: boolean;
+  connected: boolean;
+}> => {
+  const response = await api.get('mqtt/status');
+  return response.data;
+};
+
 export const getDeviceConfig = async (id: number) => {
   const response = await api.get(`/devices/${id}/config`);
   return response.data;

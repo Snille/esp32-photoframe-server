@@ -230,6 +230,14 @@ func main() {
 	})
 	deviceHandler := handler.NewDeviceHandler(deviceService, synologyService, immichService, database)
 
+	// Initialize MQTT bridge — publishes each frame to a Home Assistant MQTT
+	// broker (HA discovery: battery / status / current-image entities). Off
+	// until configured in Settings; the server is a plain MQTT client and does
+	// not need to run as an HA add-on.
+	mqttService := service.NewMQTTService(database, settingsService, service.NewBatteryService(database), dataDir)
+	mqttService.Start()
+	deviceHandler.SetMQTT(mqttService)
+
 	// Initialize Telegram Service
 	// Pass deviceService as Pusher
 	telegramService := service.NewTelegramService(database, dataDir, settingsService, deviceService)
@@ -259,6 +267,7 @@ func main() {
 		Auth:           authService,
 		DB:             database,
 		DataDir:        dataDir,
+		MQTT:           mqttService,
 	})
 	pah := handler.NewPublicArtHandler(publicArtService, settingsService)
 	ch := handler.NewCalendarHandler(googleCalendarClient, calendarClient)
@@ -351,6 +360,12 @@ func main() {
 	protectedApi.GET("/gallery/urls", gh.ListURLSources)
 	protectedApi.PUT("/gallery/urls/:id", gh.UpdateURLSource)
 	protectedApi.DELETE("/gallery/urls/:id", gh.DeleteURLSource)
+
+	// MQTT bridge status (Protected) — {enabled, connected} for the Settings UI.
+	protectedApi.GET("/mqtt/status", func(c echo.Context) error {
+		enabled, connected := mqttService.Status()
+		return c.JSON(http.StatusOK, map[string]bool{"enabled": enabled, "connected": connected})
+	})
 
 	// Public Art (Protected)
 	protectedApi.POST("/public-art/search", pah.Search)
