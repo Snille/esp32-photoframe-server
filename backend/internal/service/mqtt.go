@@ -132,7 +132,15 @@ func (s *MQTTService) imageTopic(id uint) string {
 func (s *MQTTService) connect(cfg mqttConfig) {
 	opts := mqtt.NewClientOptions()
 	opts.AddBroker(fmt.Sprintf("tcp://%s:%d", cfg.host, cfg.port))
-	opts.SetClientID("esp32-photoframe-server")
+	// Unique client ID per instance: a fixed ID means two servers sharing one
+	// broker (e.g. dev + prod, or two containers) kick each other off in an
+	// endless connect/EOF loop. The hostname is the container ID under Docker,
+	// so it is unique per running instance.
+	clientID := "esp32-photoframe-server"
+	if host, err := os.Hostname(); err == nil && host != "" {
+		clientID = clientID + "-" + host
+	}
+	opts.SetClientID(clientID)
 	if cfg.username != "" {
 		opts.SetUsername(cfg.username)
 		opts.SetPassword(cfg.password)

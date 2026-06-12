@@ -1,5 +1,10 @@
 # Changelog
 
+## v1.17.2
+
+### Fixed
+- **MQTT bridge no longer fights itself when two servers share one broker.** The MQTT client used a fixed client ID (`esp32-photoframe-server`), so running two instances against the same broker (e.g. a Portainer prod container plus a dev container, or any second copy) made them repeatedly kick each other off in an endless `connected → connection lost: EOF` loop. The client ID is now made unique per instance by appending the hostname (the container ID under Docker), so multiple servers can connect to the same Home Assistant broker without disconnecting one another.
+
 ## v1.17.1
 
 ### Fixed
