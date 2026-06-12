@@ -1242,7 +1242,9 @@
                         height="50"
                         cover
                         class="rounded my-1 bg-surface-variant"
-                        title="Current image on the frame"
+                        style="cursor: zoom-in"
+                        title="Click to view the full image on the frame"
+                        @click="openFullImage(device)"
                       >
                         <template #error>
                           <div
@@ -1324,6 +1326,41 @@
                 </tbody>
               </v-table>
 
+              <!-- Full current-image lightbox (click a Devices-list miniature) -->
+              <v-dialog v-model="fullImageDialog" width="auto" max-width="96vw">
+                <v-card>
+                  <v-toolbar density="compact" color="surface">
+                    <v-toolbar-title class="text-body-1">{{
+                      fullImageTitle
+                    }}</v-toolbar-title>
+                    <v-spacer></v-spacer>
+                    <v-btn
+                      icon="mdi-close"
+                      variant="text"
+                      @click="fullImageDialog = false"
+                    ></v-btn>
+                  </v-toolbar>
+                  <v-img
+                    :src="fullImageUrl"
+                    max-height="85vh"
+                    max-width="96vw"
+                    contain
+                    class="bg-black"
+                  >
+                    <template #placeholder>
+                      <div
+                        class="d-flex align-center justify-center fill-height"
+                      >
+                        <v-progress-circular
+                          indeterminate
+                          color="primary"
+                        ></v-progress-circular>
+                      </div>
+                    </template>
+                  </v-img>
+                </v-card>
+              </v-dialog>
+
               <!-- Edit Device Dialog (tabbed like device webapp) -->
               <v-dialog
                 v-model="showEditDeviceDialog"
@@ -1402,26 +1439,34 @@
                         <v-row>
                           <v-col cols="12" md="6">
                             <v-select
-                              v-model="deviceConfig.display_orientation"
-                              :items="orientationOptions"
-                              label="Display Orientation"
-                              variant="outlined"
-                              density="compact"
-                            ></v-select>
-                          </v-col>
-                          <v-col cols="12" md="6">
-                            <v-select
                               v-model="deviceConfig.display_rotation_deg"
                               :items="[
-                                { title: '0°', value: 0 },
+                                { title: '0° — native', value: 0 },
                                 { title: '90°', value: 90 },
                                 { title: '180°', value: 180 },
                                 { title: '270°', value: 270 },
                               ]"
-                              label="Display Rotation (deg)"
+                              label="Display Rotation"
                               variant="outlined"
                               density="compact"
+                              hint="How the frame is mounted relative to the panel's native orientation. Drives the rendered image and all previews."
+                              persistent-hint
                             ></v-select>
+                          </v-col>
+                          <v-col cols="12" md="6">
+                            <v-text-field
+                              :model-value="
+                                derivedOrientation === 'landscape'
+                                  ? 'Landscape'
+                                  : 'Portrait'
+                              "
+                              label="Orientation (derived)"
+                              variant="outlined"
+                              density="compact"
+                              readonly
+                              hint="Determined by native panel size + Display Rotation."
+                              persistent-hint
+                            ></v-text-field>
                           </v-col>
                         </v-row>
                         <v-row>
@@ -3223,8 +3268,8 @@ const deviceConfig = reactive<Record<string, any>>({
   sleep_schedule_enabled: false,
   sleep_start_time: '23:00',
   sleep_end_time: '07:00',
-  display_orientation: 'landscape',
-  display_rotation_deg: 180,
+  display_orientation: 'portrait',
+  display_rotation_deg: 0,
   timezone_offset: 0,
   ntp_server: 'pool.ntp.org',
   deep_sleep_enabled: true,
@@ -3396,15 +3441,16 @@ watch(
   }
 );
 
-const orientationOptions = computed(() => {
+// Display Rotation is the single source of truth; the landscape/portrait label
+// is derived from native panel dims + the chosen rotation (90°/270° swap the
+// viewing dimensions). Shown read-only and sent to the firmware config so its
+// own WebUI stays consistent.
+const derivedOrientation = computed(() => {
+  const deg = (((deviceConfig.display_rotation_deg ?? 0) % 360) + 360) % 360;
   const w = editingDevice.width || 800;
   const h = editingDevice.height || 480;
-  const wide = Math.max(w, h);
-  const narrow = Math.min(w, h);
-  return [
-    { title: `Landscape (${wide}\u00d7${narrow})`, value: 'landscape' },
-    { title: `Portrait (${narrow}\u00d7${wide})`, value: 'portrait' },
-  ];
+  const [lw, lh] = deg === 90 || deg === 270 ? [h, w] : [w, h];
+  return lw >= lh ? 'landscape' : 'portrait';
 });
 
 const rotateIntervalOptions = [
@@ -3471,7 +3517,7 @@ const loadDeviceConfig = async (deviceId: number) => {
       sleep_schedule_enabled: cfg.sleep_schedule_enabled ?? false,
       display_orientation:
         cfg.display_orientation ?? deviceConfig.display_orientation,
-      display_rotation_deg: cfg.display_rotation_deg ?? 180,
+      display_rotation_deg: cfg.display_rotation_deg ?? 0,
       deep_sleep_enabled: cfg.deep_sleep_enabled ?? true,
       button_action_short: cfg.button_action_short ?? 'next_image',
       button_action_long: cfg.button_action_long ?? 'sleep',
@@ -3580,6 +3626,16 @@ const filteredLayoutOptions = computed(() => {
     opt.orientations.includes(orientation)
   );
 });
+
+// Display Rotation is the single source of truth: keep the derived
+// landscape/portrait mirror in deviceConfig in sync so the live overlay preview
+// and layout filtering react to a rotation change immediately.
+watch(
+  () => [deviceConfig.display_rotation_deg, editingDevice.width, editingDevice.height],
+  () => {
+    deviceConfig.display_orientation = derivedOrientation.value;
+  }
+);
 
 // Auto-select first layout if current layout is not valid for orientation
 watch(
@@ -4457,7 +4513,7 @@ const saveDevice = async () => {
           sleep_schedule_enabled: deviceConfig.sleep_schedule_enabled,
           sleep_schedule_start: startH * 60 + startM,
           sleep_schedule_end: endH * 60 + endM,
-          display_orientation: deviceConfig.display_orientation,
+          display_orientation: derivedOrientation.value,
           display_rotation_deg: deviceConfig.display_rotation_deg,
           timezone: timezone,
           ntp_server: deviceConfig.ntp_server,
@@ -4531,8 +4587,7 @@ onUnmounted(() => {
 // Build the public /served-image-thumbnail/<id> URL for the current-image
 // preview. Mirrors getImageUrl's origin/add-on-port logic since the thumbnail
 // route lives on the same server (ingress port 8123 can't serve it directly).
-const getServedThumbUrl = (thumbId: string) => {
-  const path = `served-image-thumbnail/${thumbId}`;
+const buildServedUrl = (path: string) => {
   const { protocol, hostname, port } = window.location;
   const addonPort = import.meta.env.VITE_ADDON_PORT || '9607';
   if (protocol === 'https:') return `${window.location.origin}/${path}`;
@@ -4540,6 +4595,25 @@ const getServedThumbUrl = (thumbId: string) => {
     return `${window.location.origin}/${path}`;
   }
   return `${protocol}//${hostname}:${addonPort}/${path}`;
+};
+
+const getServedThumbUrl = (thumbId: string) =>
+  buildServedUrl(`served-image-thumbnail/${thumbId}`);
+
+// Full-resolution (native panel size) image, served by /served-image-full/:id.
+// Opened in a lightbox when the Devices-list miniature is clicked.
+const getServedFullUrl = (thumbId: string) =>
+  buildServedUrl(`served-image-full/${thumbId}`);
+
+const fullImageDialog = ref(false);
+const fullImageUrl = ref('');
+const fullImageTitle = ref('');
+
+const openFullImage = (device: Device) => {
+  if (!device.current_thumb_id) return;
+  fullImageUrl.value = getServedFullUrl(device.current_thumb_id);
+  fullImageTitle.value = device.name || 'Current image';
+  fullImageDialog.value = true;
 };
 
 const batteryColor = (p: number) =>

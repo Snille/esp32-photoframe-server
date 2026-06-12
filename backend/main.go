@@ -287,6 +287,7 @@ func main() {
 	// User said "access the /image/<source>/ endpoint. This one... people can't just access".
 	// Let's protect main image endpoint.
 	e.GET("/served-image-thumbnail/:id", ih.GetServedImageThumbnail)
+	e.GET("/served-image-full/:id", ih.GetServedImageFull)
 
 	// Device Config Sync (Protected - device token or session auth)
 	e.POST("/api/device-config/sync", ih.SyncDeviceConfig, authMiddleware)

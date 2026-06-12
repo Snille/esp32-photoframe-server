@@ -1,5 +1,13 @@
 # Changelog
 
+## v1.16.0
+
+### Added
+- **Click a Devices-list miniature to see the full image on the frame.** The current-image thumbnail is now clickable and opens a lightbox showing the **full-resolution** dithered image at native panel size — exactly what the frame displays. Served via the new public `/served-image-full/:id` route (a full-size JPEG written alongside the miniature on every real serve, and cleaned up when the frame's image changes).
+
+### Changed
+- **Orientation rework: native panel orientation is now the baseline and "Display Rotation" drives everything.** The panel's native orientation (portrait for the 4" Spectra 6) is the anchor, and a single **Device → General → "Display Rotation"** choice (0/90/180/270°) drives both the rendered frame image **and** every preview (Devices-list miniature, full-image lightbox, companion-app preview) — no more per-feature un-rotation hacks. Rotation is a single `display_rotation_deg`-driven step: the composed image is pre-rotated into native panel layout before dithering, and previews rotate back to the viewing orientation by the same amount. The landscape/portrait label is now derived (shown read-only). Migration **000040** adds `devices.display_rotation_deg`, backfilled from the existing orientation (`landscape → 90°`) so frames look identical after upgrade.
+
 ## v1.15.0
 
 ### Added

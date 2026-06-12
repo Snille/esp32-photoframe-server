@@ -68,15 +68,63 @@ func rotate90CCW(src image.Image) *image.RGBA {
 	return dst
 }
 
+// RotateDeg returns src rotated counter-clockwise by deg (one of 0/90/180/270).
+// This is the single rotation primitive the orientation pipeline uses, in both
+// directions: 90° here is the inverse of 270°, so rotating the panel-native
+// buffer by deg yields the viewing orientation, and rotating a viewing-oriented
+// image by (360-deg) yields the native panel layout. Any non-multiple of 90
+// falls through to deg=0 (no rotation).
+func RotateDeg(src image.Image, deg int) image.Image {
+	switch ((deg % 360) + 360) % 360 {
+	case 90:
+		return rotate90CCW(src)
+	case 180:
+		b := src.Bounds()
+		w, h := b.Dx(), b.Dy()
+		dst := image.NewRGBA(image.Rect(0, 0, w, h))
+		for y := 0; y < h; y++ {
+			for x := 0; x < w; x++ {
+				dst.Set(w-1-x, h-1-y, src.At(b.Min.X+x, b.Min.Y+y))
+			}
+		}
+		return dst
+	case 270:
+		// CCW 270° == CW 90°.
+		b := src.Bounds()
+		w, h := b.Dx(), b.Dy()
+		dst := image.NewRGBA(image.Rect(0, 0, h, w))
+		for y := 0; y < h; y++ {
+			for x := 0; x < w; x++ {
+				// CW: (x,y) -> (h-1-y, x)
+				dst.Set(h-1-y, x, src.At(b.Min.X+x, b.Min.Y+y))
+			}
+		}
+		return dst
+	default:
+		return src
+	}
+}
+
+// LogicalDims returns the viewing-orientation dimensions for a panel of native
+// size nativeW×nativeH mounted at the given rotation: 90°/270° swap width and
+// height, 0°/180° keep them.
+func LogicalDims(nativeW, nativeH, deg int) (int, int) {
+	if d := ((deg % 360) + 360) % 360; d == 90 || d == 270 {
+		return nativeH, nativeW
+	}
+	return nativeW, nativeH
+}
+
 // ProcessedToThumbnailJPEG turns a frame's processed output into a small JPEG
 // preview that truthfully reflects the applied processing (grayscale, palette,
 // tone) — unlike the converter's own thumbnail, which is snapshotted pre-dither
 // and ignores those filters. format is "png", "epdgz", or anything else (raw
 // EPD bytes). width/height are the native panel dimensions of the buffer.
-// rotateCCW un-rotates the native-layout buffer back to the viewing orientation
-// (the processed output is rotated into native panel layout when the viewing
-// orientation differs). maxLong caps the long side (0 = no downscale).
-func ProcessedToThumbnailJPEG(processed []byte, format string, width, height, maxLong int, rotateCCW bool) ([]byte, error) {
+// deg rotates the native-layout buffer back to the viewing orientation (the
+// processed output is in native panel layout; the frame is mounted at deg, so
+// the viewer sees it rotated by deg). maxLong caps the long side (0 = no
+// downscale).
+func ProcessedToThumbnailJPEG(processed []byte, format string, width, height, maxLong, deg int) ([]byte, error) {
 	var src image.Image
 	switch format {
 	case "png":
@@ -106,10 +154,8 @@ func ProcessedToThumbnailJPEG(processed []byte, format string, width, height, ma
 		src = m
 	}
 
-	// Un-rotate native panel layout back to the viewing orientation.
-	if rotateCCW {
-		src = rotate90CCW(src)
-	}
+	// Rotate the native panel layout to the viewing orientation.
+	src = RotateDeg(src, deg)
 
 	// Downscale the long side to maxLong. BiLinear blends the dither dots into
 	// the colours the eye perceives, which reads cleanly at thumbnail size.

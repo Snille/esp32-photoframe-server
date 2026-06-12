@@ -69,7 +69,13 @@ type Device struct {
 	Width          int     `json:"width"`
 	Height         int     `json:"height"`
 	Orientation    string  `json:"orientation"`
-	BoardName      string  `json:"board_name"`
+	// DisplayRotationDeg (0/90/180/270) is how the frame is mounted relative to
+	// the panel's native orientation, and the single source of truth the render
+	// pipeline + all previews derive viewing orientation from. Width/Height stay
+	// native (as reported by the firmware); Orientation is now a derived/legacy
+	// mirror. A landscape-mounted portrait-native panel is 90°.
+	DisplayRotationDeg int    `json:"display_rotation_deg" gorm:"default:0"`
+	BoardName          string `json:"board_name"`
 	// HTTPSSupported mirrors the device's system-info https_supported flag:
 	// false on no-PSRAM boards (e.g. FireBeetle) that can't fit a TLS handshake
 	// alongside the framebuffer, so the web UI warns against https:// image URLs.
@@ -236,6 +242,17 @@ func NormalizeBatteryStyle(style string) string {
 // NormalizeBatteryRotation clamps the battery badge rotation to one of the
 // four right angles, defaulting to 0 for any other value.
 func NormalizeBatteryRotation(deg int) int {
+	switch deg {
+	case 0, 90, 180, 270:
+		return deg
+	default:
+		return 0
+	}
+}
+
+// NormalizeRotationDeg clamps a display rotation to one of 0/90/180/270,
+// defaulting to 0 (native panel orientation).
+func NormalizeRotationDeg(deg int) int {
 	switch deg {
 	case 0, 90, 180, 270:
 		return deg

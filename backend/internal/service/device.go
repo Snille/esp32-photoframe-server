@@ -72,6 +72,7 @@ func (s *DeviceService) AddDevice(host string, enableCollage, showDate, showPhot
 	var name string
 	var width, height int
 	var orientation, boardName string
+	rotationDeg := 0
 	httpsSupported := true // assume capable unless the device reports otherwise
 
 	var deviceConfig, deviceProc, devicePalette string
@@ -99,9 +100,13 @@ func (s *DeviceService) AddDevice(host string, enableCollage, showDate, showPhot
 			deviceConfig = configRaw
 			var parsed struct {
 				DisplayOrientation string `json:"display_orientation"`
+				DisplayRotationDeg int    `json:"display_rotation_deg"`
 			}
-			if json.Unmarshal([]byte(configRaw), &parsed) == nil && parsed.DisplayOrientation != "" {
-				orientation = parsed.DisplayOrientation
+			if json.Unmarshal([]byte(configRaw), &parsed) == nil {
+				if parsed.DisplayOrientation != "" {
+					orientation = parsed.DisplayOrientation
+				}
+				rotationDeg = model.NormalizeRotationDeg(parsed.DisplayRotationDeg)
 			}
 		}
 
@@ -134,6 +139,7 @@ func (s *DeviceService) AddDevice(host string, enableCollage, showDate, showPhot
 		Width:                    width,
 		Height:                   height,
 		Orientation:              orientation,
+		DisplayRotationDeg:       rotationDeg,
 		BoardName:                boardName,
 		HTTPSSupported:           httpsSupported,
 		EnableCollage:            enableCollage,
@@ -296,9 +302,13 @@ func (s *DeviceService) RefreshDeviceFromHardware(id uint) (*model.Device, error
 	device.DeviceConfig = configRaw
 	var parsedConfig struct {
 		DisplayOrientation string `json:"display_orientation"`
+		DisplayRotationDeg int    `json:"display_rotation_deg"`
 	}
-	if json.Unmarshal([]byte(configRaw), &parsedConfig) == nil && parsedConfig.DisplayOrientation != "" {
-		device.Orientation = parsedConfig.DisplayOrientation
+	if json.Unmarshal([]byte(configRaw), &parsedConfig) == nil {
+		if parsedConfig.DisplayOrientation != "" {
+			device.Orientation = parsedConfig.DisplayOrientation
+		}
+		device.DisplayRotationDeg = model.NormalizeRotationDeg(parsedConfig.DisplayRotationDeg)
 	}
 
 	if procRaw, err := pfClient.FetchProcessingSettings(); err != nil {
@@ -371,12 +381,14 @@ func (s *DeviceService) PushToHost(device *model.Device, imagePath string, extra
 		processingOpts["format"] = "png"
 	}
 
-	// 1. Validate dimensions
+	// 1. Validate dimensions. Native dims are the baseline; the viewing
+	// (logical) dims derive from the frame's Display Rotation.
 	nativeW, nativeH := device.Width, device.Height
 	if nativeW == 0 || nativeH == 0 {
 		nativeW, nativeH = 800, 480
 	}
-	logicalW, logicalH := nativeW, nativeH
+	deg := model.NormalizeRotationDeg(device.DisplayRotationDeg)
+	logicalW, logicalH := imageops.LogicalDims(nativeW, nativeH, deg)
 
 	// 2. Open file
 	f, err := os.Open(imagePath)
@@ -389,14 +401,6 @@ func (s *DeviceService) PushToHost(device *model.Device, imagePath string, extra
 	srcImg, _, err := image.Decode(f)
 	if err != nil {
 		return fmt.Errorf("failed to decode image: %w", err)
-	}
-
-	// 4. Apply device orientation to logical dimensions (for overlay rendering)
-	orientation := device.Orientation
-	if orientation == "portrait" && logicalW > logicalH {
-		logicalW, logicalH = logicalH, logicalW
-	} else if orientation == "landscape" && logicalW < logicalH {
-		logicalW, logicalH = logicalH, logicalW
 	}
 
 	// 5. Render layout (photo + overlay + calendar)
@@ -523,13 +527,13 @@ func (s *DeviceService) PushToHost(device *model.Device, imagePath string, extra
 	}
 
 	// 6. Process for E-Paper
-	// Always pass native panel dimensions. The CLI handles orientation
-	// internally (swaps dims, processes, rotates output to native layout).
+	// finalImg is in viewing orientation; pre-rotate it into native panel layout
+	// (inverse of deg) so the CLI dithers straight to native dimensions. Rotation
+	// is a single deg-driven Go step (mirrors the pull path in image.go). No-op
+	// at deg=0.
+	finalImg = imageops.RotateDeg(finalImg, 360-deg)
 	opts := map[string]string{
 		"dimension": fmt.Sprintf("%dx%d", nativeW, nativeH),
-	}
-	if orientation != "" {
-		opts["orientation"] = orientation
 	}
 
 	// Merge extra options (device params)
@@ -576,15 +580,23 @@ func (s *DeviceService) PushToHost(device *model.Device, imagePath string, extra
 		if opts["format"] == "png" {
 			thumbFormat = "png"
 		}
-		rotateThumb := logicalW != nativeW || logicalH != nativeH
-		if previewJPEG, terr := imageops.ProcessedToThumbnailJPEG(processedData, thumbFormat, nativeW, nativeH, 400, rotateThumb); terr != nil {
+		if previewJPEG, terr := imageops.ProcessedToThumbnailJPEG(processedData, thumbFormat, nativeW, nativeH, 400, deg); terr != nil {
 			log.Printf("Failed to build current thumbnail for device %d: %v", device.ID, terr)
 		} else {
 			thumbID := fmt.Sprintf("%d", time.Now().UnixNano())
 			thumbPath := filepath.Join(s.dataDir, fmt.Sprintf("thumb_%s.jpg", thumbID))
 			if writeErr := os.WriteFile(thumbPath, previewJPEG, 0644); writeErr == nil {
+				// Also write a full-resolution JPEG (native panel size) so the UI
+				// can open what the frame actually shows. Served via
+				// /served-image-full/:id.
+				if fullJPEG, ferr := imageops.ProcessedToThumbnailJPEG(processedData, thumbFormat, nativeW, nativeH, 0, deg); ferr != nil {
+					log.Printf("Failed to build full preview for device %d: %v", device.ID, ferr)
+				} else if werr := os.WriteFile(filepath.Join(s.dataDir, fmt.Sprintf("full_%s.jpg", thumbID)), fullJPEG, 0644); werr != nil {
+					log.Printf("Failed to save full preview for device %d: %v", device.ID, werr)
+				}
 				if device.CurrentThumbID != "" && device.CurrentThumbID != thumbID {
 					os.Remove(filepath.Join(s.dataDir, fmt.Sprintf("thumb_%s.jpg", device.CurrentThumbID)))
+					os.Remove(filepath.Join(s.dataDir, fmt.Sprintf("full_%s.jpg", device.CurrentThumbID)))
 				}
 				s.db.Model(device).Update("current_thumb_id", thumbID)
 			} else {

@@ -197,24 +197,30 @@ func (h *ImageHandler) ServeImage(c echo.Context) error {
 			}
 		}
 	}
-	// Determine effective orientation from header or device config
-	orientation := ""
-	if oStr := c.Request().Header.Get("X-Display-Orientation"); oStr != "" {
-		orientation = oStr
-		// Persist orientation update to database if it changed
-		if deviceFound && device.Orientation != oStr {
-			device.Orientation = oStr
-			h.db.Model(&device).Update("orientation", oStr)
-		}
-	} else if deviceFound {
-		orientation = device.Orientation
+	// Display Rotation (deg, one of 0/90/180/270) is the single source of truth
+	// for how the frame is mounted relative to the panel's native orientation.
+	// Native dims (nativeW/nativeH) stay the baseline; the viewing (logical) dims
+	// and every rotation in the pipeline derive from deg. Legacy frames that
+	// haven't synced a rotation fall back to the X-Display-Orientation header
+	// (landscape => 90).
+	deg := 0
+	if deviceFound {
+		deg = model.NormalizeRotationDeg(device.DisplayRotationDeg)
 	}
+	if deg == 0 && c.Request().Header.Get("X-Display-Orientation") == "landscape" {
+		deg = 90
+	}
+	logicalW, logicalH = imageops.LogicalDims(nativeW, nativeH, deg)
 
-	// Swap logical dimensions to match orientation (used for overlays and collage)
-	if orientation == "portrait" && logicalW > logicalH {
-		logicalW, logicalH = logicalH, logicalW
-	} else if orientation == "landscape" && logicalW < logicalH {
-		logicalW, logicalH = logicalH, logicalW
+	// Keep the legacy orientation mirror in sync (derived from the viewing dims)
+	// for any consumer still reading it.
+	orientation := "portrait"
+	if logicalW >= logicalH {
+		orientation = "landscape"
+	}
+	if deviceFound && device.Orientation != orientation {
+		device.Orientation = orientation
+		h.db.Model(&device).Update("orientation", orientation)
 	}
 
 	layout := model.LayoutPhotoOverlay
@@ -299,10 +305,9 @@ func (h *ImageHandler) ServeImage(c echo.Context) error {
 	// are skipped — the source already produced a panel-ready image, and
 	// CDR / preprocessing would shift its flat color regions.
 	if sourceResp.SkipPostProcessing {
-		out := img
-		if logicalW != nativeW || logicalH != nativeH {
-			out = rotate90CW(out)
-		}
+		// The source produced a panel-ready image in viewing orientation; rotate
+		// it into native panel layout (inverse of deg). No-op at deg=0.
+		out := imageops.RotateDeg(img, 360-deg)
 		var buf bytes.Buffer
 		if err := png.Encode(&buf, out); err != nil {
 			return c.JSON(http.StatusInternalServerError, map[string]string{"error": "png encode: " + err.Error()})
@@ -460,13 +465,13 @@ func (h *ImageHandler) ServeImage(c echo.Context) error {
 	}
 
 	// 3. Tone Mapping + Thumbnail (CLI)
-	// Always pass native panel dimensions. The CLI handles orientation
-	// internally (swaps dims, processes, rotates output to native layout).
+	// The overlay-composited image is in viewing orientation; pre-rotate it into
+	// native panel layout (inverse of deg) so the CLI dithers straight to native
+	// dimensions. This makes rotation a single deg-driven Go step instead of
+	// relying on the CLI's opaque --orientation rotation. No-op at deg=0.
+	imgWithOverlay = imageops.RotateDeg(imgWithOverlay, 360-deg)
 	procOptions := map[string]string{
 		"dimension": fmt.Sprintf("%dx%d", nativeW, nativeH),
-	}
-	if orientation != "" {
-		procOptions["orientation"] = orientation
 	}
 
 	// Determine output format based on firmware version (epdgz requires >= 2.6.1)
@@ -555,8 +560,7 @@ func (h *ImageHandler) ServeImage(c echo.Context) error {
 	} else if firmwareVersion == "" || !photoframe.SupportsEPDGZ(firmwareVersion) {
 		thumbFormat = "png"
 	}
-	rotateThumb := logicalW != nativeW || logicalH != nativeH
-	if previewJPEG, terr := imageops.ProcessedToThumbnailJPEG(processedBytes, thumbFormat, nativeW, nativeH, 400, rotateThumb); terr != nil {
+	if previewJPEG, terr := imageops.ProcessedToThumbnailJPEG(processedBytes, thumbFormat, nativeW, nativeH, 400, deg); terr != nil {
 		fmt.Printf("Failed to build preview thumbnail: %v\n", terr)
 	} else {
 		thumbID := fmt.Sprintf("%d", time.Now().UnixNano())
@@ -570,8 +574,17 @@ func (h *ImageHandler) ServeImage(c echo.Context) error {
 			// the frame displays), and delete the previous per-device thumbnail so
 			// these files don't pile up.
 			if deviceFound && !preview {
+				// Also write a full-resolution (un-downscaled) JPEG so the UI can
+				// open the current image at native panel size — what the frame
+				// actually shows. Served via /served-image-full/:id.
+				if fullJPEG, ferr := imageops.ProcessedToThumbnailJPEG(processedBytes, thumbFormat, nativeW, nativeH, 0, deg); ferr != nil {
+					fmt.Printf("Failed to build full preview: %v\n", ferr)
+				} else if werr := os.WriteFile(filepath.Join(h.dataDir, fmt.Sprintf("full_%s.jpg", thumbID)), fullJPEG, 0644); werr != nil {
+					fmt.Printf("Failed to save full preview: %v\n", werr)
+				}
 				if device.CurrentThumbID != "" && device.CurrentThumbID != thumbID {
 					os.Remove(filepath.Join(h.dataDir, fmt.Sprintf("thumb_%s.jpg", device.CurrentThumbID)))
+					os.Remove(filepath.Join(h.dataDir, fmt.Sprintf("full_%s.jpg", device.CurrentThumbID)))
 				}
 				h.db.Model(&device).Update("current_thumb_id", thumbID)
 			}
@@ -729,6 +742,23 @@ func (h *ImageHandler) UpdateDeviceConfig(c echo.Context) error {
 			updates["device_config"] = string(merged)
 		}
 	}
+
+	// Mirror Display Rotation into its dedicated column so the render pipeline and
+	// previews (image.go / device.go) can read it without parsing device_config.
+	// JSON numbers unmarshal as float64. Keep the legacy orientation column in
+	// sync (derived) for any consumer still reading it.
+	if v, ok := configMap["display_rotation_deg"]; ok {
+		if f, ok := v.(float64); ok {
+			deg := model.NormalizeRotationDeg(int(f))
+			updates["display_rotation_deg"] = deg
+			nw, nh := device.Width, device.Height
+			if lw, lh := imageops.LogicalDims(nw, nh, deg); lw >= lh {
+				updates["orientation"] = "landscape"
+			} else {
+				updates["orientation"] = "portrait"
+			}
+		}
+	}
 	if len(req.ProcessingSettings) > 0 {
 		updates["device_processing_settings"] = string(req.ProcessingSettings)
 	}
@@ -864,6 +894,31 @@ func (h *ImageHandler) GetServedImageThumbnail(c echo.Context) error {
 	return c.Blob(http.StatusOK, "image/jpeg", data)
 }
 
+// GetServedImageFull serves the full-resolution (native panel size) JPEG of the
+// frame's current image — what the UI shows when the Devices-list miniature is
+// clicked. Unlike the thumbnail it is not auto-deleted on access, so the
+// lightbox keeps working; it is cleaned up when the device's current image
+// changes (see ServeImage / PushToHost).
+func (h *ImageHandler) GetServedImageFull(c echo.Context) error {
+	id := c.Param("id")
+	// Prevent directory traversal
+	if id == "" || id == "." || id == ".." {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid id"})
+	}
+
+	fullPath := filepath.Join(h.dataDir, fmt.Sprintf("full_%s.jpg", id))
+	data, err := os.ReadFile(fullPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return c.JSON(http.StatusNotFound, map[string]string{"error": "image not found"})
+		}
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to read image"})
+	}
+
+	c.Response().Header().Set("Content-Length", fmt.Sprintf("%d", len(data)))
+	return c.Blob(http.StatusOK, "image/jpeg", data)
+}
+
 // applyConfigSyncHeader sets the X-Config-Payload response header when the
 // server's stored device config is newer than what the device most recently
 // reported. Pulled out so both the bypass branch and the main flow share it.
@@ -887,19 +942,4 @@ func applyConfigSyncHeader(c echo.Context, device *model.Device, deviceFound boo
 	c.Response().Header().Set("X-Config-Payload", payload)
 	log.Printf("Config sync: pushing config to device (server=%d, device=%d)",
 		device.ConfigLastUpdated, deviceConfigTS)
-}
-
-// rotate90CW returns src rotated 90° clockwise. Used for bypass sources to
-// translate from the device's logical (oriented) layout to the panel's
-// native physical layout.
-func rotate90CW(src image.Image) *image.RGBA {
-	b := src.Bounds()
-	sw, sh := b.Dx(), b.Dy()
-	dst := image.NewRGBA(image.Rect(0, 0, sh, sw))
-	for y := 0; y < sh; y++ {
-		for x := 0; x < sw; x++ {
-			dst.Set(sh-1-y, x, src.At(b.Min.X+x, b.Min.Y+y))
-		}
-	}
-	return dst
 }
