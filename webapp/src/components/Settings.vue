@@ -884,6 +884,42 @@
                   </div>
 
                   <v-text-field
+                    v-model="form.minimax_global_api_key"
+                    label="MiniMax Global API Key"
+                    type="password"
+                    variant="outlined"
+                    class="mb-1"
+                    persistent-hint
+                  ></v-text-field>
+                  <div class="text-caption text-grey ml-2 mb-4">
+                    Uses <code>api.minimax.io</code>. Get your API key at
+                    <a
+                      href="https://platform.minimax.io"
+                      target="_blank"
+                      class="text-primary text-decoration-none"
+                      >platform.minimax.io</a
+                    >
+                  </div>
+
+                  <v-text-field
+                    v-model="form.minimax_china_api_key"
+                    label="MiniMax China API Key"
+                    type="password"
+                    variant="outlined"
+                    class="mb-1"
+                    persistent-hint
+                  ></v-text-field>
+                  <div class="text-caption text-grey ml-2 mb-4">
+                    Uses <code>api.minimaxi.com</code>. Get your API key at
+                    <a
+                      href="https://platform.minimaxi.com"
+                      target="_blank"
+                      class="text-primary text-decoration-none"
+                      >platform.minimaxi.com</a
+                    >
+                  </div>
+
+                  <v-text-field
                     v-model="form.comfyui_host"
                     label="ComfyUI Server (local)"
                     variant="outlined"
@@ -2974,6 +3010,8 @@
                             { title: 'None', value: '' },
                             { title: 'OpenAI', value: 'openai' },
                             { title: 'Google Gemini', value: 'google' },
+                            { title: 'MiniMax (Global)', value: 'minimax_global' },
+                            { title: 'MiniMax (China)', value: 'minimax_china' },
                             { title: 'ComfyUI (local)', value: 'comfyui' },
                           ]"
                           label="AI Provider"
@@ -4341,6 +4379,8 @@ const aiModelOptionsForProvider = (provider: string | undefined) => {
       { title: 'Gemini 3 Pro Image', value: 'gemini-3-pro-image-preview' },
       { title: 'Gemini 2.5 Flash Image', value: 'gemini-2.5-flash-image' },
     ];
+  } else if (provider === 'minimax_global' || provider === 'minimax_china') {
+    return [{ title: 'Image-01', value: 'image-01' }];
   }
   return [];
 };

@@ -1,5 +1,10 @@
 # Changelog
 
+## v1.17.1
+
+### Fixed
+- **MiniMax is now selectable in the UI.** v1.17.0 added the MiniMax server-side image provider to the backend but never exposed it in the web app. Settings → AI Generation now has **MiniMax Global / MiniMax China API Key** fields, and the per-device AI provider dropdown offers **MiniMax (Global)** and **MiniMax (China)** with the Image-01 model.
+
 ## v1.17.0
 
 ### Added
