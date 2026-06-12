@@ -1,5 +1,11 @@
 # Changelog
 
+## v1.17.0
+
+### Added
+- **Public Art image source** (`public_art`): auto-rotate or lock open-access museum artwork from the **Cleveland Museum of Art** on a frame — no API key. A new "Public Art" tab in Settings → Data Sources lets you search the collection, preview & crop (drag to pan, scroll to zoom, cover/fit), pick an artwork to lock, or push one to a frame. Point a frame's source at `public_art` to rotate by a saved query with de-duplication. Migration **000041** adds the serving-history table. (A source selector is present for future collections.) Also adds a **MiniMax** server-side AI image provider.
+- **Home Assistant MQTT bridge**: the server publishes each frame to your Home Assistant MQTT broker using HA's MQTT discovery, so every frame shows up as a device with **Battery %, Battery Voltage, Battery Days Remaining, Battery Trend, Image Source, Last Seen** sensors and a **Current Image** entity — ready for automations (low-battery alerts, dashboards, etc.). The server is a plain MQTT client (its own broker user/pass) and does **not** need to run as an HA add-on. Configure it in the new Settings → **Home Assistant** tab (enable, broker host/port, credentials, advanced topics) with a live connection-status indicator.
+
 ## v1.16.0
 
 ### Added
