@@ -22,7 +22,7 @@ A image server for the [ESP32 PhotoFrame](https://github.com/aitjcize/esp32-phot
     - **Battery badge**: shows the frame's battery level (icon, text, or both) using the level the device reports on each fetch. The icon can be rotated (0/90/180/270°), the percentage text placed on any side of it, and its size scaled independently of the overlay text.
     - **Per-element placement**: position Date, Photo Date, Weather and Battery in any of six slots (top/bottom × left/center/right), with an adjustable size scale and a live preview in the device settings.
     - "iPhone Lockscreen" style aesthetics with Inter font and drop shadows.
-- **Home Assistant MQTT**: Publishes each frame to your Home Assistant MQTT broker via MQTT discovery — **battery, battery voltage, days-remaining, trend, image source, last-seen** sensors and a **current-image** entity per frame, ready for automations. Runs as a plain MQTT client (its own broker credentials); no add-on required. Configure it under Settings → **Home Assistant**.
+- **Home Assistant MQTT**: Publishes each frame to your Home Assistant MQTT broker via MQTT discovery — **battery, battery voltage, days-remaining, trend, image source, last-seen, refresh interval, sleep schedule, next image pull, host and IP-address** sensors plus **Previous / Current / Next image** entities per frame, ready for automations. Runs as a plain MQTT client (its own broker credentials); no add-on required. Configure it under Settings → **Home Assistant**.
 - **Authentication**:
     - User account system with login/registration.
     - Revocable API tokens for device access.
