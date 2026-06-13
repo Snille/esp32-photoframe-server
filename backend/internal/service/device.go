@@ -594,11 +594,8 @@ func (s *DeviceService) PushToHost(device *model.Device, imagePath string, extra
 				} else if werr := os.WriteFile(filepath.Join(s.dataDir, fmt.Sprintf("full_%s.jpg", thumbID)), fullJPEG, 0644); werr != nil {
 					log.Printf("Failed to save full preview for device %d: %v", device.ID, werr)
 				}
-				if device.CurrentThumbID != "" && device.CurrentThumbID != thumbID {
-					os.Remove(filepath.Join(s.dataDir, fmt.Sprintf("thumb_%s.jpg", device.CurrentThumbID)))
-					os.Remove(filepath.Join(s.dataDir, fmt.Sprintf("full_%s.jpg", device.CurrentThumbID)))
-				}
-				s.db.Model(device).Update("current_thumb_id", thumbID)
+				// Rotate Previous ← Current ← new (and clean up the demoted file).
+				SetCurrentThumb(s.db, s.dataDir, device, thumbID)
 			} else {
 				log.Printf("Failed to save current thumbnail for device %d: %v", device.ID, writeErr)
 			}

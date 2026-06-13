@@ -10,8 +10,8 @@ import (
 	"sync"
 	"time"
 
-	mqtt "github.com/eclipse/paho.mqtt.golang"
 	"github.com/aitjcize/esp32-photoframe-server/backend/internal/model"
+	mqtt "github.com/eclipse/paho.mqtt.golang"
 	"gorm.io/gorm"
 )
 
@@ -127,6 +127,12 @@ func (s *MQTTService) stateTopic(id uint) string {
 }
 func (s *MQTTService) imageTopic(id uint) string {
 	return fmt.Sprintf("%s/device/%d/image", s.cfg.baseTopic, id)
+}
+func (s *MQTTService) prevImageTopic(id uint) string {
+	return fmt.Sprintf("%s/device/%d/previous_image", s.cfg.baseTopic, id)
+}
+func (s *MQTTService) nextImageTopic(id uint) string {
+	return fmt.Sprintf("%s/device/%d/next_image", s.cfg.baseTopic, id)
 }
 
 func (s *MQTTService) connect(cfg mqttConfig) {
@@ -250,9 +256,13 @@ func (s *MQTTService) RemoveDevice(deviceID uint) {
 	for _, key := range mqttSensorKeys {
 		client.Publish(s.discoveryTopic("sensor", deviceID, key), 1, true, "")
 	}
-	client.Publish(s.discoveryTopic("image", deviceID, "current"), 1, true, "")
+	for _, key := range []string{"current", "previous", "next"} {
+		client.Publish(s.discoveryTopic("image", deviceID, key), 1, true, "")
+	}
 	client.Publish(s.stateTopic(deviceID), 1, true, "")
 	client.Publish(s.imageTopic(deviceID), 1, true, "")
+	client.Publish(s.prevImageTopic(deviceID), 1, true, "")
+	client.Publish(s.nextImageTopic(deviceID), 1, true, "")
 	s.mu.Lock()
 	delete(s.discoverySent, deviceID)
 	s.mu.Unlock()
@@ -301,15 +311,25 @@ func (s *MQTTService) publishState(client mqtt.Client, device *model.Device) {
 }
 
 func (s *MQTTService) publishImage(client mqtt.Client, device *model.Device) {
-	if device.CurrentThumbID == "" {
+	s.publishOneImage(client, s.imageTopic(device.ID), device.CurrentThumbID)
+	s.publishOneImage(client, s.prevImageTopic(device.ID), device.PrevThumbID)
+	s.publishOneImage(client, s.nextImageTopic(device.ID), device.NextThumbID)
+}
+
+// publishOneImage publishes the JPEG thumbnail for thumbID to topic (retained),
+// or clears the retained image with an empty payload when there is none (e.g. a
+// device with no previous image yet, or a source without a deterministic next).
+func (s *MQTTService) publishOneImage(client mqtt.Client, topic, thumbID string) {
+	if thumbID == "" {
+		client.Publish(topic, 1, true, []byte{})
 		return
 	}
-	path := filepath.Join(s.dataDir, fmt.Sprintf("thumb_%s.jpg", device.CurrentThumbID))
-	data, err := os.ReadFile(path)
+	data, err := os.ReadFile(filepath.Join(s.dataDir, fmt.Sprintf("thumb_%s.jpg", thumbID)))
 	if err != nil {
+		client.Publish(topic, 1, true, []byte{})
 		return
 	}
-	client.Publish(s.imageTopic(device.ID), 1, true, data)
+	client.Publish(topic, 1, true, data)
 }
 
 // mqttSensorKeys are the value_json keys exposed as HA sensors.
@@ -368,18 +388,27 @@ func (s *MQTTService) publishDiscovery(client mqtt.Client, device *model.Device)
 	sensor("source", "Image Source", "source", map[string]interface{}{"icon": "mdi:image-multiple"})
 	sensor("last_seen", "Last Seen", "last_seen", map[string]interface{}{"device_class": "timestamp"})
 
-	// Current image entity.
-	imgCfg := map[string]interface{}{
-		"name":         "Current Image",
-		"unique_id":    fmt.Sprintf("photoframe_%d_image", device.ID),
-		"object_id":    fmt.Sprintf("photoframe_%s_image", sanitize(device.Name)),
-		"image_topic":  s.imageTopic(device.ID),
-		"content_type": "image/jpeg",
-		"availability": avail,
-		"device":       dev,
+	// Image entities: what's on the frame now (current), what was on it before
+	// (previous), and a non-mutating preview of what the next pull will show
+	// (next — populated only for ordered DB-backed sources).
+	imageEntity := func(discoveryKey, idSuffix, name, topic string) {
+		cfg := map[string]interface{}{
+			"name":         name,
+			"unique_id":    fmt.Sprintf("photoframe_%d_%s", device.ID, idSuffix),
+			"object_id":    fmt.Sprintf("photoframe_%s_%s", sanitize(device.Name), idSuffix),
+			"image_topic":  topic,
+			"content_type": "image/jpeg",
+			"availability": avail,
+			"device":       dev,
+		}
+		payload, _ := json.Marshal(cfg)
+		client.Publish(s.discoveryTopic("image", device.ID, discoveryKey), 1, true, payload)
 	}
-	payload, _ := json.Marshal(imgCfg)
-	client.Publish(s.discoveryTopic("image", device.ID, "current"), 1, true, payload)
+	// "current" keeps its original unique_id ("..._image") so existing HA
+	// entities aren't orphaned; previous/next are new.
+	imageEntity("current", "image", "Current Image", s.imageTopic(device.ID))
+	imageEntity("previous", "previous_image", "Previous Image", s.prevImageTopic(device.ID))
+	imageEntity("next", "next_image", "Next Image", s.nextImageTopic(device.ID))
 }
 
 func round1(f float64) float64 { return float64(int(f*10+0.5)) / 10 }

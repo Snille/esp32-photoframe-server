@@ -179,12 +179,10 @@ func (h *ImageHandler) ServeImage(c echo.Context) error {
 		go h.battery.RecordSample(device.ID, batteryPercent, voltageMV)
 	}
 
-	// Notify the MQTT bridge that this frame just checked in, so Home Assistant
-	// gets fresh battery / current-image / last-seen state. No-op when MQTT is
-	// disabled; the publish is delayed + async so it never affects the response.
-	if deviceFound && !preview && h.mqtt != nil {
-		h.mqtt.NotifyDeviceUpdated(device.ID)
-	}
+	// (The MQTT bridge is notified at the end of the serve, once current_thumb_id
+	// is committed and the next-image preview is rendered — see post-serve hook
+	// below. Notifying here would race the thumbnail write and publish the
+	// previous rotation's image as "Current".)
 
 	// ALWAYS overrides logical resolution/orientation from Headers if present
 	if wStr := c.Request().Header.Get("X-Display-Width"); wStr != "" {
@@ -325,6 +323,13 @@ func (h *ImageHandler) ServeImage(c echo.Context) error {
 		body := buf.Bytes()
 
 		applyConfigSyncHeader(c, &device, deviceFound)
+
+		// These sources ship a panel-ready image with no stored thumbnail, so
+		// there's no current/next image to publish — just refresh the bridge
+		// state (battery / last-seen) for the frame.
+		if deviceFound && !preview && h.mqtt != nil {
+			h.mqtt.NotifyDeviceUpdated(device.ID)
+		}
 
 		c.Response().Header().Set("Content-Length", fmt.Sprintf("%d", len(body)))
 		return c.Blob(http.StatusOK, "image/png", body)
@@ -592,11 +597,16 @@ func (h *ImageHandler) ServeImage(c echo.Context) error {
 				} else if werr := os.WriteFile(filepath.Join(h.dataDir, fmt.Sprintf("full_%s.jpg", thumbID)), fullJPEG, 0644); werr != nil {
 					fmt.Printf("Failed to save full preview: %v\n", werr)
 				}
-				if device.CurrentThumbID != "" && device.CurrentThumbID != thumbID {
-					os.Remove(filepath.Join(h.dataDir, fmt.Sprintf("thumb_%s.jpg", device.CurrentThumbID)))
-					os.Remove(filepath.Join(h.dataDir, fmt.Sprintf("full_%s.jpg", device.CurrentThumbID)))
+				// Rotate Previous ← Current ← new (keeps the demoted image as
+				// "previous", deletes the one leaving the retained set).
+				service.SetCurrentThumb(h.db, h.dataDir, &device, thumbID)
+
+				// Post-serve hook: render the next image (non-mutating preview) and
+				// notify the Home Assistant MQTT bridge once current_thumb_id is
+				// committed. Async so it never delays the frame's response.
+				if h.mqtt != nil {
+					h.afterServe(device, source, servedImageIDs)
 				}
-				h.db.Model(&device).Update("current_thumb_id", thumbID)
 			}
 		} else {
 			fmt.Printf("Failed to save served thumbnail: %v\n", err)

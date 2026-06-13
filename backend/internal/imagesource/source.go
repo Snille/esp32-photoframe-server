@@ -48,6 +48,12 @@ type Request struct {
 	// but the pick must not persist any state (no shuffle-seed bump). The
 	// handler also skips the device-history write for preview requests.
 	Preview bool
+	// LastServedOverride, when non-zero, overrides the display-order cursor: the
+	// next photo is computed as the one *after* this image id instead of after
+	// the newest DeviceHistory row. Used by the "next image" preview render,
+	// which runs right after a real serve and must compute the next photo
+	// relative to the photo just served — without racing the async history write.
+	LastServedOverride uint
 }
 
 // Response is what a Source produces.

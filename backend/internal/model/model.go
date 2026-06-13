@@ -25,28 +25,28 @@ const (
 )
 
 type Image struct {
-	ID              uint           `gorm:"primaryKey" json:"id"`
-	FilePath        string         `json:"file_path"`
-	Caption         string         `json:"caption"`
-	Width           int            `json:"width"`
-	Height          int            `json:"height"`
-	Orientation     string         `json:"orientation"` // "landscape", "portrait"
-	UserID          int64          `json:"user_id"`
-	Status          string         `json:"status"`                                                                                                                      // pending, shown
-	Source          string         `gorm:"index:idx_images_source;index:idx_images_source_synology,priority:1;index:idx_images_source_immich,priority:1" json:"source"` // "local", "google_photos", "synology_photos"
-	SynologyPhotoID int            `gorm:"index:idx_images_source_synology,priority:2" json:"synology_id"`
-	ThumbnailKey    string         `json:"thumbnail_key"`                                                    // Cache key for Synology
-	ImmichAssetID   string         `gorm:"index:idx_images_source_immich,priority:2" json:"immich_asset_id"` // UUID for Immich assets
-	PhotoTakenAt    *time.Time     `json:"photo_taken_at"`                                                   // Original photo creation/taken date
+	ID              uint       `gorm:"primaryKey" json:"id"`
+	FilePath        string     `json:"file_path"`
+	Caption         string     `json:"caption"`
+	Width           int        `json:"width"`
+	Height          int        `json:"height"`
+	Orientation     string     `json:"orientation"` // "landscape", "portrait"
+	UserID          int64      `json:"user_id"`
+	Status          string     `json:"status"`                                                                                                                      // pending, shown
+	Source          string     `gorm:"index:idx_images_source;index:idx_images_source_synology,priority:1;index:idx_images_source_immich,priority:1" json:"source"` // "local", "google_photos", "synology_photos"
+	SynologyPhotoID int        `gorm:"index:idx_images_source_synology,priority:2" json:"synology_id"`
+	ThumbnailKey    string     `json:"thumbnail_key"`                                                    // Cache key for Synology
+	ImmichAssetID   string     `gorm:"index:idx_images_source_immich,priority:2" json:"immich_asset_id"` // UUID for Immich assets
+	PhotoTakenAt    *time.Time `json:"photo_taken_at"`                                                   // Original photo creation/taken date
 	// PeopleJSON is a JSON array of {"name","birthDate"} for faces recognized in
 	// the photo (Immich only). Location is a formatted "City, State, Country"
 	// string from EXIF (Immich only). Both empty for sources that lack metadata.
-	PeopleJSON      string         `json:"people_json" gorm:"column:people_json"`
-	Location        string         `json:"location"`
-	Description     string         `json:"description"` // photo description/caption (Immich exif description; gallery caption)
-	DisplayOrder    int            `json:"display_order"`                                                    // Manual sort position for devices in 'custom' order mode (lower = earlier)
-	CreatedAt       time.Time      `json:"created_at"`
-	DeletedAt       gorm.DeletedAt `gorm:"index" json:"-"`
+	PeopleJSON   string         `json:"people_json" gorm:"column:people_json"`
+	Location     string         `json:"location"`
+	Description  string         `json:"description"`   // photo description/caption (Immich exif description; gallery caption)
+	DisplayOrder int            `json:"display_order"` // Manual sort position for devices in 'custom' order mode (lower = earlier)
+	CreatedAt    time.Time      `json:"created_at"`
+	DeletedAt    gorm.DeletedAt `gorm:"index" json:"-"`
 }
 
 type GoogleAuth struct {
@@ -64,12 +64,12 @@ type GoogleCalendarAuth struct {
 }
 
 type Device struct {
-	ID             uint    `gorm:"primaryKey" json:"id"`
-	Name           string  `json:"name"`
-	Host           string  `gorm:"index" json:"host"` // IP or Hostname
-	Width          int     `json:"width"`
-	Height         int     `json:"height"`
-	Orientation    string  `json:"orientation"`
+	ID          uint   `gorm:"primaryKey" json:"id"`
+	Name        string `json:"name"`
+	Host        string `gorm:"index" json:"host"` // IP or Hostname
+	Width       int    `json:"width"`
+	Height      int    `json:"height"`
+	Orientation string `json:"orientation"`
 	// DisplayRotationDeg (0/90/180/270) is how the frame is mounted relative to
 	// the panel's native orientation, and the single source of truth the render
 	// pipeline + all previews derive viewing orientation from. Width/Height stay
@@ -89,33 +89,33 @@ type Device struct {
 	ShowWeather    bool    `json:"show_weather"`
 	WeatherLat     float64 `json:"weather_lat"`
 	WeatherLon     float64 `json:"weather_lon"`
-	AIProvider    string  `gorm:"column:ai_provider" json:"ai_provider"`
-	AIModel       string  `gorm:"column:ai_model" json:"ai_model"`
-	AIPrompt      string  `gorm:"column:ai_prompt" json:"ai_prompt"`
+	AIProvider     string  `gorm:"column:ai_provider" json:"ai_provider"`
+	AIModel        string  `gorm:"column:ai_model" json:"ai_model"`
+	AIPrompt       string  `gorm:"column:ai_prompt" json:"ai_prompt"`
 	// DisplayOrder controls the sequence photos are shown in for DB-backed
 	// sources: shuffle | chrono_newest | chrono_oldest | custom. ShuffleSeed is
 	// server-managed (bumped each completed shuffle cycle) and not user-editable.
-	DisplayOrder  string  `json:"display_order" gorm:"default:'shuffle'"`
-	ShuffleSeed   int64   `json:"-" gorm:"default:0"`
-	Layout        string  `json:"layout"`       // "photo_info", "photo_overlay", "side_panel"
-	DisplayMode   string  `json:"display_mode"` // "cover" or "fit"
-	ShowCalendar  bool    `json:"show_calendar"`
-	CalendarID    string  `json:"calendar_id"` // Google Calendar ID (per-device)
-	DateFormat    string  `json:"date_format"` // Go time format string, empty = default "Mon, Jan 02"
-	ShowBattery   bool    `json:"show_battery"` // Overlay a battery badge (uses X-Battery-Percentage from device)
+	DisplayOrder string `json:"display_order" gorm:"default:'shuffle'"`
+	ShuffleSeed  int64  `json:"-" gorm:"default:0"`
+	Layout       string `json:"layout"`       // "photo_info", "photo_overlay", "side_panel"
+	DisplayMode  string `json:"display_mode"` // "cover" or "fit"
+	ShowCalendar bool   `json:"show_calendar"`
+	CalendarID   string `json:"calendar_id"`  // Google Calendar ID (per-device)
+	DateFormat   string `json:"date_format"`  // Go time format string, empty = default "Mon, Jan 02"
+	ShowBattery  bool   `json:"show_battery"` // Overlay a battery badge (uses X-Battery-Percentage from device)
 	// Per-element overlay placement. One of: top-left, top-center, top-right,
 	// bottom-left, bottom-center, bottom-right. Date/photo-date/weather only
 	// apply on the full-photo (photo_overlay) layout; battery applies on the
 	// photo in every layout.
-	DatePosition      string `json:"date_position" gorm:"default:'bottom-left'"`
-	PhotoDatePosition string `json:"photo_date_position" gorm:"default:'bottom-left'"`
-	WeatherPosition   string `json:"weather_position" gorm:"default:'bottom-right'"`
-	BatteryPosition   string `json:"battery_position" gorm:"default:'top-right'"`
-	BatteryStyle      string `json:"battery_style" gorm:"default:'both'"` // both | icon | text
-	BatteryRotation   int     `json:"battery_rotation" gorm:"default:0"`  // rotate the battery badge: 0/90/180/270 degrees
+	DatePosition      string  `json:"date_position" gorm:"default:'bottom-left'"`
+	PhotoDatePosition string  `json:"photo_date_position" gorm:"default:'bottom-left'"`
+	WeatherPosition   string  `json:"weather_position" gorm:"default:'bottom-right'"`
+	BatteryPosition   string  `json:"battery_position" gorm:"default:'top-right'"`
+	BatteryStyle      string  `json:"battery_style" gorm:"default:'both'"`      // both | icon | text
+	BatteryRotation   int     `json:"battery_rotation" gorm:"default:0"`        // rotate the battery badge: 0/90/180/270 degrees
 	BatteryTextSide   string  `json:"battery_text_side" gorm:"default:'right'"` // which side of the icon the % text sits: left | right
-	BatteryIconScale  float64 `json:"battery_icon_scale" gorm:"default:1"` // size multiplier for the battery icon only (0.5–2.0), independent of text size
-	OverlayScale      float64 `json:"overlay_scale" gorm:"default:1"`     // size multiplier for overlay elements (0.5–2.0)
+	BatteryIconScale  float64 `json:"battery_icon_scale" gorm:"default:1"`      // size multiplier for the battery icon only (0.5–2.0), independent of text size
+	OverlayScale      float64 `json:"overlay_scale" gorm:"default:1"`           // size multiplier for overlay elements (0.5–2.0)
 	// Typeface for the floating overlay chips. OverlayFont is one of the keys in
 	// validOverlayFonts (mapped to a real installed family by the renderer);
 	// OverlayWeight is regular | medium | bold.
@@ -147,15 +147,21 @@ type Device struct {
 	// shown. Lets a frame run a clean text-only chip (e.g. a Description slogan).
 	OverlayHiddenIcons string `json:"overlay_hidden_icons" gorm:"default:''"`
 	// Remote config sync fields (JSON blobs synced from/to device)
-	DeviceConfig             string    `json:"device_config" gorm:"default:'{}'"`
-	DeviceProcessingSettings string    `json:"device_processing_settings" gorm:"default:'{}'"`
-	DeviceColorPalette       string    `json:"device_color_palette" gorm:"default:'{}'"`
-	ConfigLastUpdated        int64     `json:"config_last_updated" gorm:"default:0"`
+	DeviceConfig             string `json:"device_config" gorm:"default:'{}'"`
+	DeviceProcessingSettings string `json:"device_processing_settings" gorm:"default:'{}'"`
+	DeviceColorPalette       string `json:"device_color_palette" gorm:"default:'{}'"`
+	ConfigLastUpdated        int64  `json:"config_last_updated" gorm:"default:0"`
 	// CurrentThumbID is the id (unix-nano filename stem) of the most recent
 	// served-image thumbnail for this frame, served via /served-image-thumbnail/:id.
 	// Lets the Devices list show a miniature of what's currently on the frame.
-	CurrentThumbID string    `json:"current_thumb_id" gorm:"default:''"`
-	CreatedAt      time.Time `json:"created_at"`
+	CurrentThumbID string `json:"current_thumb_id" gorm:"default:''"`
+	// PrevThumbID is the thumbnail id of the image that was on the frame before
+	// the current one (the demoted CurrentThumbID); NextThumbID is a non-mutating
+	// preview render of what the next pull will show (ordered DB-backed sources
+	// only). Both feed the Home Assistant MQTT Previous / Next image entities.
+	PrevThumbID string    `json:"prev_thumb_id" gorm:"default:''"`
+	NextThumbID string    `json:"next_thumb_id" gorm:"default:''"`
+	CreatedAt   time.Time `json:"created_at"`
 }
 
 const (
@@ -187,22 +193,22 @@ func NormalizeDisplayOrder(s string) string {
 // threaded through AddDevice/UpdateDevice as a single argument instead of five
 // more positional parameters.
 type OverlaySettings struct {
-	DatePosition      string
-	PhotoDatePosition string
-	WeatherPosition   string
-	BatteryPosition   string
-	BatteryStyle      string
-	BatteryRotation   int
-	BatteryTextSide   string
-	BatteryIconScale  float64
-	OverlayScale      float64
-	OverlayFont       string
-	OverlayWeight     string
-	ShowNames         bool
-	NamesPosition     string
-	NameFormat        string
-	NamesShowAge      bool
-	NamesMaxLen       int
+	DatePosition        string
+	PhotoDatePosition   string
+	WeatherPosition     string
+	BatteryPosition     string
+	BatteryStyle        string
+	BatteryRotation     int
+	BatteryTextSide     string
+	BatteryIconScale    float64
+	OverlayScale        float64
+	OverlayFont         string
+	OverlayWeight       string
+	ShowNames           bool
+	NamesPosition       string
+	NameFormat          string
+	NamesShowAge        bool
+	NamesMaxLen         int
 	ShowLocation        bool
 	LocationPosition    string
 	LocationMaxLen      int

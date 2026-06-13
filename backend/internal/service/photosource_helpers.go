@@ -58,7 +58,7 @@ func RunDBPhotoFlow(
 	case req.Device != nil:
 		// Ordered single-photo selection (shuffle / chronological / custom).
 		var item model.Image
-		item, err = pickOrderedPhoto(db, req.Device, source, req.Preview, scope...)
+		item, err = pickOrderedPhoto(db, req.Device, source, req.Preview, req.LastServedOverride, scope...)
 		if err != nil {
 			return nil, err
 		}
@@ -134,7 +134,7 @@ func PickRandomDBPhoto(db *gorm.DB, source, orientationFilter string, excludeIDs
 //
 // The cursor is derived from DeviceHistory (the most recent served photo for
 // this device+source), so no separate per-device position needs persisting.
-func pickOrderedPhoto(db *gorm.DB, device *model.Device, source string, preview bool, scope ...func(*gorm.DB) *gorm.DB) (model.Image, error) {
+func pickOrderedPhoto(db *gorm.DB, device *model.Device, source string, preview bool, lastServedOverride uint, scope ...func(*gorm.DB) *gorm.DB) (model.Image, error) {
 	mode := model.NormalizeDisplayOrder(device.DisplayOrder)
 
 	base := db.Model(&model.Image{}).Where("source = ?", source)
@@ -165,7 +165,11 @@ func pickOrderedPhoto(db *gorm.DB, device *model.Device, source string, preview 
 	}
 
 	next := 0
-	if lastID := lastServedImageID(db, device.ID, source); lastID != 0 {
+	lastID := lastServedOverride
+	if lastID == 0 {
+		lastID = lastServedImageID(db, device.ID, source)
+	}
+	if lastID != 0 {
 		if idx := indexOfUint(ids, lastID); idx >= 0 {
 			next = idx + 1
 			if next >= len(ids) {

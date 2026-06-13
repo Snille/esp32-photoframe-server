@@ -1,5 +1,16 @@
 # Changelog
 
+## v1.18.0
+
+### Added
+- **Home Assistant now shows Previous / Current / Next image per frame.** The MQTT bridge previously exposed a single "Current Image" entity that, because it published before the frame's new image had finished rendering, often lagged a rotation behind (it showed the *last* image, not the one on the wall). Each frame now exposes three image entities:
+  - **Current Image** — what's on the frame right now. The bridge is notified *after* the new thumbnail is committed, so it's always truthful (no more off-by-one lag).
+  - **Previous Image** — the image that was on the frame before the current one.
+  - **Next Image** — a non-mutating preview render of what the next pull will show (overlays + the real e-paper dither), for the ordered DB-backed sources (gallery, Immich, Synology, Google Photos). Synthetic sources (AI/fractal/DLA), URL proxy, public art and collage mode have no deterministic "next", so that entity stays empty for them.
+
+### Fixed
+- **"Current Image" no longer shows the previous rotation's photo.** The MQTT publish was triggered at the start of the image request with a fixed 1.5s delay, which lost the race against image download + dithering on slower pulls. It now fires once `current_thumb_id` is committed.
+
 ## v1.17.2
 
 ### Fixed
