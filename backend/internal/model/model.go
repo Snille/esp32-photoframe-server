@@ -177,8 +177,13 @@ type Device struct {
 	NextThumbID string `json:"next_thumb_id" gorm:"default:''"`
 	// LastIP is the client IP the frame last checked in from (best-effort, via
 	// X-Forwarded-For when proxied), surfaced as an HA diagnostic sensor.
-	LastIP    string    `json:"last_ip" gorm:"default:''"`
-	CreatedAt time.Time `json:"created_at"`
+	LastIP string `json:"last_ip" gorm:"default:''"`
+	// LastTrigger is what caused the frame's most recent image change, surfaced as
+	// the HA "Last Trigger" sensor: "timer" (auto-rotate wake), "button" (wake
+	// button), "boot" (cold boot/reset), "push" (server-initiated) or "pull"
+	// (firmware too old to report a wake reason). Set on every real serve.
+	LastTrigger string    `json:"last_trigger" gorm:"default:''"`
+	CreatedAt   time.Time `json:"created_at"`
 }
 
 const (

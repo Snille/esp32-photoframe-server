@@ -111,6 +111,9 @@ export interface Device {
   immich_album_ids?: string;
   // Comma-separated overlay element keys whose icon is hidden (empty = all shown).
   overlay_hidden_icons?: string;
+  // How the frame is mounted relative to the panel's native orientation
+  // (0/90/180/270). Drives the lightbox's viewing dimensions.
+  display_rotation_deg?: number;
   // Id of the most recent served-image thumbnail, served via
   // /served-image-thumbnail/:id — drives the Devices-list current-image preview.
   current_thumb_id?: string;

@@ -1,5 +1,26 @@
 # Changelog
 
+## v1.20.0
+
+### Added
+- **Six more Home Assistant sensors per frame (MQTT).** Each frame now also exposes:
+  - **Timezone** — the frame's configured POSIX timezone.
+  - **Display Rotation** — how the frame is mounted (0/90/180/270°).
+  - **Image Order** — the photo-ordering mode (Shuffle / Newest first / Oldest first / Custom).
+  - **Server Host** — the server (host:port) the frame pulls its images from.
+  - **Deep Sleep** — binary sensor for whether the frame deep-sleeps between rotations.
+  - **Last Trigger** — what caused the most recent image change: Timer (auto-rotate wake), Button (wake button), Boot (cold boot), Push (server-initiated) or Pull. Distinguishing Timer/Button/Boot requires the matching firmware (it reports the wake reason via a new `X-Wake-Reason` header); older firmware shows "Pull".
+
+### Fixed
+- **"Previous Image" no longer shows a broken-image icon in Home Assistant.** When a frame had no previous image yet (fresh device, or just after a source change) the Previous Image entity published an empty payload, which Home Assistant renders as a broken icon. It now goes **Unavailable** in that case, mirroring the Next Image entity.
+- **Clicking a frame's miniature now opens the image at a usable size.** The full-image lightbox rendered the image at the panel's small native resolution (~600 px) instead of scaling it up to fill the viewport, so it looked shrunk. It now scales to fit the screen while preserving aspect ratio.
+
+### Security
+- **Each install now uses a unique JWT signing secret.** Without an explicit `JWT_SECRET`, the server previously fell back to a hardcoded default, which would let anyone forge admin and device tokens. It now generates a strong random secret on first run and persists it (with restrictive permissions) in the data directory. **Note:** on first start after this upgrade, existing tokens become invalid — re-log in to the web UI, and re-save each frame's configuration once (while it is awake) to push it a fresh device token.
+
+### Changed
+- Internal cleanups: removed a duplicate settings route, fixed a flaky test helper, corrected the Google OAuth callback-port example (9607), and suppressed a false-positive lint warning on the firmware installer button.
+
 ## v1.19.2
 
 ### Fixed

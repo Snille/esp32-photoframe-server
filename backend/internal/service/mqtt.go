@@ -3,6 +3,7 @@ package service
 import (
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -142,6 +143,23 @@ func (s *MQTTService) nextAvailabilityTopic(id uint) string {
 	return fmt.Sprintf("%s/device/%d/next_available", s.cfg.baseTopic, id)
 }
 
+// prevAvailabilityTopic gates the Previous Image entity's availability: published
+// "offline" when there is no previous thumbnail yet (fresh device / after a source
+// change), so HA shows it as Unavailable instead of rendering the empty image
+// payload as a broken-image icon.
+func (s *MQTTService) prevAvailabilityTopic(id uint) string {
+	return fmt.Sprintf("%s/device/%d/prev_available", s.cfg.baseTopic, id)
+}
+
+// thumbExists reports whether the 400px thumbnail file for thumbID is on disk.
+func (s *MQTTService) thumbExists(thumbID string) bool {
+	if thumbID == "" {
+		return false
+	}
+	_, err := os.Stat(filepath.Join(s.dataDir, fmt.Sprintf("thumb_%s.jpg", thumbID)))
+	return err == nil
+}
+
 func (s *MQTTService) connect(cfg mqttConfig) {
 	opts := mqtt.NewClientOptions()
 	opts.AddBroker(fmt.Sprintf("tcp://%s:%d", cfg.host, cfg.port))
@@ -267,11 +285,13 @@ func (s *MQTTService) RemoveDevice(deviceID uint) {
 		client.Publish(s.discoveryTopic("image", deviceID, key), 1, true, "")
 	}
 	client.Publish(s.discoveryTopic("binary_sensor", deviceID, "collage"), 1, true, "")
+	client.Publish(s.discoveryTopic("binary_sensor", deviceID, "deep_sleep"), 1, true, "")
 	client.Publish(s.stateTopic(deviceID), 1, true, "")
 	client.Publish(s.imageTopic(deviceID), 1, true, "")
 	client.Publish(s.prevImageTopic(deviceID), 1, true, "")
 	client.Publish(s.nextImageTopic(deviceID), 1, true, "")
 	client.Publish(s.nextAvailabilityTopic(deviceID), 1, true, "")
+	client.Publish(s.prevAvailabilityTopic(deviceID), 1, true, "")
 	s.mu.Lock()
 	delete(s.discoverySent, deviceID)
 	s.mu.Unlock()
@@ -297,6 +317,13 @@ func (s *MQTTService) publishDevice(device *model.Device) {
 		avail = "online"
 	}
 	client.Publish(s.nextAvailabilityTopic(device.ID), 1, true, avail)
+	// Gate the Previous Image entity on whether a previous thumbnail actually
+	// exists, so an absent one shows as Unavailable instead of a broken-image icon.
+	prevAvail := "offline"
+	if s.thumbExists(device.PrevThumbID) {
+		prevAvail = "online"
+	}
+	client.Publish(s.prevAvailabilityTopic(device.ID), 1, true, prevAvail)
 }
 
 func (s *MQTTService) publishState(client mqtt.Client, device *model.Device) {
@@ -345,6 +372,26 @@ func (s *MQTTService) publishState(client mqtt.Client, device *model.Device) {
 	if device.LastIP != "" {
 		state["ip_address"] = device.LastIP
 	}
+	// Frame timezone (POSIX TZ string), how the frame is mounted (display rotation),
+	// which photo-ordering mode it uses, the server it pulls images from, and what
+	// triggered the most recent image change.
+	if pc.timezone != "" {
+		state["timezone"] = pc.timezone
+	}
+	state["rotation"] = device.DisplayRotationDeg
+	state["display_order"] = displayOrderLabel(device.DisplayOrder)
+	if host := serverHostFromURL(pc.imageURL); host != "" {
+		state["server_host"] = host
+	}
+	if t := triggerLabel(device.LastTrigger); t != "" {
+		state["trigger"] = t
+	}
+	// Deep-sleep on/off (binary_sensor); the frame deep-sleeps between rotations.
+	if pc.deepSleep {
+		state["deep_sleep"] = "ON"
+	} else {
+		state["deep_sleep"] = "OFF"
+	}
 
 	// Collage flag + an explanation of the Next Image entity's state. The Next
 	// Image preview only works for ordered DB-backed sources with collage off
@@ -388,12 +435,15 @@ type pollConfig struct {
 	sleepEnabled   bool // quiet-hours schedule active
 	sleepStart     int  // minutes since local midnight
 	sleepEnd       int
+	timezone       string // frame's POSIX TZ string (e.g. "UTC0", "CET-1CEST,M3.5.0,...")
+	deepSleep      bool   // deep_sleep_enabled (frame deep-sleeps between rotations)
+	imageURL       string // configured image source URL (to derive the server host)
 }
 
 func parsePollConfig(deviceConfig string) pollConfig {
-	// auto_rotate defaults on when the key is absent (older firmware); the others
-	// default to their zero value.
-	pc := pollConfig{autoRotate: true}
+	// auto_rotate + deep_sleep default on when the key is absent (older firmware /
+	// the FireBeetle's normal mode); the others default to their zero value.
+	pc := pollConfig{autoRotate: true, deepSleep: true}
 	if deviceConfig == "" {
 		return pc
 	}
@@ -419,7 +469,66 @@ func parsePollConfig(deviceConfig string) pollConfig {
 	if v, ok := cfg["sleep_schedule_end"].(float64); ok {
 		pc.sleepEnd = int(v)
 	}
+	if v, ok := cfg["timezone"].(string); ok {
+		pc.timezone = strings.TrimSpace(v)
+	}
+	if v, ok := cfg["deep_sleep_enabled"].(bool); ok {
+		pc.deepSleep = v
+	}
+	if v, ok := cfg["image_url"].(string); ok {
+		pc.imageURL = strings.TrimSpace(v)
+	}
 	return pc
+}
+
+// serverHostFromURL extracts the "host[:port]" the frame pulls images from out of
+// its configured image_url, for the HA "Server Host" sensor. Empty when the URL
+// is blank or unparseable.
+func serverHostFromURL(raw string) string {
+	if raw == "" {
+		return ""
+	}
+	u, err := url.Parse(raw)
+	if err != nil || u.Host == "" {
+		return ""
+	}
+	return u.Host
+}
+
+// displayOrderLabel maps the stored display-order mode to a human label for the
+// HA "Image Order" sensor.
+func displayOrderLabel(order string) string {
+	switch order {
+	case model.DisplayOrderShuffle:
+		return "Shuffle"
+	case model.DisplayOrderChronoNewest:
+		return "Newest first"
+	case model.DisplayOrderChronoOldest:
+		return "Oldest first"
+	case model.DisplayOrderCustom:
+		return "Custom"
+	default:
+		return "Shuffle"
+	}
+}
+
+// triggerLabel maps the stored last-trigger token to a human label for the HA
+// "Last Trigger" sensor.
+func triggerLabel(t string) string {
+	switch t {
+	case "timer":
+		return "Timer"
+	case "button":
+		return "Button"
+	case "boot":
+		return "Boot"
+	case "push":
+		return "Push"
+	case "pull":
+		return "Pull"
+	default:
+		return ""
+	}
 }
 
 // computeNextPull predicts when the frame next wakes to fetch an image, mirroring
@@ -483,7 +592,7 @@ func (s *MQTTService) publishOneImage(client mqtt.Client, topic, thumbID string)
 }
 
 // mqttSensorKeys are the value_json keys exposed as HA sensors.
-var mqttSensorKeys = []string{"battery", "battery_voltage", "days_remaining", "trend", "source", "last_seen", "refresh_interval", "sleep_schedule", "next_pull", "host", "ip_address", "next_image_status"}
+var mqttSensorKeys = []string{"battery", "battery_voltage", "days_remaining", "trend", "source", "last_seen", "refresh_interval", "sleep_schedule", "next_pull", "host", "ip_address", "next_image_status", "timezone", "rotation", "display_order", "server_host", "trigger"}
 
 func (s *MQTTService) discoveryTopic(component string, id uint, key string) string {
 	return fmt.Sprintf("%s/%s/photoframe_%d_%s/config", s.cfg.discoveryPrefix, component, id, key)
@@ -559,6 +668,41 @@ func (s *MQTTService) publishDiscovery(client mqtt.Client, device *model.Device)
 		"icon": "mdi:image-sync-outline", "entity_category": "diagnostic",
 	})
 
+	// Frame timezone, mount rotation, photo-ordering mode, the server it pulls
+	// from, and what triggered the most recent image change.
+	sensor("timezone", "Timezone", "timezone", map[string]interface{}{
+		"icon": "mdi:map-clock", "entity_category": "diagnostic",
+	})
+	sensor("rotation", "Display Rotation", "rotation", map[string]interface{}{
+		"unit_of_measurement": "°", "icon": "mdi:screen-rotation", "entity_category": "diagnostic",
+	})
+	sensor("display_order", "Image Order", "display_order", map[string]interface{}{
+		"icon": "mdi:sort",
+	})
+	sensor("server_host", "Server Host", "server_host", map[string]interface{}{
+		"icon": "mdi:server-network", "entity_category": "diagnostic",
+	})
+	sensor("trigger", "Last Trigger", "trigger", map[string]interface{}{
+		"icon": "mdi:gesture-tap-button",
+	})
+
+	// Deep-sleep on/off flag (binary_sensor like collage).
+	deepSleepCfg := map[string]interface{}{
+		"name":            "Deep Sleep",
+		"unique_id":       fmt.Sprintf("photoframe_%d_deep_sleep", device.ID),
+		"object_id":       fmt.Sprintf("photoframe_%s_deep_sleep", sanitize(device.Name)),
+		"state_topic":     state,
+		"value_template":  "{{ value_json.deep_sleep }}",
+		"payload_on":      "ON",
+		"payload_off":     "OFF",
+		"icon":            "mdi:power-sleep",
+		"entity_category": "diagnostic",
+		"availability":    avail,
+		"device":          dev,
+	}
+	deepSleepPayload, _ := json.Marshal(deepSleepCfg)
+	client.Publish(s.discoveryTopic("binary_sensor", device.ID, "deep_sleep"), 1, true, deepSleepPayload)
+
 	// Collage on/off flag.
 	collageCfg := map[string]interface{}{
 		"name":            "Collage",
@@ -599,7 +743,16 @@ func (s *MQTTService) publishDiscovery(client mqtt.Client, device *model.Device)
 	// "current" keeps its original unique_id ("..._image") so existing HA
 	// entities aren't orphaned; previous/next are new.
 	imageEntity("current", "image", "Current Image", s.imageTopic(device.ID), avail, "")
-	imageEntity("previous", "previous_image", "Previous Image", s.prevImageTopic(device.ID), avail, "")
+	// Previous is available only when BOTH the bridge is online AND a previous
+	// thumbnail exists (prev_available topic) — hence availability_mode "all" — so
+	// a frame with no previous image yet shows Unavailable, not a broken icon.
+	prevAvail := append([]map[string]string{}, avail...)
+	prevAvail = append(prevAvail, map[string]string{
+		"topic":                 s.prevAvailabilityTopic(device.ID),
+		"payload_available":     "online",
+		"payload_not_available": "offline",
+	})
+	imageEntity("previous", "previous_image", "Previous Image", s.prevImageTopic(device.ID), prevAvail, "all")
 	// Next is available only when BOTH the bridge is online AND a deterministic
 	// next image exists (next_available topic) — hence availability_mode "all".
 	nextAvail := append([]map[string]string{}, avail...)

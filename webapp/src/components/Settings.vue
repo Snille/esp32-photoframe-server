@@ -237,7 +237,7 @@
                       and add the redirect URI:
                       <br />
                       <code
-                        >http://[YOUR_SERVER_IP]:8080/api/auth/google/callback</code
+                        >http://[YOUR_SERVER_IP]:9607/api/auth/google/callback</code
                       >
                     </div>
                   </v-alert>
@@ -1545,6 +1545,8 @@
                   </v-toolbar>
                   <v-img
                     :src="fullImageUrl"
+                    :width="fullImageWidth"
+                    :height="fullImageHeight"
                     max-height="85vh"
                     max-width="96vw"
                     contain
@@ -4857,11 +4859,38 @@ const getServedFullUrl = (thumbId: string) =>
 const fullImageDialog = ref(false);
 const fullImageUrl = ref('');
 const fullImageTitle = ref('');
+// Explicit display size so the lightbox scales the (small, native-resolution)
+// panel image UP to fill the viewport instead of rendering at its ~600px native
+// size. Undefined falls back to the CSS max-width/height only.
+const fullImageWidth = ref<number | undefined>(undefined);
+const fullImageHeight = ref<number | undefined>(undefined);
 
 const openFullImage = (device: Device) => {
   if (!device.current_thumb_id) return;
   fullImageUrl.value = getServedFullUrl(device.current_thumb_id);
   fullImageTitle.value = device.name || 'Current image';
+  // The full image is rendered at the panel's native resolution; viewing
+  // dimensions swap at 90/270. Scale to fill most of the viewport (upscaling
+  // allowed) so it isn't tiny on a desktop.
+  const nw = device.width || 0;
+  const nh = device.height || 0;
+  const deg = (((device.display_rotation_deg || 0) % 360) + 360) % 360;
+  let vw = nw;
+  let vh = nh;
+  if (deg === 90 || deg === 270) {
+    vw = nh;
+    vh = nw;
+  }
+  if (vw > 0 && vh > 0) {
+    const maxW = window.innerWidth * 0.92;
+    const maxH = window.innerHeight * 0.8;
+    const scale = Math.min(maxW / vw, maxH / vh);
+    fullImageWidth.value = Math.round(vw * scale);
+    fullImageHeight.value = Math.round(vh * scale);
+  } else {
+    fullImageWidth.value = undefined;
+    fullImageHeight.value = undefined;
+  }
   fullImageDialog.value = true;
 };
 

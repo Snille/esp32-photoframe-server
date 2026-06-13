@@ -187,6 +187,22 @@ func (h *ImageHandler) ServeImage(c echo.Context) error {
 			device.LastIP = ip
 			go h.db.Model(&model.Device{}).Where("id = ?", device.ID).Update("last_ip", ip)
 		}
+		// Record what triggered this pull (for the HA "Last Trigger" sensor). The
+		// firmware reports its deep-sleep wake cause via X-Wake-Reason; firmware too
+		// old to send it is recorded as a generic "pull".
+		trigger := "pull"
+		switch strings.ToLower(c.Request().Header.Get("X-Wake-Reason")) {
+		case "timer":
+			trigger = "timer"
+		case "button":
+			trigger = "button"
+		case "boot":
+			trigger = "boot"
+		}
+		if trigger != device.LastTrigger {
+			device.LastTrigger = trigger
+			go h.db.Model(&model.Device{}).Where("id = ?", device.ID).Update("last_trigger", trigger)
+		}
 	}
 
 	// (The MQTT bridge is notified at the end of the serve, once current_thumb_id

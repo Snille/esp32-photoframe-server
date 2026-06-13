@@ -602,6 +602,13 @@ func (s *DeviceService) PushToHost(device *model.Device, imagePath string, extra
 		}
 	}
 
+	// This image change was server-initiated, so record "push" as the trigger for
+	// the HA "Last Trigger" sensor (the pull path records timer/button/boot).
+	if device.LastTrigger != "push" {
+		device.LastTrigger = "push"
+		s.db.Model(device).Update("last_trigger", "push")
+	}
+
 	if rawEPD {
 		// CLI produced EPDGZ; decompress to the raw 4bpp panel bytes the
 		// SRAM-only device streams directly into its framebuffer.

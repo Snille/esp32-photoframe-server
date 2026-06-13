@@ -30,7 +30,7 @@ func onePixelPNGBase64(t *testing.T) string {
 }
 
 func TestAIGenerationMiniMaxGlobalSendsExpectedRequest(t *testing.T) {
-	settings := NewSettingsService(setupTestDB())
+	settings := NewSettingsService(setupTestDB(t))
 	if err := settings.Set("minimax_global_api_key", "test-global-key"); err != nil {
 		t.Fatalf("set api key: %v", err)
 	}
@@ -80,7 +80,7 @@ func TestAIGenerationMiniMaxGlobalSendsExpectedRequest(t *testing.T) {
 }
 
 func TestAIGenerationMiniMaxChinaUsesChinaEndpointAndPortraitAspect(t *testing.T) {
-	settings := NewSettingsService(setupTestDB())
+	settings := NewSettingsService(setupTestDB(t))
 	if err := settings.Set("minimax_china_api_key", "test-cn-key"); err != nil {
 		t.Fatalf("set api key: %v", err)
 	}

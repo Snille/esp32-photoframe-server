@@ -1,10 +1,13 @@
 package main
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"log"
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/aitjcize/esp32-photoframe-server/backend/internal/db"
 	"github.com/aitjcize/esp32-photoframe-server/backend/internal/handler"
@@ -20,6 +23,35 @@ import (
 	echoMiddleware "github.com/labstack/echo/v4/middleware"
 	"gorm.io/gorm"
 )
+
+// resolveJWTSecret returns the JWT signing secret. An explicit JWT_SECRET env
+// wins; otherwise a strong random secret is read from (or, on first run,
+// generated and written to) <dataDir>/jwt_secret with 0600 perms, so each
+// install has a unique key. Only if persistence fails entirely does it fall back
+// to the in-service default (logged loudly).
+func resolveJWTSecret(dataDir string) string {
+	if s := strings.TrimSpace(os.Getenv("JWT_SECRET")); s != "" {
+		return s
+	}
+	path := filepath.Join(dataDir, "jwt_secret")
+	if b, err := os.ReadFile(path); err == nil {
+		if s := strings.TrimSpace(string(b)); s != "" {
+			return s
+		}
+	}
+	buf := make([]byte, 32)
+	if _, err := rand.Read(buf); err != nil {
+		log.Printf("WARNING: could not generate a JWT secret (%v); falling back to the insecure default. Set JWT_SECRET to fix.", err)
+		return ""
+	}
+	secret := hex.EncodeToString(buf)
+	if err := os.WriteFile(path, []byte(secret), 0600); err != nil {
+		log.Printf("WARNING: generated a JWT secret but could not persist it to %s (%v); it will change on restart and invalidate existing tokens. Set JWT_SECRET to fix.", path, err)
+	} else {
+		log.Printf("Generated a new persistent JWT secret at %s", path)
+	}
+	return secret
+}
 
 func main() {
 	// Initialize Database
@@ -133,8 +165,12 @@ func main() {
 	// Initialize Services
 	settingsService := service.NewSettingsService(database)
 	tokenStore := service.NewDBTokenStore(database, "photos")
-	// JWT Secret - In production, this should come from env but for Addon we might generate or fix it
-	jwtSecret := os.Getenv("JWT_SECRET")
+	// JWT Secret: prefer an explicit JWT_SECRET env; otherwise use a strong random
+	// secret persisted in the data dir (generated once on first run) so every
+	// install gets a unique, non-guessable signing key instead of the hardcoded
+	// default. Falling back to a fixed default would let anyone forge admin /
+	// device tokens.
+	jwtSecret := resolveJWTSecret(dataDir)
 	authService := service.NewAuthService(database, jwtSecret)
 
 	// Migrate All Models
@@ -323,7 +359,6 @@ func main() {
 	// Protected API Routes
 	// 1. Protected API Group
 	protectedApi := e.Group("/api", authMiddleware)
-	protectedApi.GET("/settings", h.GetSettings)
 	protectedApi.GET("/settings", h.GetSettings)
 	protectedApi.POST("/settings", h.UpdateSettings)
 
