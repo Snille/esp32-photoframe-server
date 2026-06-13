@@ -187,6 +187,14 @@ func (s *ImmichService) ListAlbums() ([]immich.Album, error) {
 	sort.SliceStable(albums, func(i, j int) bool {
 		return strings.ToLower(albums[i].AlbumName) < strings.ToLower(albums[j].AlbumName)
 	})
+	// Cache album names by UUID so the Home Assistant "Immich Albums" sensor can
+	// resolve a frame's selected album IDs without an Immich round-trip.
+	for _, a := range albums {
+		s.db.Clauses(clause.OnConflict{
+			Columns:   []clause.Column{{Name: "immich_album_id"}},
+			DoUpdates: clause.AssignmentColumns([]string{"album_name"}),
+		}).Create(&model.ImmichAlbum{ImmichAlbumID: a.ID, AlbumName: a.AlbumName})
+	}
 	return albums, nil
 }
 

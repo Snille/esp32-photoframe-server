@@ -405,8 +405,22 @@ func (h *ImageHandler) ServeImage(c echo.Context) error {
 		}(device.ID, servedImageIDs)
 	}
 
+	// Rotation-position chip: where the just-served photo sits in this frame's
+	// rotation (computed from the in-flight served id so it's truthful before the
+	// async DeviceHistory write). Empty for non-ordered sources / collage.
+	rotationText, rotationIcon := "", ""
+	if device.ShowRotation {
+		curID := uint(0)
+		if len(servedImageIDs) > 0 {
+			curID = servedImageIDs[0]
+		}
+		rs := service.ComputeRotationStatus(h.db, &device, source, curID)
+		rotationText, rotationIcon = service.FormatRotationOverlay(rs, device.RotationShowTotal)
+	}
+	showRotation := device.ShowRotation && rotationText != ""
+
 	// 2. Render layout (photo + overlay + calendar)
-	needsOverlay := showDate || showPhotoDate || showWeather || showCalendar || showBattery || showNames || showLocation || showDescription
+	needsOverlay := showDate || showPhotoDate || showWeather || showCalendar || showBattery || showNames || showLocation || showDescription || showRotation
 	var imgWithOverlay image.Image
 
 	// People-names + location + description strings, formatted per device
@@ -496,6 +510,10 @@ func (h *ImageHandler) ServeImage(c echo.Context) error {
 			ShowDescription:     showDescription,
 			Description:         descriptionStr,
 			DescriptionPosition: device.DescriptionPosition,
+			ShowRotation:        showRotation,
+			RotationText:        rotationText,
+			RotationIcon:        rotationIcon,
+			RotationPosition:    device.RotationPosition,
 			OverlayHiddenIcons:  device.OverlayHiddenIcons,
 		})
 		if renderErr != nil {

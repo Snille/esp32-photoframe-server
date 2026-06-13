@@ -7,11 +7,13 @@ package service
 // so the plugins stay small and uniform.
 
 import (
+	"fmt"
 	"image"
 	"log"
 	"math/rand"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"gorm.io/gorm"
@@ -122,6 +124,125 @@ func PickRandomDBPhoto(db *gorm.DB, source, orientationFilter string, excludeIDs
 	return item, err
 }
 
+// orderedCandidateIDs builds the canonical ordered list of candidate image IDs
+// for a device+source in the device's current DisplayOrder mode, using the
+// device's CURRENT shuffle seed (it never bumps it). This is the shared
+// list-building step behind both the next-photo cursor (pickOrderedPhoto) and
+// the rotation position/size reporting (ComputeRotationStatus), so the two
+// always agree on order and length.
+func orderedCandidateIDs(db *gorm.DB, device *model.Device, source string, scope ...func(*gorm.DB) *gorm.DB) ([]uint, string, error) {
+	mode := model.NormalizeDisplayOrder(device.DisplayOrder)
+	base := db.Model(&model.Image{}).Where("source = ?", source)
+	for _, fn := range scope {
+		if fn != nil {
+			base = fn(base)
+		}
+	}
+	switch mode {
+	case model.DisplayOrderChronoNewest:
+		base = base.Order("COALESCE(photo_taken_at, created_at) DESC, id DESC")
+	case model.DisplayOrderChronoOldest:
+		base = base.Order("COALESCE(photo_taken_at, created_at) ASC, id ASC")
+	case model.DisplayOrderCustom:
+		base = base.Order("display_order ASC, id ASC")
+	default: // shuffle — pull in a stable order, then shuffle deterministically
+		base = base.Order("id ASC")
+	}
+	var ids []uint
+	if err := base.Pluck("id", &ids).Error; err != nil {
+		return nil, mode, err
+	}
+	if mode == model.DisplayOrderShuffle {
+		deterministicShuffle(ids, device.ShuffleSeed)
+	}
+	return ids, mode, nil
+}
+
+// deviceSourceScope returns the per-device pool filter for a source, or nil when
+// the whole source pool applies. Today only Immich has one: a frame can restrict
+// itself to selected albums (via the membership join table). Shared so the
+// source plugin, the next-photo cursor, and the rotation-size report all count
+// the exact same pool.
+func deviceSourceScope(device *model.Device, source string) func(*gorm.DB) *gorm.DB {
+	if device == nil || source != model.SourceImmich {
+		return nil
+	}
+	ids := model.ParseImmichAlbumIDs(device.ImmichAlbumIDs)
+	if len(ids) == 0 {
+		return nil
+	}
+	return func(q *gorm.DB) *gorm.DB {
+		return q.Where(
+			"id IN (SELECT image_id FROM immich_image_albums WHERE immich_album_id IN ?)", ids)
+	}
+}
+
+// RotationStatus describes where a frame is in its image rotation, for the Home
+// Assistant sensors and the on-image overlay. Ordered is false for sources that
+// have no deterministic sequence (collage / synthetic / url_proxy), in which case
+// the numeric fields are meaningless and callers should skip the report.
+type RotationStatus struct {
+	Total     int    // number of images in this frame's rotation pool
+	Position  int    // 1-based index of the current image (0 = unknown)
+	Remaining int    // images left in this cycle after the current one (Total-Position)
+	Mode      string // normalized DisplayOrder
+	Ordered   bool   // false for collage / non-ordered sources
+}
+
+// ComputeRotationStatus reports the size of a frame's rotation pool and where the
+// current image sits in it. currentID is the image being served right now (so the
+// overlay/sensor reflects the in-flight pull before DeviceHistory is written);
+// pass 0 to derive it from the most recently served photo. The order, seed and
+// pool filter match pickOrderedPhoto exactly, so Position/Remaining line up with
+// what the frame actually shows next.
+func ComputeRotationStatus(db *gorm.DB, device *model.Device, source string, currentID uint) RotationStatus {
+	rs := RotationStatus{Mode: model.NormalizeDisplayOrder(device.DisplayOrder)}
+	if device == nil || device.EnableCollage || !model.IsOrderedSource(source) {
+		return rs
+	}
+	ids, mode, err := orderedCandidateIDs(db, device, source, deviceSourceScope(device, source))
+	if err != nil || len(ids) == 0 {
+		return rs
+	}
+	rs.Ordered = true
+	rs.Mode = mode
+	rs.Total = len(ids)
+	cur := currentID
+	if cur == 0 {
+		cur = lastServedImageID(db, device.ID, source)
+	}
+	if cur != 0 {
+		if idx := indexOfUint(ids, cur); idx >= 0 {
+			rs.Position = idx + 1
+			rs.Remaining = rs.Total - rs.Position
+		}
+	}
+	return rs
+}
+
+// FormatRotationOverlay builds the compact on-image chip text + Material Symbols
+// icon name for a rotation status. For shuffle it shows images left in the cycle
+// (a shuffle glyph); for chronological/custom it shows the current image number
+// (a "#" tag glyph). showTotal appends "/<pool size>". Returns empty text when
+// there's nothing meaningful to show (no ordered position yet).
+func FormatRotationOverlay(rs RotationStatus, showTotal bool) (text, icon string) {
+	if !rs.Ordered || rs.Total <= 0 || rs.Position <= 0 {
+		return "", ""
+	}
+	n := rs.Position
+	icon = "tag"
+	if rs.Mode == model.DisplayOrderShuffle {
+		n = rs.Remaining
+		icon = "shuffle"
+	}
+	if showTotal {
+		text = fmt.Sprintf("%d/%d", n, rs.Total)
+	} else {
+		text = strconv.Itoa(n)
+	}
+	return text, icon
+}
+
 // pickOrderedPhoto selects the next photo for a device according to its
 // DisplayOrder mode. Every mode reduces to the same idea: build the canonical
 // ordered list of candidate image IDs for the source, find where the
@@ -135,33 +256,12 @@ func PickRandomDBPhoto(db *gorm.DB, source, orientationFilter string, excludeIDs
 // The cursor is derived from DeviceHistory (the most recent served photo for
 // this device+source), so no separate per-device position needs persisting.
 func pickOrderedPhoto(db *gorm.DB, device *model.Device, source string, preview bool, lastServedOverride uint, scope ...func(*gorm.DB) *gorm.DB) (model.Image, error) {
-	mode := model.NormalizeDisplayOrder(device.DisplayOrder)
-
-	base := db.Model(&model.Image{}).Where("source = ?", source)
-	for _, fn := range scope {
-		if fn != nil {
-			base = fn(base)
-		}
-	}
-	var ids []uint
-	switch mode {
-	case model.DisplayOrderChronoNewest:
-		base = base.Order("COALESCE(photo_taken_at, created_at) DESC, id DESC")
-	case model.DisplayOrderChronoOldest:
-		base = base.Order("COALESCE(photo_taken_at, created_at) ASC, id ASC")
-	case model.DisplayOrderCustom:
-		base = base.Order("display_order ASC, id ASC")
-	default: // shuffle — pull in a stable order, then shuffle deterministically
-		base = base.Order("id ASC")
-	}
-	if err := base.Pluck("id", &ids).Error; err != nil {
+	ids, mode, err := orderedCandidateIDs(db, device, source, scope...)
+	if err != nil {
 		return model.Image{}, err
 	}
 	if len(ids) == 0 {
 		return model.Image{}, gorm.ErrRecordNotFound
-	}
-	if mode == model.DisplayOrderShuffle {
-		deterministicShuffle(ids, device.ShuffleSeed)
 	}
 
 	next := 0

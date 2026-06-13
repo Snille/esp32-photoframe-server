@@ -152,6 +152,14 @@ type Device struct {
 	ShowDescription     bool   `json:"show_description" gorm:"default:0"`
 	DescriptionPosition string `json:"description_position" gorm:"default:'wide-bottom'"`
 	DescriptionMaxLen   int    `json:"description_max_len" gorm:"default:80"`
+	// Rotation-position overlay: a compact "where am I in the rotation" chip.
+	// For shuffle it shows images left in the cycle, for chronological/custom the
+	// current image number. RotationShowTotal appends "/<pool size>". Only ordered
+	// DB-backed sources have a meaningful rotation, so the chip self-suppresses
+	// otherwise (collage / synthetic sources).
+	ShowRotation      bool   `json:"show_rotation" gorm:"default:0"`
+	RotationPosition  string `json:"rotation_position" gorm:"default:'bottom-right'"`
+	RotationShowTotal bool   `json:"rotation_show_total" gorm:"default:1"`
 	// Per-device Immich album filter: comma-separated Immich album UUIDs. When
 	// set, this frame only shows photos that belong to one of these albums
 	// (using the same global Immich connection). Empty = all Immich photos.
@@ -237,6 +245,9 @@ type OverlaySettings struct {
 	ShowDescription     bool
 	DescriptionPosition string
 	DescriptionMaxLen   int
+	ShowRotation        bool
+	RotationPosition    string
+	RotationShowTotal   bool
 	OverlayHiddenIcons  string
 }
 
@@ -505,6 +516,17 @@ type ImmichImageAlbum struct {
 }
 
 func (ImmichImageAlbum) TableName() string { return "immich_image_albums" }
+
+// ImmichAlbum caches an Immich album's display name keyed by its UUID, so the
+// Home Assistant "Immich Albums" sensor can resolve a frame's selected album IDs
+// to names without calling the Immich API on each publish. Refreshed whenever the
+// album list is fetched (album picker / import).
+type ImmichAlbum struct {
+	ImmichAlbumID string `gorm:"primaryKey" json:"immich_album_id"`
+	AlbumName     string `json:"album_name"`
+}
+
+func (ImmichAlbum) TableName() string { return "immich_albums" }
 
 type UserSession struct {
 	ID        uint      `gorm:"primaryKey" json:"id"`

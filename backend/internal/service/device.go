@@ -178,6 +178,9 @@ func (s *DeviceService) AddDevice(host string, enableCollage, showDate, showPhot
 		ShowDescription:          overlay.ShowDescription,
 		DescriptionPosition:      model.NormalizeOverlayPosition(overlay.DescriptionPosition, "wide-bottom"),
 		DescriptionMaxLen:        model.NormalizeDescriptionMaxLen(overlay.DescriptionMaxLen),
+		ShowRotation:             overlay.ShowRotation,
+		RotationPosition:         model.NormalizeOverlayPosition(overlay.RotationPosition, "bottom-right"),
+		RotationShowTotal:        overlay.RotationShowTotal,
 		OverlayHiddenIcons:       model.NormalizeOverlayHiddenIcons(overlay.OverlayHiddenIcons),
 		DeviceConfig:             deviceConfig,
 		DeviceProcessingSettings: deviceProc,
@@ -259,6 +262,9 @@ func (s *DeviceService) UpdateDevice(id uint, name, host, orientation string, en
 	device.ShowDescription = overlay.ShowDescription
 	device.DescriptionPosition = model.NormalizeOverlayPosition(overlay.DescriptionPosition, "wide-bottom")
 	device.DescriptionMaxLen = model.NormalizeDescriptionMaxLen(overlay.DescriptionMaxLen)
+	device.ShowRotation = overlay.ShowRotation
+	device.RotationPosition = model.NormalizeOverlayPosition(overlay.RotationPosition, "bottom-right")
+	device.RotationShowTotal = overlay.RotationShowTotal
 	device.OverlayHiddenIcons = model.NormalizeOverlayHiddenIcons(overlay.OverlayHiddenIcons)
 
 	if err := s.db.Save(&device).Error; err != nil {

@@ -117,6 +117,9 @@ func (h *DeviceHandler) AddDevice(c echo.Context) error {
 		ShowDescription     bool   `json:"show_description"`
 		DescriptionPosition string `json:"description_position"`
 		DescriptionMaxLen   int    `json:"description_max_len"`
+		ShowRotation        bool   `json:"show_rotation"`
+		RotationPosition    string `json:"rotation_position"`
+		RotationShowTotal   bool   `json:"rotation_show_total"`
 		OverlayHiddenIcons  string `json:"overlay_hidden_icons"`
 	}
 	if err := c.Bind(&req); err != nil {
@@ -154,6 +157,9 @@ func (h *DeviceHandler) AddDevice(c echo.Context) error {
 		ShowDescription:     req.ShowDescription,
 		DescriptionPosition: req.DescriptionPosition,
 		DescriptionMaxLen:   req.DescriptionMaxLen,
+		ShowRotation:        req.ShowRotation,
+		RotationPosition:    req.RotationPosition,
+		RotationShowTotal:   req.RotationShowTotal,
 		OverlayHiddenIcons:  req.OverlayHiddenIcons,
 	})
 	if err != nil {
@@ -218,6 +224,9 @@ func (h *DeviceHandler) UpdateDevice(c echo.Context) error {
 		ShowDescription     bool   `json:"show_description"`
 		DescriptionPosition string `json:"description_position"`
 		DescriptionMaxLen   int    `json:"description_max_len"`
+		ShowRotation        bool   `json:"show_rotation"`
+		RotationPosition    string `json:"rotation_position"`
+		RotationShowTotal   bool   `json:"rotation_show_total"`
 		OverlayHiddenIcons  string `json:"overlay_hidden_icons"`
 	}
 	if err := c.Bind(&req); err != nil {
@@ -251,6 +260,9 @@ func (h *DeviceHandler) UpdateDevice(c echo.Context) error {
 		ShowDescription:     req.ShowDescription,
 		DescriptionPosition: req.DescriptionPosition,
 		DescriptionMaxLen:   req.DescriptionMaxLen,
+		ShowRotation:        req.ShowRotation,
+		RotationPosition:    req.RotationPosition,
+		RotationShowTotal:   req.RotationShowTotal,
 		OverlayHiddenIcons:  req.OverlayHiddenIcons,
 	})
 	if err != nil {

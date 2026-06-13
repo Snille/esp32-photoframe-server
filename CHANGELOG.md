@@ -1,5 +1,18 @@
 # Changelog
 
+## v1.22.0
+
+### Added
+- **"Where am I in the rotation?" — new Home Assistant sensors (MQTT).** Each frame now reports its position in its photo rotation (for ordered sources — Gallery / Immich / Synology / Google Photos, with collage off):
+  - **Rotation Size** — how many photos are in the frame's rotation (respecting its Immich album filter).
+  - **Rotation Status** — a one-line summary: in shuffle mode "*N* of *T* left" (counts down to a fresh shuffle), in chronological/custom mode "Image *P* of *T*".
+  - **Rotation Position** / **Rotation Remaining** — the numeric position and images-left (diagnostic).
+  - **Rotation Completes** — a timestamp estimate of when the current cycle finishes (a fresh shuffle / wrap), based on the rotate interval. Only when auto-rotate is on.
+- **Current Photo Date (MQTT)** — the capture date of the photo currently on the frame.
+- **Immich Albums (MQTT)** — the names of the Immich albums the frame pulls from (falls back to album IDs until the album list has been loaded once).
+- **Reshuffle button (MQTT)** — reshuffles the frame's photo order for the next pull. Server-side, so it works on any board.
+- **Rotation-position overlay.** A new opt-in overlay chip bakes the rotation position onto the photo itself, with selectable placement like the other overlay elements. Kept compact to stay out of the way: in shuffle mode it shows images left (with a shuffle icon), in chronological/custom mode the image number (with a "#" icon); a per-frame **Show total** toggle switches between e.g. `23` and `23/183`. It hides itself for sources that have no fixed rotation (Public Art, AI, URL proxy) and in collage mode.
+
 ## v1.21.0
 
 ### Added

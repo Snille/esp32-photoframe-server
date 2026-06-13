@@ -300,6 +300,7 @@ func (s *MQTTService) RemoveDevice(deviceID uint) {
 	client.Publish(s.discoveryTopic("switch", deviceID, "deep_sleep"), 1, true, "")
 	client.Publish(s.discoveryTopic("switch", deviceID, "auto_rotate"), 1, true, "")
 	client.Publish(s.discoveryTopic("button", deviceID, "rotate"), 1, true, "")
+	client.Publish(s.discoveryTopic("button", deviceID, "reshuffle"), 1, true, "")
 	client.Publish(s.controlsAvailabilityTopic(deviceID), 1, true, "")
 	client.Publish(s.stateTopic(deviceID), 1, true, "")
 	client.Publish(s.imageTopic(deviceID), 1, true, "")
@@ -419,6 +420,10 @@ func (s *MQTTService) handleCommand(deviceID uint, field, payload string) {
 	case "auto_rotate":
 		on := payload == "ON"
 		s.applyConfigChange(&device, func(cfg map[string]interface{}) { cfg["auto_rotate"] = on }, false)
+	case "reshuffle":
+		// Bump the shuffle seed → the next pull computes a fresh shuffle order.
+		s.db.Model(&device).Update("shuffle_seed", device.ShuffleSeed+1)
+		device.ShuffleSeed++
 	case "rotate":
 		if !boardSupportsLiveControl(device.BoardName) || device.Host == "" {
 			return
@@ -519,9 +524,10 @@ func labelToDisplayOrder(label string) string {
 
 func (s *MQTTService) publishState(client mqtt.Client, device *model.Device) {
 	est := s.battery.Estimate(device.ID)
+	source := deviceSourceFromConfig(device.DeviceConfig)
 	state := map[string]interface{}{
 		"name":   device.Name,
-		"source": deviceSourceFromConfig(device.DeviceConfig),
+		"source": source,
 	}
 	if est.HasData {
 		if est.CurrentPercent >= 0 {
@@ -600,6 +606,35 @@ func (s *MQTTService) publishState(client mqtt.Client, device *model.Device) {
 		state["collage"] = "OFF"
 	}
 	state["next_image_status"] = s.nextImageStatus(device)
+
+	// Rotation position / size: how many images this frame cycles through and
+	// where the current one sits. For shuffle the "remaining" is what's left in
+	// the current cycle (counts down to a fresh shuffle); for chronological/custom
+	// the "position" is the current image number. Only ordered DB-backed sources
+	// (collage off) have a meaningful rotation; the report self-suppresses otherwise.
+	rs := ComputeRotationStatus(s.db, device, source, 0)
+	if rs.Ordered && rs.Total > 0 {
+		state["rotation_total"] = rs.Total
+		if rs.Position > 0 {
+			state["rotation_position"] = rs.Position
+			state["rotation_remaining"] = rs.Remaining
+			state["rotation_status"] = rotationStatusString(rs)
+			// Estimate when the current cycle completes (a fresh shuffle / wrap):
+			// "images left after the current one" more pulls at the rotate interval.
+			if pc.autoRotate && pc.rotateInterval > 0 && est.HasData && !est.LastSampledAt.IsZero() {
+				completes := est.LastSampledAt.Add(time.Duration(rs.Remaining*pc.rotateInterval) * time.Second)
+				state["rotation_completes"] = completes.UTC().Format(time.RFC3339)
+			}
+		}
+	}
+	// Capture date of the photo currently on the frame.
+	if t := s.currentPhotoTakenAt(device.ID, source); t != nil {
+		state["current_photo_date"] = t.UTC().Format(time.RFC3339)
+	}
+	// Names of the Immich albums this frame pulls from (per-device album filter).
+	if names := s.immichAlbumNames(device); names != "" {
+		state["immich_albums"] = names
+	}
 
 	payload, _ := json.Marshal(state)
 	client.Publish(s.stateTopic(device.ID), 1, true, payload)
@@ -690,6 +725,57 @@ func serverHostFromURL(raw string) string {
 		return ""
 	}
 	return u.Host
+}
+
+// rotationStatusString is the human "Rotation Status" sensor value: images left
+// in the cycle for shuffle, the current image number for chronological/custom.
+func rotationStatusString(rs RotationStatus) string {
+	if rs.Position <= 0 {
+		return ""
+	}
+	if rs.Mode == model.DisplayOrderShuffle {
+		return fmt.Sprintf("%d of %d left", rs.Remaining, rs.Total)
+	}
+	return fmt.Sprintf("Image %d of %d", rs.Position, rs.Total)
+}
+
+// currentPhotoTakenAt returns the capture date of the photo most recently served
+// to the device from the given source, or nil if unknown.
+func (s *MQTTService) currentPhotoTakenAt(deviceID uint, source string) *time.Time {
+	id := lastServedImageID(s.db, deviceID, source)
+	if id == 0 {
+		return nil
+	}
+	var img model.Image
+	if err := s.db.Select("photo_taken_at").First(&img, id).Error; err != nil {
+		return nil
+	}
+	return img.PhotoTakenAt
+}
+
+// immichAlbumNames resolves a frame's selected Immich album UUIDs to a
+// comma-separated name list (cached in immich_albums; falls back to the raw UUID
+// for any not yet cached). Empty when the frame has no album filter.
+func (s *MQTTService) immichAlbumNames(device *model.Device) string {
+	ids := model.ParseImmichAlbumIDs(device.ImmichAlbumIDs)
+	if len(ids) == 0 {
+		return ""
+	}
+	var albums []model.ImmichAlbum
+	s.db.Where("immich_album_id IN ?", ids).Find(&albums)
+	nameByID := make(map[string]string, len(albums))
+	for _, a := range albums {
+		nameByID[a.ImmichAlbumID] = a.AlbumName
+	}
+	out := make([]string, 0, len(ids))
+	for _, id := range ids {
+		if n := nameByID[id]; n != "" {
+			out = append(out, n)
+		} else {
+			out = append(out, id)
+		}
+	}
+	return strings.Join(out, ", ")
 }
 
 // displayOrderLabel maps the stored display-order mode to a human label for the
@@ -791,7 +877,7 @@ func (s *MQTTService) publishOneImage(client mqtt.Client, topic, thumbID string)
 // mqttSensorKeys are the value_json keys exposed as plain (read-only) HA sensors.
 // Image source / refresh interval / image order are now controllable select /
 // number entities (see publishDiscovery), so they are not in this list.
-var mqttSensorKeys = []string{"battery", "battery_voltage", "days_remaining", "trend", "last_seen", "sleep_schedule", "next_pull", "host", "ip_address", "next_image_status", "timezone", "rotation", "server_host", "trigger"}
+var mqttSensorKeys = []string{"battery", "battery_voltage", "days_remaining", "trend", "last_seen", "sleep_schedule", "next_pull", "host", "ip_address", "next_image_status", "timezone", "rotation", "server_host", "trigger", "rotation_total", "rotation_position", "rotation_remaining", "rotation_status", "rotation_completes", "current_photo_date", "immich_albums"}
 
 // commandSourceOptions are the image sources offered by the HA "Image Source"
 // select. Matches the server's registered sources (model source constants).
@@ -887,6 +973,31 @@ func (s *MQTTService) publishDiscovery(client mqtt.Client, device *model.Device)
 		"icon": "mdi:gesture-tap-button",
 	})
 
+	// Rotation position / size. rotation_status is the human one-liner; the
+	// numeric ones are for templates/automations. current_photo_date + the
+	// cycle-completion estimate round out the "where in the album am I" picture.
+	sensor("rotation_total", "Rotation Size", "rotation_total", map[string]interface{}{
+		"icon": "mdi:image-multiple", "unit_of_measurement": "images", "state_class": "measurement",
+	})
+	sensor("rotation_status", "Rotation Status", "rotation_status", map[string]interface{}{
+		"icon": "mdi:playlist-play",
+	})
+	sensor("rotation_position", "Rotation Position", "rotation_position", map[string]interface{}{
+		"icon": "mdi:format-list-numbered", "entity_category": "diagnostic",
+	})
+	sensor("rotation_remaining", "Rotation Remaining", "rotation_remaining", map[string]interface{}{
+		"icon": "mdi:counter", "entity_category": "diagnostic",
+	})
+	sensor("rotation_completes", "Rotation Completes", "rotation_completes", map[string]interface{}{
+		"device_class": "timestamp", "icon": "mdi:restart",
+	})
+	sensor("current_photo_date", "Current Photo Date", "current_photo_date", map[string]interface{}{
+		"device_class": "timestamp", "icon": "mdi:calendar-image",
+	})
+	sensor("immich_albums", "Immich Albums", "immich_albums", map[string]interface{}{
+		"icon": "mdi:image-album", "entity_category": "diagnostic",
+	})
+
 	// --- Controllable entities (HA writes to a command topic; the server applies
 	// the change + pushes/config-syncs to the frame, then republishes state). These
 	// supersede the former read-only Image Source / Refresh Interval / Image Order /
@@ -954,6 +1065,23 @@ func (s *MQTTService) publishDiscovery(client mqtt.Client, device *model.Device)
 	}
 	rotatePayload, _ := json.Marshal(rotateCfg)
 	client.Publish(s.discoveryTopic("button", device.ID, "rotate"), 1, true, rotatePayload)
+
+	// "Reshuffle" button — bumps the shuffle seed so the next pull starts a fresh
+	// shuffle order. Server-side only (no frame contact needed), so it's always
+	// available regardless of board. Only meaningful in shuffle mode; harmless
+	// otherwise.
+	reshuffleCfg := map[string]interface{}{
+		"name":          "Reshuffle",
+		"unique_id":     fmt.Sprintf("photoframe_%d_reshuffle", device.ID),
+		"object_id":     fmt.Sprintf("photoframe_%s_reshuffle", sanitize(device.Name)),
+		"command_topic": s.commandTopic(device.ID, "reshuffle"),
+		"payload_press": "PRESS",
+		"icon":          "mdi:shuffle-variant",
+		"availability":  avail,
+		"device":        dev,
+	}
+	reshufflePayload, _ := json.Marshal(reshuffleCfg)
+	client.Publish(s.discoveryTopic("button", device.ID, "reshuffle"), 1, true, reshufflePayload)
 
 	// Collage on/off flag.
 	collageCfg := map[string]interface{}{

@@ -107,6 +107,10 @@ export interface Device {
   show_description?: boolean;
   description_position?: string;
   description_max_len?: number;
+  // Rotation-position overlay chip (where in the rotation the frame is).
+  show_rotation?: boolean;
+  rotation_position?: string;
+  rotation_show_total?: boolean;
   // Comma-separated Immich album IDs this frame is restricted to (empty = all).
   immich_album_ids?: string;
   // Comma-separated overlay element keys whose icon is hidden (empty = all shown).
@@ -168,6 +172,9 @@ export const addDevice = async (params: {
   show_description?: boolean;
   description_position?: string;
   description_max_len?: number;
+  show_rotation?: boolean;
+  rotation_position?: string;
+  rotation_show_total?: boolean;
   immich_album_ids?: string;
   overlay_hidden_icons?: string;
 }) => {
@@ -221,6 +228,9 @@ export const updateDevice = async (
     show_description?: boolean;
     description_position?: string;
     description_max_len?: number;
+    show_rotation?: boolean;
+    rotation_position?: string;
+    rotation_show_total?: boolean;
     display_order?: string;
     immich_album_ids?: string;
     overlay_hidden_icons?: string;
@@ -267,6 +277,9 @@ export const updateDevice = async (
     show_description: overlayPositions?.show_description || false,
     description_position: overlayPositions?.description_position || 'wide-bottom',
     description_max_len: overlayPositions?.description_max_len ?? 80,
+    show_rotation: overlayPositions?.show_rotation || false,
+    rotation_position: overlayPositions?.rotation_position || 'bottom-right',
+    rotation_show_total: overlayPositions?.rotation_show_total ?? true,
     display_order: overlayPositions?.display_order || 'shuffle',
     immich_album_ids: overlayPositions?.immich_album_ids ?? '',
     overlay_hidden_icons: overlayPositions?.overlay_hidden_icons ?? '',

@@ -26,15 +26,8 @@ func (s *immichSource) Name() string { return model.SourceImmich }
 func (s *immichSource) Fetch(req *imagesource.Request) (*imagesource.Response, error) {
 	// If this frame has Immich albums selected, restrict its pool to assets in
 	// those albums (via the membership join table). Empty = all Immich photos.
-	var albumScope func(*gorm.DB) *gorm.DB
-	if req.Device != nil {
-		if ids := model.ParseImmichAlbumIDs(req.Device.ImmichAlbumIDs); len(ids) > 0 {
-			albumScope = func(q *gorm.DB) *gorm.DB {
-				return q.Where(
-					"id IN (SELECT image_id FROM immich_image_albums WHERE immich_album_id IN ?)", ids)
-			}
-		}
-	}
+	// Shared with the rotation-status report so both count the same pool.
+	albumScope := deviceSourceScope(req.Device, model.SourceImmich)
 	pick := func(orientation string, exclude []uint) (model.Image, error) {
 		return PickRandomDBPhoto(s.db, model.SourceImmich, orientation, exclude, albumScope)
 	}

@@ -1975,6 +1975,12 @@
                               color="primary"
                               hide-details
                             ></v-checkbox>
+                            <v-checkbox
+                              v-model="editingDevice.show_rotation"
+                              label="Show Rotation Position"
+                              color="primary"
+                              hide-details
+                            ></v-checkbox>
                           </div>
 
                           <!-- People name options (Immich face metadata) -->
@@ -2064,6 +2070,22 @@
                               </span>
                             </template>
                           </v-slider>
+                          <!-- Rotation-position chip options -->
+                          <template v-if="editingDevice.show_rotation">
+                            <div class="text-caption text-disabled mt-3 mb-1">
+                              A compact "where am I in the rotation" chip. Shuffle
+                              shows images left in the cycle, chronological/custom
+                              the current image number. Only ordered sources
+                              (Gallery / Immich / Synology / Google, collage off)
+                              have a rotation — it hides itself otherwise.
+                            </div>
+                            <v-checkbox
+                              v-model="editingDevice.rotation_show_total"
+                              label="Show total (e.g. 23/183 instead of 23)"
+                              color="primary"
+                              hide-details
+                            ></v-checkbox>
+                          </template>
                           <v-select
                             v-if="editingDevice.show_date"
                             v-model="editingDevice.date_format"
@@ -2297,6 +2319,31 @@
                                   :model-value="!isIconHidden('description')"
                                   @update:model-value="
                                     (v: any) => setIconShown('description', !!v)
+                                  "
+                                  label="Show icon"
+                                  density="compact"
+                                  hide-details
+                                ></v-checkbox>
+                              </v-col>
+                              <v-col
+                                v-if="editingDevice.show_rotation"
+                                cols="12"
+                                sm="6"
+                              >
+                                <v-select
+                                  v-model="editingDevice.rotation_position"
+                                  :items="positionOptions"
+                                  item-title="label"
+                                  item-value="value"
+                                  label="Rotation position"
+                                  variant="outlined"
+                                  density="compact"
+                                  hide-details
+                                ></v-select>
+                                <v-checkbox
+                                  :model-value="!isIconHidden('rotation')"
+                                  @update:model-value="
+                                    (v: any) => setIconShown('rotation', !!v)
                                   "
                                   label="Show icon"
                                   density="compact"
@@ -4233,6 +4280,20 @@ const previewElements = computed<PreviewEl[]>(() => {
         sample.length > max ? sample.slice(0, max - 1).trimEnd() + '…' : sample,
     });
   }
+  if (ov && editingDevice.show_rotation) {
+    const total = 183;
+    const showTotal = editingDevice.rotation_show_total !== false;
+    // Sample mirrors the renderer: shuffle → images left; otherwise image number.
+    const shuffle = (editingDevice.display_order || 'shuffle') === 'shuffle';
+    const n = shuffle ? 23 : 26;
+    els.push({
+      key: 'rotation',
+      pos: editingDevice.rotation_position || 'bottom-right',
+      kind: 'rotation',
+      emoji: isIconHidden('rotation') ? undefined : shuffle ? '🔀' : '#️⃣',
+      text: showTotal ? `${n}/${total}` : `${n}`,
+    });
+  }
   if (editingDevice.show_battery) {
     const style = editingDevice.battery_style || 'both';
     const pct = 76;
@@ -4491,6 +4552,9 @@ const openAddDeviceDialog = () => {
     show_description: false,
     description_position: 'wide-bottom',
     description_max_len: 80,
+    show_rotation: false,
+    rotation_position: 'bottom-right',
+    rotation_show_total: true,
   });
   Object.assign(deviceConfig, {
     auto_rotate: false,
@@ -4655,6 +4719,9 @@ const saveDevice = async () => {
         description_position:
           editingDevice.description_position || 'wide-bottom',
         description_max_len: editingDevice.description_max_len ?? 80,
+        show_rotation: editingDevice.show_rotation || false,
+        rotation_position: editingDevice.rotation_position || 'bottom-right',
+        rotation_show_total: editingDevice.rotation_show_total !== false,
         immich_album_ids: editingDevice.immich_album_ids || '',
         overlay_hidden_icons: editingDevice.overlay_hidden_icons || '',
       });
@@ -4717,6 +4784,9 @@ const saveDevice = async () => {
           description_position:
             editingDevice.description_position || 'wide-bottom',
           description_max_len: editingDevice.description_max_len ?? 80,
+          show_rotation: editingDevice.show_rotation || false,
+          rotation_position: editingDevice.rotation_position || 'bottom-right',
+          rotation_show_total: editingDevice.rotation_show_total !== false,
           display_order: editingDevice.display_order || 'shuffle',
           immich_album_ids: editingDevice.immich_album_ids || '',
           overlay_hidden_icons: editingDevice.overlay_hidden_icons || '',
