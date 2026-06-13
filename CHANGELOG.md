@@ -1,5 +1,13 @@
 # Changelog
 
+## v1.19.1
+
+### Added
+- **Collage sensor + clearer Next Image state in Home Assistant.** When a frame runs in **collage** mode there is no deterministic "next image" (collage shuffles random pairs), so the Next Image entity was simply empty with no explanation. Now:
+  - A new **Collage** binary sensor shows whether collage is on for each frame.
+  - The **Next Image** entity is marked **Unavailable** (visibly disabled) when collage is on or the source has no fixed next image, instead of being silently empty.
+  - A new **Next Image Status** sensor explains why (e.g. "Disabled — collage mode shuffles random pairs, so there is no fixed next image" / "Active").
+
 ## v1.19.0
 
 ### Added

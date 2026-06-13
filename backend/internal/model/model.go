@@ -24,6 +24,20 @@ const (
 	SourceDLA            = "dla"
 )
 
+// IsOrderedSource reports whether a source has a deterministic display-order
+// cursor (so a truthful "next image" preview can be rendered). The DB-backed
+// library sources qualify; synthetic generators (AI/fractal/DLA), the URL proxy
+// and public-art do not. Collage mode also disqualifies a frame even on these
+// sources, since it shuffles random pairs — check EnableCollage separately.
+func IsOrderedSource(source string) bool {
+	switch source {
+	case SourceGallery, SourceImmich, SourceSynologyPhotos, SourceGooglePhotos:
+		return true
+	default:
+		return false
+	}
+}
+
 type Image struct {
 	ID              uint       `gorm:"primaryKey" json:"id"`
 	FilePath        string     `json:"file_path"`

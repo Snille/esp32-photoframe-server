@@ -135,6 +135,13 @@ func (s *MQTTService) nextImageTopic(id uint) string {
 	return fmt.Sprintf("%s/device/%d/next_image", s.cfg.baseTopic, id)
 }
 
+// nextAvailabilityTopic gates the Next Image entity's availability: published
+// "offline" when the frame can't show a deterministic next image (collage on /
+// non-ordered source) so HA shows it as Unavailable ("disabled").
+func (s *MQTTService) nextAvailabilityTopic(id uint) string {
+	return fmt.Sprintf("%s/device/%d/next_available", s.cfg.baseTopic, id)
+}
+
 func (s *MQTTService) connect(cfg mqttConfig) {
 	opts := mqtt.NewClientOptions()
 	opts.AddBroker(fmt.Sprintf("tcp://%s:%d", cfg.host, cfg.port))
@@ -259,10 +266,12 @@ func (s *MQTTService) RemoveDevice(deviceID uint) {
 	for _, key := range []string{"current", "previous", "next"} {
 		client.Publish(s.discoveryTopic("image", deviceID, key), 1, true, "")
 	}
+	client.Publish(s.discoveryTopic("binary_sensor", deviceID, "collage"), 1, true, "")
 	client.Publish(s.stateTopic(deviceID), 1, true, "")
 	client.Publish(s.imageTopic(deviceID), 1, true, "")
 	client.Publish(s.prevImageTopic(deviceID), 1, true, "")
 	client.Publish(s.nextImageTopic(deviceID), 1, true, "")
+	client.Publish(s.nextAvailabilityTopic(deviceID), 1, true, "")
 	s.mu.Lock()
 	delete(s.discoverySent, deviceID)
 	s.mu.Unlock()
@@ -281,6 +290,13 @@ func (s *MQTTService) publishDevice(device *model.Device) {
 	s.mu.Unlock()
 	s.publishState(client, device)
 	s.publishImage(client, device)
+	// Gate the Next Image entity's availability on whether a deterministic next
+	// image exists for this frame.
+	avail := "offline"
+	if s.deviceSupportsNext(device) {
+		avail = "online"
+	}
+	client.Publish(s.nextAvailabilityTopic(device.ID), 1, true, avail)
 }
 
 func (s *MQTTService) publishState(client mqtt.Client, device *model.Device) {
@@ -326,8 +342,37 @@ func (s *MQTTService) publishState(client mqtt.Client, device *model.Device) {
 		state["ip_address"] = device.LastIP
 	}
 
+	// Collage flag + an explanation of the Next Image entity's state. The Next
+	// Image preview only works for ordered DB-backed sources with collage off
+	// (collage shuffles random pairs, so there is no deterministic next image);
+	// surface why so the (unavailable) Next Image entity isn't a mystery.
+	if device.EnableCollage {
+		state["collage"] = "ON"
+	} else {
+		state["collage"] = "OFF"
+	}
+	state["next_image_status"] = s.nextImageStatus(device)
+
 	payload, _ := json.Marshal(state)
 	client.Publish(s.stateTopic(device.ID), 1, true, payload)
+}
+
+// deviceSupportsNext reports whether a frame can show a truthful Next Image
+// preview: an ordered DB-backed source with collage disabled.
+func (s *MQTTService) deviceSupportsNext(device *model.Device) bool {
+	return !device.EnableCollage && model.IsOrderedSource(deviceSourceFromConfig(device.DeviceConfig))
+}
+
+// nextImageStatus is the human explanation shown as the "Next Image Status"
+// sensor, telling the user why the Next Image entity is (un)available.
+func (s *MQTTService) nextImageStatus(device *model.Device) string {
+	if s.deviceSupportsNext(device) {
+		return "Active"
+	}
+	if device.EnableCollage {
+		return "Disabled — collage mode shuffles random pairs, so there is no fixed next image"
+	}
+	return "Disabled — this image source has no deterministic next image"
 }
 
 // pollConfig holds the frame's rotation / sleep settings parsed from the synced
@@ -400,7 +445,7 @@ func (s *MQTTService) publishOneImage(client mqtt.Client, topic, thumbID string)
 }
 
 // mqttSensorKeys are the value_json keys exposed as HA sensors.
-var mqttSensorKeys = []string{"battery", "battery_voltage", "days_remaining", "trend", "source", "last_seen", "refresh_interval", "sleep_schedule", "next_pull", "host", "ip_address"}
+var mqttSensorKeys = []string{"battery", "battery_voltage", "days_remaining", "trend", "source", "last_seen", "refresh_interval", "sleep_schedule", "next_pull", "host", "ip_address", "next_image_status"}
 
 func (s *MQTTService) discoveryTopic(component string, id uint, key string) string {
 	return fmt.Sprintf("%s/%s/photoframe_%d_%s/config", s.cfg.discoveryPrefix, component, id, key)
@@ -471,28 +516,61 @@ func (s *MQTTService) publishDiscovery(client mqtt.Client, device *model.Device)
 	sensor("ip_address", "IP Address", "ip_address", map[string]interface{}{
 		"icon": "mdi:ip-network-outline", "entity_category": "diagnostic",
 	})
+	// Explains why Next Image is (un)available — see nextImageStatus().
+	sensor("next_image_status", "Next Image Status", "next_image_status", map[string]interface{}{
+		"icon": "mdi:image-sync-outline", "entity_category": "diagnostic",
+	})
+
+	// Collage on/off flag.
+	collageCfg := map[string]interface{}{
+		"name":            "Collage",
+		"unique_id":       fmt.Sprintf("photoframe_%d_collage", device.ID),
+		"object_id":       fmt.Sprintf("photoframe_%s_collage", sanitize(device.Name)),
+		"state_topic":     state,
+		"value_template":  "{{ value_json.collage }}",
+		"payload_on":      "ON",
+		"payload_off":     "OFF",
+		"icon":            "mdi:grid",
+		"entity_category": "diagnostic",
+		"availability":    avail,
+		"device":          dev,
+	}
+	collagePayload, _ := json.Marshal(collageCfg)
+	client.Publish(s.discoveryTopic("binary_sensor", device.ID, "collage"), 1, true, collagePayload)
 
 	// Image entities: what's on the frame now (current), what was on it before
 	// (previous), and a non-mutating preview of what the next pull will show
-	// (next — populated only for ordered DB-backed sources).
-	imageEntity := func(discoveryKey, idSuffix, name, topic string) {
+	// (next). availability lets "next" be gated independently: it goes Unavailable
+	// ("disabled") when the frame can't show a deterministic next image.
+	imageEntity := func(discoveryKey, idSuffix, name, topic string, availability []map[string]string, mode string) {
 		cfg := map[string]interface{}{
 			"name":         name,
 			"unique_id":    fmt.Sprintf("photoframe_%d_%s", device.ID, idSuffix),
 			"object_id":    fmt.Sprintf("photoframe_%s_%s", sanitize(device.Name), idSuffix),
 			"image_topic":  topic,
 			"content_type": "image/jpeg",
-			"availability": avail,
+			"availability": availability,
 			"device":       dev,
+		}
+		if mode != "" {
+			cfg["availability_mode"] = mode
 		}
 		payload, _ := json.Marshal(cfg)
 		client.Publish(s.discoveryTopic("image", device.ID, discoveryKey), 1, true, payload)
 	}
 	// "current" keeps its original unique_id ("..._image") so existing HA
 	// entities aren't orphaned; previous/next are new.
-	imageEntity("current", "image", "Current Image", s.imageTopic(device.ID))
-	imageEntity("previous", "previous_image", "Previous Image", s.prevImageTopic(device.ID))
-	imageEntity("next", "next_image", "Next Image", s.nextImageTopic(device.ID))
+	imageEntity("current", "image", "Current Image", s.imageTopic(device.ID), avail, "")
+	imageEntity("previous", "previous_image", "Previous Image", s.prevImageTopic(device.ID), avail, "")
+	// Next is available only when BOTH the bridge is online AND a deterministic
+	// next image exists (next_available topic) — hence availability_mode "all".
+	nextAvail := append([]map[string]string{}, avail...)
+	nextAvail = append(nextAvail, map[string]string{
+		"topic":                 s.nextAvailabilityTopic(device.ID),
+		"payload_available":     "online",
+		"payload_not_available": "offline",
+	})
+	imageEntity("next", "next_image", "Next Image", s.nextImageTopic(device.ID), nextAvail, "all")
 }
 
 func round1(f float64) float64 { return float64(int(f*10+0.5)) / 10 }

@@ -18,19 +18,8 @@ import (
 	"github.com/aitjcize/esp32-photoframe-server/backend/pkg/weather"
 )
 
-// orderedDBSources are the device-backed sources whose next photo is
-// deterministic (display-order cursor), so a "next image" preview is truthful.
-// Synthetic sources (AI/fractal/DLA), url_proxy and public_art have no stable
-// "next", and collage mode shuffles pairs — those get no Next Image entity.
-var orderedDBSources = map[string]bool{
-	model.SourceGallery:        true,
-	model.SourceImmich:         true,
-	model.SourceGooglePhotos:   true,
-	model.SourceSynologyPhotos: true,
-}
-
 func (h *ImageHandler) supportsNextPreview(device *model.Device, source string) bool {
-	return device != nil && !device.EnableCollage && orderedDBSources[source]
+	return device != nil && !device.EnableCollage && model.IsOrderedSource(source)
 }
 
 // afterServe runs the post-serve hook (async): render the next image as a
