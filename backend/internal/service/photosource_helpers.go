@@ -37,16 +37,14 @@ type PhotoLoader func(item model.Image) (image.Image, error)
 // optionally compose a smart collage when the photo orientation mismatches
 // the device, otherwise pick + load one photo, then look up PhotoTakenAt
 // if the device shows photo dates. The two callbacks (pick / load) are
-// the per-source bits.
-// scope is an optional set of extra WHERE-clause builders applied to the photo
-// pool (e.g. an Immich per-device album filter). Most sources pass none.
+// the per-source bits. The ordered path derives its pool filters (Immich album,
+// favorites-only, on-this-day) from the device itself via devicePoolScopes.
 func RunDBPhotoFlow(
 	req *imagesource.Request,
 	db *gorm.DB,
 	source string,
 	pick PhotoPicker,
 	load PhotoLoader,
-	scope ...func(*gorm.DB) *gorm.DB,
 ) (*imagesource.Response, error) {
 	var img image.Image
 	var ids []uint
@@ -60,7 +58,14 @@ func RunDBPhotoFlow(
 	case req.Device != nil:
 		// Ordered single-photo selection (shuffle / chronological / custom).
 		var item model.Image
-		item, err = pickOrderedPhoto(db, req.Device, source, req.Preview, req.LastServedOverride, scope...)
+		item, err = pickOrderedPhoto(db, req.Device, source, req.Preview, req.LastServedOverride,
+			devicePoolScopes(req.Device, source, true)...)
+		// On-this-day with no photos for today: fall back to the full pool
+		// (minus the date filter) so the frame still shows something.
+		if err == gorm.ErrRecordNotFound && req.Device.OnThisDay {
+			item, err = pickOrderedPhoto(db, req.Device, source, req.Preview, req.LastServedOverride,
+				devicePoolScopes(req.Device, source, false)...)
+		}
 		if err != nil {
 			return nil, err
 		}
@@ -107,7 +112,7 @@ func RunDBPhotoFlow(
 // always matched alongside) and excluding ids. Generic over the four sources
 // that follow the source = ? filter shape (gallery, immich, synology, google).
 func PickRandomDBPhoto(db *gorm.DB, source, orientationFilter string, excludeIDs []uint, scope ...func(*gorm.DB) *gorm.DB) (model.Image, error) {
-	query := db.Order("RANDOM()").Where("source = ?", source)
+	query := db.Order("RANDOM()").Where("source = ? AND hidden = 0", source)
 	if len(excludeIDs) > 0 {
 		query = query.Where("id NOT IN ?", excludeIDs)
 	}
@@ -132,7 +137,8 @@ func PickRandomDBPhoto(db *gorm.DB, source, orientationFilter string, excludeIDs
 // always agree on order and length.
 func orderedCandidateIDs(db *gorm.DB, device *model.Device, source string, scope ...func(*gorm.DB) *gorm.DB) ([]uint, string, error) {
 	mode := model.NormalizeDisplayOrder(device.DisplayOrder)
-	base := db.Model(&model.Image{}).Where("source = ?", source)
+	// Hidden photos are globally excluded from every rotation.
+	base := db.Model(&model.Image{}).Where("source = ? AND hidden = 0", source)
 	for _, fn := range scope {
 		if fn != nil {
 			base = fn(base)
@@ -177,6 +183,47 @@ func deviceSourceScope(device *model.Device, source string) func(*gorm.DB) *gorm
 	}
 }
 
+// onThisDayScope filters the pool to photos taken on today's month/day (any
+// year), using the capture date and falling back to created_at. Server local
+// time. nil when the device's on-this-day mode is off.
+func onThisDayScope(device *model.Device) func(*gorm.DB) *gorm.DB {
+	if device == nil || !device.OnThisDay {
+		return nil
+	}
+	return func(q *gorm.DB) *gorm.DB {
+		return q.Where(
+			"strftime('%m-%d', COALESCE(photo_taken_at, created_at)) = strftime('%m-%d', 'now', 'localtime')")
+	}
+}
+
+// favoritesScope filters the pool to starred photos. nil when off.
+func favoritesScope(device *model.Device) func(*gorm.DB) *gorm.DB {
+	if device == nil || !device.FavoritesOnly {
+		return nil
+	}
+	return func(q *gorm.DB) *gorm.DB { return q.Where("favorite = 1") }
+}
+
+// devicePoolScopes collects every per-device pool filter for a source: the
+// album filter, plus the optional favorites-only and (when includeOnThisDay)
+// on-this-day filters. The on-this-day filter is separable so callers can drop
+// it and fall back to the full pool on days with no matching photos.
+func devicePoolScopes(device *model.Device, source string, includeOnThisDay bool) []func(*gorm.DB) *gorm.DB {
+	var scopes []func(*gorm.DB) *gorm.DB
+	if s := deviceSourceScope(device, source); s != nil {
+		scopes = append(scopes, s)
+	}
+	if s := favoritesScope(device); s != nil {
+		scopes = append(scopes, s)
+	}
+	if includeOnThisDay {
+		if s := onThisDayScope(device); s != nil {
+			scopes = append(scopes, s)
+		}
+	}
+	return scopes
+}
+
 // RotationStatus describes where a frame is in its image rotation, for the Home
 // Assistant sensors and the on-image overlay. Ordered is false for sources that
 // have no deterministic sequence (collage / synthetic / url_proxy), in which case
@@ -200,7 +247,7 @@ func ComputeRotationStatus(db *gorm.DB, device *model.Device, source string, cur
 	if device == nil || device.EnableCollage || !model.IsOrderedSource(source) {
 		return rs
 	}
-	ids, mode, err := orderedCandidateIDs(db, device, source, deviceSourceScope(device, source))
+	ids, mode, err := orderedCandidateIDs(db, device, source, devicePoolScopes(device, source, true)...)
 	if err != nil || len(ids) == 0 {
 		return rs
 	}

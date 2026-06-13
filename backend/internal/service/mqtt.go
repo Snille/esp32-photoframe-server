@@ -96,6 +96,19 @@ func (s *MQTTService) Start() {
 		}
 	})
 	s.Reload()
+	// Periodically re-publish device state so time-sensitive sensors stay fresh
+	// without a frame check-in — chiefly the per-device online/offline sensor,
+	// which must flip to offline once a frame stops reporting. A no-op while the
+	// broker is disconnected (isReady guards it). Discovery isn't re-sent (it's
+	// gated by discoverySent), only state.
+	go func() {
+		ticker := time.NewTicker(5 * time.Minute)
+		for range ticker.C {
+			if _, ok := s.isReady(); ok {
+				s.publishAllDevices()
+			}
+		}
+	}()
 }
 
 // Reload reconnects with the current settings. Saving the MQTT form changes
@@ -301,6 +314,12 @@ func (s *MQTTService) RemoveDevice(deviceID uint) {
 	client.Publish(s.discoveryTopic("switch", deviceID, "auto_rotate"), 1, true, "")
 	client.Publish(s.discoveryTopic("button", deviceID, "rotate"), 1, true, "")
 	client.Publish(s.discoveryTopic("button", deviceID, "reshuffle"), 1, true, "")
+	client.Publish(s.discoveryTopic("button", deviceID, "hide"), 1, true, "")
+	client.Publish(s.discoveryTopic("button", deviceID, "favorite"), 1, true, "")
+	client.Publish(s.discoveryTopic("switch", deviceID, "on_this_day"), 1, true, "")
+	client.Publish(s.discoveryTopic("switch", deviceID, "favorites_only"), 1, true, "")
+	client.Publish(s.discoveryTopic("binary_sensor", deviceID, "online"), 1, true, "")
+	client.Publish(s.discoveryTopic("binary_sensor", deviceID, "current_favorite"), 1, true, "")
 	client.Publish(s.controlsAvailabilityTopic(deviceID), 1, true, "")
 	client.Publish(s.stateTopic(deviceID), 1, true, "")
 	client.Publish(s.imageTopic(deviceID), 1, true, "")
@@ -424,6 +443,28 @@ func (s *MQTTService) handleCommand(deviceID uint, field, payload string) {
 		// Bump the shuffle seed → the next pull computes a fresh shuffle order.
 		s.db.Model(&device).Update("shuffle_seed", device.ShuffleSeed+1)
 		device.ShuffleSeed++
+	case "hide":
+		// Globally hide the photo currently on the frame; it's skipped from the
+		// next pull onward (the frame keeps showing it until then).
+		if id := lastServedImageID(s.db, deviceID, deviceSourceFromConfig(device.DeviceConfig)); id != 0 {
+			s.db.Model(&model.Image{}).Where("id = ?", id).Update("hidden", true)
+		}
+	case "favorite":
+		// Toggle the star on the photo currently on the frame.
+		if id := lastServedImageID(s.db, deviceID, deviceSourceFromConfig(device.DeviceConfig)); id != 0 {
+			var img model.Image
+			if s.db.Select("favorite").First(&img, id).Error == nil {
+				s.db.Model(&model.Image{}).Where("id = ?", id).Update("favorite", !img.Favorite)
+			}
+		}
+	case "on_this_day":
+		on := payload == "ON"
+		s.db.Model(&device).Update("on_this_day", on)
+		device.OnThisDay = on
+	case "favorites_only":
+		on := payload == "ON"
+		s.db.Model(&device).Update("favorites_only", on)
+		device.FavoritesOnly = on
 	case "rotate":
 		if !boardSupportsLiveControl(device.BoardName) || device.Host == "" {
 			return
@@ -635,6 +676,25 @@ func (s *MQTTService) publishState(client mqtt.Client, device *model.Device) {
 	if names := s.immichAlbumNames(device); names != "" {
 		state["immich_albums"] = names
 	}
+	// Per-device online/offline: heard from the frame within ~2 rotation cycles?
+	// Refreshed by the periodic republish (below) so it flips to offline even with
+	// no check-in.
+	online := false
+	if est.HasData && !est.LastSampledAt.IsZero() {
+		threshold := 90 * time.Minute
+		if pc.rotateInterval > 0 {
+			if t := 2*time.Duration(pc.rotateInterval)*time.Second + 15*time.Minute; t > threshold {
+				threshold = t
+			}
+		}
+		online = time.Since(est.LastSampledAt) < threshold
+	}
+	state["online"] = onOff(online)
+	// Whether the photo currently on the frame is starred, and the two
+	// rotation-pool toggles (exposed as HA switches).
+	state["current_favorite"] = onOff(s.currentImageFavorite(device.ID, source))
+	state["on_this_day"] = onOff(device.OnThisDay)
+	state["favorites_only"] = onOff(device.FavoritesOnly)
 
 	payload, _ := json.Marshal(state)
 	client.Publish(s.stateTopic(device.ID), 1, true, payload)
@@ -737,6 +797,28 @@ func rotationStatusString(rs RotationStatus) string {
 		return fmt.Sprintf("%d of %d left", rs.Remaining, rs.Total)
 	}
 	return fmt.Sprintf("Image %d of %d", rs.Position, rs.Total)
+}
+
+// onOff maps a bool to the "ON"/"OFF" payload HA switches/binary_sensors expect.
+func onOff(b bool) string {
+	if b {
+		return "ON"
+	}
+	return "OFF"
+}
+
+// currentImageFavorite reports whether the photo most recently served to the
+// device from the given source is starred.
+func (s *MQTTService) currentImageFavorite(deviceID uint, source string) bool {
+	id := lastServedImageID(s.db, deviceID, source)
+	if id == 0 {
+		return false
+	}
+	var img model.Image
+	if err := s.db.Select("favorite").First(&img, id).Error; err != nil {
+		return false
+	}
+	return img.Favorite
 }
 
 // currentPhotoTakenAt returns the capture date of the photo most recently served
@@ -1082,6 +1164,62 @@ func (s *MQTTService) publishDiscovery(client mqtt.Client, device *model.Device)
 	}
 	reshufflePayload, _ := json.Marshal(reshuffleCfg)
 	client.Publish(s.discoveryTopic("button", device.ID, "reshuffle"), 1, true, reshufflePayload)
+
+	// "Hide Current Photo" + "Toggle Favorite" buttons — act on the photo the frame
+	// is showing now. Server-side, always available.
+	button := func(key, name, icon string) {
+		cfg := map[string]interface{}{
+			"name":          name,
+			"unique_id":     fmt.Sprintf("photoframe_%d_%s", device.ID, key),
+			"object_id":     fmt.Sprintf("photoframe_%s_%s", sanitize(device.Name), key),
+			"command_topic": s.commandTopic(device.ID, key),
+			"payload_press": "PRESS",
+			"icon":          icon,
+			"availability":  avail,
+			"device":        dev,
+		}
+		payload, _ := json.Marshal(cfg)
+		client.Publish(s.discoveryTopic("button", device.ID, key), 1, true, payload)
+	}
+	button("hide", "Hide Current Photo", "mdi:eye-off")
+	button("favorite", "Toggle Favorite", "mdi:star")
+
+	// On This Day / Favorites Only rotation-pool switches.
+	control("switch", "on_this_day", map[string]interface{}{
+		"name": "On This Day", "icon": "mdi:calendar-star",
+		"state_topic": state, "value_template": "{{ value_json.on_this_day }}",
+		"payload_on": "ON", "payload_off": "OFF", "entity_category": "config",
+	})
+	control("switch", "favorites_only", map[string]interface{}{
+		"name": "Favorites Only", "icon": "mdi:star-circle",
+		"state_topic": state, "value_template": "{{ value_json.favorites_only }}",
+		"payload_on": "ON", "payload_off": "OFF", "entity_category": "config",
+	})
+
+	// Per-device online/offline + current-photo-favorite binary sensors.
+	binarySensor := func(key, name, valueKey, devClass, icon string) {
+		cfg := map[string]interface{}{
+			"name":           name,
+			"unique_id":      fmt.Sprintf("photoframe_%d_%s", device.ID, key),
+			"object_id":      fmt.Sprintf("photoframe_%s_%s", sanitize(device.Name), key),
+			"state_topic":    state,
+			"value_template": fmt.Sprintf("{{ value_json.%s }}", valueKey),
+			"payload_on":     "ON",
+			"payload_off":    "OFF",
+			"availability":   avail,
+			"device":         dev,
+		}
+		if devClass != "" {
+			cfg["device_class"] = devClass
+		}
+		if icon != "" {
+			cfg["icon"] = icon
+		}
+		payload, _ := json.Marshal(cfg)
+		client.Publish(s.discoveryTopic("binary_sensor", device.ID, key), 1, true, payload)
+	}
+	binarySensor("online", "Online", "online", "connectivity", "")
+	binarySensor("current_favorite", "Current Photo Favorite", "current_favorite", "", "mdi:star")
 
 	// Collage on/off flag.
 	collageCfg := map[string]interface{}{

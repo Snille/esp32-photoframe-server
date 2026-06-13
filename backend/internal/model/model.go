@@ -59,8 +59,14 @@ type Image struct {
 	Location     string         `json:"location"`
 	Description  string         `json:"description"`   // photo description/caption (Immich exif description; gallery caption)
 	DisplayOrder int            `json:"display_order"` // Manual sort position for devices in 'custom' order mode (lower = earlier)
-	CreatedAt    time.Time      `json:"created_at"`
-	DeletedAt    gorm.DeletedAt `gorm:"index" json:"-"`
+	// Hidden photos are globally excluded from every frame's rotation (a "remove
+	// this from the slideshow" flag, toggled from HA / the web UI without deleting
+	// the asset). Favorite is a user-set star, surfaced to HA and usable as a
+	// per-frame "favorites only" rotation filter.
+	Hidden    bool           `json:"hidden" gorm:"default:0"`
+	Favorite  bool           `json:"favorite" gorm:"default:0"`
+	CreatedAt time.Time      `json:"created_at"`
+	DeletedAt gorm.DeletedAt `gorm:"index" json:"-"`
 }
 
 type GoogleAuth struct {
@@ -160,6 +166,11 @@ type Device struct {
 	ShowRotation      bool   `json:"show_rotation" gorm:"default:0"`
 	RotationPosition  string `json:"rotation_position" gorm:"default:'bottom-right'"`
 	RotationShowTotal bool   `json:"rotation_show_total" gorm:"default:1"`
+	// Rotation-pool filters (ordered DB sources). OnThisDay restricts the frame to
+	// photos taken on today's month/day (any year); FavoritesOnly to starred
+	// photos. Both fall back to the full pool when the filtered set is empty.
+	OnThisDay     bool `json:"on_this_day" gorm:"default:0"`
+	FavoritesOnly bool `json:"favorites_only" gorm:"default:0"`
 	// Per-device Immich album filter: comma-separated Immich album UUIDs. When
 	// set, this frame only shows photos that belong to one of these albums
 	// (using the same global Immich connection). Empty = all Immich photos.

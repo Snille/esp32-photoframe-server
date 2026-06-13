@@ -1,5 +1,16 @@
 # Changelog
 
+## v1.23.0
+
+### Added
+- **"On this day" mode.** A per-frame toggle that shows only photos taken on today's date (any year), so the frame becomes a daily memories slideshow. On days with no matching photo it falls back to the full library, so the frame is never blank. Works for the ordered sources (Gallery / Immich / Synology / Google Photos).
+- **Hide and favorite photos.** Star the photos you love and hide the ones you don't — from Home Assistant or the web UI:
+  - **Hide Current Photo** (MQTT button) — removes the photo on the frame from every frame's rotation (a "take it out of the slideshow" flag; it isn't deleted from your library).
+  - **Toggle Favorite** (MQTT button) — stars/unstars the photo currently on the frame.
+  - **Favorites Only** (per-frame toggle / MQTT switch) — restrict a frame's rotation to starred photos (falls back to the full library when none are starred).
+  - **Current Photo Favorite** (MQTT binary sensor) — whether the photo on the frame right now is starred.
+- **Per-frame Online/Offline sensor (MQTT).** A connectivity sensor that flips to *offline* when a frame hasn't checked in for roughly two rotation cycles, so you can alert on a frame that has gone quiet (dead battery, lost Wi-Fi). The server now re-publishes state every few minutes so this stays current even without a check-in.
+
 ## v1.22.0
 
 ### Added

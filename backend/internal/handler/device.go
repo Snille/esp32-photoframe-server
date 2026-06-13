@@ -95,6 +95,8 @@ func (h *DeviceHandler) AddDevice(c echo.Context) error {
 		ShowBattery   bool    `json:"show_battery"`
 		DisplayOrder  string  `json:"display_order"`
 		ImmichAlbumIDs    string `json:"immich_album_ids"`
+		OnThisDay         bool   `json:"on_this_day"`
+		FavoritesOnly     bool   `json:"favorites_only"`
 		DatePosition      string `json:"date_position"`
 		PhotoDatePosition string `json:"photo_date_position"`
 		WeatherPosition   string `json:"weather_position"`
@@ -134,7 +136,7 @@ func (h *DeviceHandler) AddDevice(c echo.Context) error {
 		req.Layout = model.LayoutPhotoOverlay
 	}
 
-	device, err := h.deviceService.AddDevice(req.Host, req.EnableCollage, req.ShowDate, req.ShowPhotoDate, req.ShowWeather, req.WeatherLat, req.WeatherLon, req.Layout, req.DisplayMode, req.ShowCalendar, req.CalendarID, req.DateFormat, req.ShowBattery, req.DisplayOrder, req.ImmichAlbumIDs, model.OverlaySettings{
+	device, err := h.deviceService.AddDevice(req.Host, req.EnableCollage, req.ShowDate, req.ShowPhotoDate, req.ShowWeather, req.WeatherLat, req.WeatherLon, req.Layout, req.DisplayMode, req.ShowCalendar, req.CalendarID, req.DateFormat, req.ShowBattery, req.DisplayOrder, req.ImmichAlbumIDs, req.OnThisDay, req.FavoritesOnly, model.OverlaySettings{
 		DatePosition:      req.DatePosition,
 		PhotoDatePosition: req.PhotoDatePosition,
 		WeatherPosition:   req.WeatherPosition,
@@ -202,6 +204,8 @@ func (h *DeviceHandler) UpdateDevice(c echo.Context) error {
 		ShowBattery   bool    `json:"show_battery"`
 		DisplayOrder  string  `json:"display_order"`
 		ImmichAlbumIDs    string `json:"immich_album_ids"`
+		OnThisDay         bool   `json:"on_this_day"`
+		FavoritesOnly     bool   `json:"favorites_only"`
 		DatePosition      string `json:"date_position"`
 		PhotoDatePosition string `json:"photo_date_position"`
 		WeatherPosition   string `json:"weather_position"`
@@ -237,7 +241,7 @@ func (h *DeviceHandler) UpdateDevice(c echo.Context) error {
 		req.Layout = model.LayoutPhotoOverlay
 	}
 
-	device, err := h.deviceService.UpdateDevice(uint(id), req.Name, req.Host, req.Orientation, req.EnableCollage, req.ShowDate, req.ShowPhotoDate, req.ShowWeather, req.WeatherLat, req.WeatherLon, req.AIProvider, req.AIModel, req.AIPrompt, req.Layout, req.DisplayMode, req.ShowCalendar, req.CalendarID, req.DateFormat, req.ShowBattery, req.DisplayOrder, req.ImmichAlbumIDs, model.OverlaySettings{
+	device, err := h.deviceService.UpdateDevice(uint(id), req.Name, req.Host, req.Orientation, req.EnableCollage, req.ShowDate, req.ShowPhotoDate, req.ShowWeather, req.WeatherLat, req.WeatherLon, req.AIProvider, req.AIModel, req.AIPrompt, req.Layout, req.DisplayMode, req.ShowCalendar, req.CalendarID, req.DateFormat, req.ShowBattery, req.DisplayOrder, req.ImmichAlbumIDs, req.OnThisDay, req.FavoritesOnly, model.OverlaySettings{
 		DatePosition:      req.DatePosition,
 		PhotoDatePosition: req.PhotoDatePosition,
 		WeatherPosition:   req.WeatherPosition,

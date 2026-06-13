@@ -113,6 +113,9 @@ export interface Device {
   rotation_show_total?: boolean;
   // Comma-separated Immich album IDs this frame is restricted to (empty = all).
   immich_album_ids?: string;
+  // Rotation-pool filters: only photos from today's date / only favorites.
+  on_this_day?: boolean;
+  favorites_only?: boolean;
   // Comma-separated overlay element keys whose icon is hidden (empty = all shown).
   overlay_hidden_icons?: string;
   // How the frame is mounted relative to the panel's native orientation
@@ -176,6 +179,8 @@ export const addDevice = async (params: {
   rotation_position?: string;
   rotation_show_total?: boolean;
   immich_album_ids?: string;
+  on_this_day?: boolean;
+  favorites_only?: boolean;
   overlay_hidden_icons?: string;
 }) => {
   const response = await api.post('devices', params);
@@ -233,6 +238,8 @@ export const updateDevice = async (
     rotation_show_total?: boolean;
     display_order?: string;
     immich_album_ids?: string;
+    on_this_day?: boolean;
+    favorites_only?: boolean;
     overlay_hidden_icons?: string;
   }
 ) => {
@@ -282,6 +289,8 @@ export const updateDevice = async (
     rotation_show_total: overlayPositions?.rotation_show_total ?? true,
     display_order: overlayPositions?.display_order || 'shuffle',
     immich_album_ids: overlayPositions?.immich_album_ids ?? '',
+    on_this_day: overlayPositions?.on_this_day || false,
+    favorites_only: overlayPositions?.favorites_only || false,
     overlay_hidden_icons: overlayPositions?.overlay_hidden_icons ?? '',
   });
   return response.data;

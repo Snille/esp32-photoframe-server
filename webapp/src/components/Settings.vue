@@ -1810,6 +1810,36 @@
                               Set the order in the Gallery tab (Reorder).
                             </div>
 
+                            <!-- This server: rotation-pool filters -->
+                            <template v-if="useThisServer">
+                              <v-checkbox
+                                v-model="editingDevice.on_this_day"
+                                label="On this day only"
+                                color="primary"
+                                density="compact"
+                                hide-details
+                                class="ml-8"
+                              ></v-checkbox>
+                              <v-checkbox
+                                v-model="editingDevice.favorites_only"
+                                label="Favorites only"
+                                color="primary"
+                                density="compact"
+                                hide-details
+                                class="ml-8"
+                              ></v-checkbox>
+                              <div
+                                v-if="
+                                  editingDevice.on_this_day ||
+                                  editingDevice.favorites_only
+                                "
+                                class="text-caption text-medium-emphasis mb-2 ml-8"
+                              >
+                                Filters the rotation pool (ordered sources). Falls
+                                back to all photos when no photo matches.
+                              </div>
+                            </template>
+
                             <!-- Custom URL -->
                             <v-text-field
                               v-if="!useThisServer"
@@ -4530,6 +4560,8 @@ const openAddDeviceDialog = () => {
     date_format: '',
     show_battery: false,
     display_order: 'shuffle',
+    on_this_day: false,
+    favorites_only: false,
     date_position: 'bottom-left',
     photo_date_position: 'bottom-left',
     weather_position: 'bottom-right',
@@ -4695,6 +4727,8 @@ const saveDevice = async () => {
         date_format: editingDevice.date_format || '',
         show_battery: editingDevice.show_battery || false,
         display_order: editingDevice.display_order || 'shuffle',
+        on_this_day: editingDevice.on_this_day || false,
+        favorites_only: editingDevice.favorites_only || false,
         date_position: editingDevice.date_position || 'bottom-left',
         photo_date_position:
           editingDevice.photo_date_position || 'bottom-left',
@@ -4789,6 +4823,8 @@ const saveDevice = async () => {
           rotation_show_total: editingDevice.rotation_show_total !== false,
           display_order: editingDevice.display_order || 'shuffle',
           immich_album_ids: editingDevice.immich_album_ids || '',
+          on_this_day: editingDevice.on_this_day || false,
+          favorites_only: editingDevice.favorites_only || false,
           overlay_hidden_icons: editingDevice.overlay_hidden_icons || '',
         }
       );
