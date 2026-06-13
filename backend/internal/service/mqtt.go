@@ -306,8 +306,75 @@ func (s *MQTTService) publishState(client mqtt.Client, device *model.Device) {
 			state["last_seen"] = est.LastSampledAt.UTC().Format(time.RFC3339)
 		}
 	}
+	// Frame poll / schedule config (from the synced device_config) + network id.
+	pc := parsePollConfig(device.DeviceConfig)
+	if pc.rotateInterval > 0 {
+		state["refresh_interval"] = round1(float64(pc.rotateInterval) / 60.0)
+		// "Next image pull" = last check-in + the rotate interval. Interval-based
+		// (not sleep-adjusted): the frame's local timezone isn't reliably known
+		// server-side, and the Sleep Schedule sensor gives the quiet-hours context.
+		if est.HasData && !est.LastSampledAt.IsZero() {
+			next := est.LastSampledAt.Add(time.Duration(pc.rotateInterval) * time.Second)
+			state["next_pull"] = next.UTC().Format(time.RFC3339)
+		}
+	}
+	state["sleep_schedule"] = pc.sleepScheduleString()
+	if device.Host != "" {
+		state["host"] = device.Host
+	}
+	if device.LastIP != "" {
+		state["ip_address"] = device.LastIP
+	}
+
 	payload, _ := json.Marshal(state)
 	client.Publish(s.stateTopic(device.ID), 1, true, payload)
+}
+
+// pollConfig holds the frame's rotation / sleep settings parsed from the synced
+// device_config blob (the same JSON the config-sync pushes to the frame).
+type pollConfig struct {
+	rotateInterval int  // seconds between image pulls
+	sleepEnabled   bool // quiet-hours schedule active
+	sleepStart     int  // minutes since local midnight
+	sleepEnd       int
+}
+
+func parsePollConfig(deviceConfig string) pollConfig {
+	var pc pollConfig
+	if deviceConfig == "" {
+		return pc
+	}
+	var cfg map[string]interface{}
+	if err := json.Unmarshal([]byte(deviceConfig), &cfg); err != nil {
+		return pc
+	}
+	if v, ok := cfg["rotate_interval"].(float64); ok {
+		pc.rotateInterval = int(v)
+	}
+	if v, ok := cfg["sleep_schedule_enabled"].(bool); ok {
+		pc.sleepEnabled = v
+	}
+	if v, ok := cfg["sleep_schedule_start"].(float64); ok {
+		pc.sleepStart = int(v)
+	}
+	if v, ok := cfg["sleep_schedule_end"].(float64); ok {
+		pc.sleepEnd = int(v)
+	}
+	return pc
+}
+
+// sleepScheduleString renders the quiet-hours window as "HH:MM–HH:MM" (local
+// clock, as configured on the frame), or "Off" when disabled.
+func (pc pollConfig) sleepScheduleString() string {
+	if !pc.sleepEnabled {
+		return "Off"
+	}
+	return fmt.Sprintf("%s–%s", formatMinutes(pc.sleepStart), formatMinutes(pc.sleepEnd))
+}
+
+func formatMinutes(m int) string {
+	m = ((m % 1440) + 1440) % 1440
+	return fmt.Sprintf("%02d:%02d", m/60, m%60)
 }
 
 func (s *MQTTService) publishImage(client mqtt.Client, device *model.Device) {
@@ -333,7 +400,7 @@ func (s *MQTTService) publishOneImage(client mqtt.Client, topic, thumbID string)
 }
 
 // mqttSensorKeys are the value_json keys exposed as HA sensors.
-var mqttSensorKeys = []string{"battery", "battery_voltage", "days_remaining", "trend", "source", "last_seen"}
+var mqttSensorKeys = []string{"battery", "battery_voltage", "days_remaining", "trend", "source", "last_seen", "refresh_interval", "sleep_schedule", "next_pull", "host", "ip_address"}
 
 func (s *MQTTService) discoveryTopic(component string, id uint, key string) string {
 	return fmt.Sprintf("%s/%s/photoframe_%d_%s/config", s.cfg.discoveryPrefix, component, id, key)
@@ -387,6 +454,23 @@ func (s *MQTTService) publishDiscovery(client mqtt.Client, device *model.Device)
 	sensor("trend", "Battery Trend", "trend", map[string]interface{}{"icon": "mdi:trending-down"})
 	sensor("source", "Image Source", "source", map[string]interface{}{"icon": "mdi:image-multiple"})
 	sensor("last_seen", "Last Seen", "last_seen", map[string]interface{}{"device_class": "timestamp"})
+
+	// Frame poll / schedule + network identity.
+	sensor("refresh_interval", "Refresh Interval", "refresh_interval", map[string]interface{}{
+		"unit_of_measurement": "min", "icon": "mdi:timer-sync-outline", "entity_category": "diagnostic",
+	})
+	sensor("next_pull", "Next Image Pull", "next_pull", map[string]interface{}{
+		"device_class": "timestamp", "icon": "mdi:timer-play-outline",
+	})
+	sensor("sleep_schedule", "Sleep Schedule", "sleep_schedule", map[string]interface{}{
+		"icon": "mdi:weather-night", "entity_category": "diagnostic",
+	})
+	sensor("host", "Host", "host", map[string]interface{}{
+		"icon": "mdi:lan", "entity_category": "diagnostic",
+	})
+	sensor("ip_address", "IP Address", "ip_address", map[string]interface{}{
+		"icon": "mdi:ip-network-outline", "entity_category": "diagnostic",
+	})
 
 	// Image entities: what's on the frame now (current), what was on it before
 	// (previous), and a non-mutating preview of what the next pull will show

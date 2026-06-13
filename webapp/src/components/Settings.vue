@@ -1471,26 +1471,35 @@
                       {{ device.host }}
                     </td>
                     <td>
-                      <div
-                        v-if="(device.battery_percent ?? -1) >= 0"
-                        class="d-flex align-center"
-                        :title="batteryTitle(device)"
-                      >
-                        <v-icon
-                          size="small"
-                          :color="batteryColor(device.battery_percent!)"
-                          >{{ batteryIcon(device.battery_percent!) }}</v-icon
+                      <template v-if="(device.battery_percent ?? -1) >= 0">
+                        <div
+                          class="d-flex align-center"
+                          :title="batteryTitle(device)"
                         >
-                        <span
-                          class="ml-1"
-                          :class="
-                            device.battery_percent! <= 15
-                              ? 'text-error'
-                              : 'text-medium-emphasis'
-                          "
-                          >{{ device.battery_percent }}%</span
+                          <v-icon
+                            size="small"
+                            :color="batteryColor(device.battery_percent!)"
+                            >{{ batteryIcon(device.battery_percent!) }}</v-icon
+                          >
+                          <span
+                            class="ml-1"
+                            :class="
+                              device.battery_percent! <= 15
+                                ? 'text-error'
+                                : 'text-medium-emphasis'
+                            "
+                            >{{ device.battery_percent }}%</span
+                          >
+                        </div>
+                        <div
+                          v-if="(device.battery_days_remaining ?? -1) > 0"
+                          class="text-caption text-medium-emphasis"
+                          :title="batteryTitle(device)"
                         >
-                      </div>
+                          ~{{ formatDaysRemaining(device.battery_days_remaining!) }}
+                          left
+                        </div>
+                      </template>
                       <span v-else class="text-grey">—</span>
                     </td>
                     <td class="text-right">
@@ -4871,6 +4880,12 @@ const batteryTitle = (device: Device) => {
     return `Battery ${device.battery_percent}% · ~${days.toFixed(1)} days remaining`;
   }
   return `Battery ${device.battery_percent}%`;
+};
+
+// Compact days-remaining for the Devices table: one decimal under 10 days,
+// whole days above (no false precision on long estimates).
+const formatDaysRemaining = (days: number) => {
+  return days >= 10 ? `${Math.round(days)} d` : `${days.toFixed(1)} d`;
 };
 
 const removeDevice = async (id: number) => {

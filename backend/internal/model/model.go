@@ -159,9 +159,12 @@ type Device struct {
 	// the current one (the demoted CurrentThumbID); NextThumbID is a non-mutating
 	// preview render of what the next pull will show (ordered DB-backed sources
 	// only). Both feed the Home Assistant MQTT Previous / Next image entities.
-	PrevThumbID string    `json:"prev_thumb_id" gorm:"default:''"`
-	NextThumbID string    `json:"next_thumb_id" gorm:"default:''"`
-	CreatedAt   time.Time `json:"created_at"`
+	PrevThumbID string `json:"prev_thumb_id" gorm:"default:''"`
+	NextThumbID string `json:"next_thumb_id" gorm:"default:''"`
+	// LastIP is the client IP the frame last checked in from (best-effort, via
+	// X-Forwarded-For when proxied), surfaced as an HA diagnostic sensor.
+	LastIP    string    `json:"last_ip" gorm:"default:''"`
+	CreatedAt time.Time `json:"created_at"`
 }
 
 const (

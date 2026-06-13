@@ -1,5 +1,15 @@
 # Changelog
 
+## v1.19.0
+
+### Added
+- **More Home Assistant sensors per frame (MQTT).** Each frame now also exposes:
+  - **Refresh Interval** — how often the frame is set to pull a new image (minutes, from `rotate_interval`).
+  - **Sleep Schedule** — the frame's configured quiet hours as `HH:MM–HH:MM` (or `Off`), during which it pauses all updates.
+  - **Next Image Pull** — a timestamp for when the frame *should* next fetch an image (last check-in + the refresh interval). Interval-based; the Sleep Schedule sensor gives the quiet-hours context.
+  - **Host** and **IP Address** — the frame's hostname (as the server addresses it) and the client IP it last checked in from.
+- **Battery days-remaining in the Devices list.** The Battery column now shows the estimated days of runtime left (e.g. `~45 d left`) under the percentage, not just in the hover tooltip.
+
 ## v1.18.0
 
 ### Added

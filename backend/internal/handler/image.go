@@ -179,6 +179,16 @@ func (h *ImageHandler) ServeImage(c echo.Context) error {
 		go h.battery.RecordSample(device.ID, batteryPercent, voltageMV)
 	}
 
+	// Remember the IP the frame checked in from (for the HA IP-address sensor).
+	// RealIP honours X-Forwarded-For, so this is the frame's LAN IP even behind a
+	// reverse proxy that forwards it. Only write on change to avoid churn.
+	if deviceFound && !preview {
+		if ip := c.RealIP(); ip != "" && ip != device.LastIP {
+			device.LastIP = ip
+			go h.db.Model(&model.Device{}).Where("id = ?", device.ID).Update("last_ip", ip)
+		}
+	}
+
 	// (The MQTT bridge is notified at the end of the serve, once current_thumb_id
 	// is committed and the next-image preview is rendered — see post-serve hook
 	// below. Notifying here would race the thumbnail write and publish the
