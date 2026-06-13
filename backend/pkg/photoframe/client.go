@@ -569,3 +569,10 @@ func (c *Client) PushProcessingSettings(settings json.RawMessage) error {
 func (c *Client) PushPalette(palette json.RawMessage) error {
 	return c.postJSON("/api/settings/palette", palette)
 }
+
+// Rotate asks an awake frame to advance to its next image via its own
+// /api/rotate endpoint. Board-agnostic, but only effective while the frame is
+// awake/reachable (e.g. a deep-sleeping frame won't see it until it next wakes).
+func (c *Client) Rotate() error {
+	return c.postJSON("/api/rotate", []byte("{}"))
+}

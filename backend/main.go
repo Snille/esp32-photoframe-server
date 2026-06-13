@@ -270,7 +270,7 @@ func main() {
 	// broker (HA discovery: battery / status / current-image entities). Off
 	// until configured in Settings; the server is a plain MQTT client and does
 	// not need to run as an HA add-on.
-	mqttService := service.NewMQTTService(database, settingsService, service.NewBatteryService(database), dataDir)
+	mqttService := service.NewMQTTService(database, settingsService, service.NewBatteryService(database), authService, dataDir)
 	mqttService.Start()
 	deviceHandler.SetMQTT(mqttService)
 

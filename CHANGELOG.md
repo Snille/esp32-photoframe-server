@@ -1,5 +1,17 @@
 # Changelog
 
+## v1.21.0
+
+### Added
+- **Control your frames from Home Assistant (MQTT).** The HA bridge gains writable controls so automations can change a frame, not just read it:
+  - **Image Source** (select) — switch the frame's photo source (Immich, Gallery, Public Art, …). Applies to the next pull and reissues the device token automatically.
+  - **Image Order** (select) — Shuffle / Newest first / Oldest first / Custom.
+  - **Refresh Interval** (number) — minutes between image pulls.
+  - **Deep Sleep** and **Auto Rotate** (switches) — toggle the frame's power/rotation behaviour (synced to the frame on its next pull).
+  - **Rotate Now** (button) — advance the frame immediately. Shown but **Unavailable on always-sleeping boards** (e.g. the FireBeetle) where a live command can't reliably land; it activates automatically on always-reachable boards.
+
+  These replace the former read-only Image Source / Refresh Interval / Image Order / Deep Sleep sensors (the controls show the same state and let you change it); the old read-only entities are removed automatically.
+
 ## v1.20.0
 
 ### Added

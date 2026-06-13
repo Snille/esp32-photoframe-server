@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/aitjcize/esp32-photoframe-server/backend/internal/model"
+	"github.com/aitjcize/esp32-photoframe-server/backend/pkg/photoframe"
 	mqtt "github.com/eclipse/paho.mqtt.golang"
 	"gorm.io/gorm"
 )
@@ -25,6 +26,7 @@ type MQTTService struct {
 	db       *gorm.DB
 	settings *SettingsService
 	battery  *BatteryService
+	auth     *AuthService
 	dataDir  string
 
 	mu        sync.Mutex
@@ -49,11 +51,12 @@ type mqttConfig struct {
 	baseTopic       string // our own state/image topic root, default "esp32photoframe"
 }
 
-func NewMQTTService(db *gorm.DB, settings *SettingsService, battery *BatteryService, dataDir string) *MQTTService {
+func NewMQTTService(db *gorm.DB, settings *SettingsService, battery *BatteryService, auth *AuthService, dataDir string) *MQTTService {
 	return &MQTTService{
 		db:            db,
 		settings:      settings,
 		battery:       battery,
+		auth:          auth,
 		dataDir:       dataDir,
 		discoverySent: make(map[uint]bool),
 	}
@@ -189,6 +192,10 @@ func (s *MQTTService) connect(cfg mqttConfig) {
 		s.mu.Unlock()
 		c.Publish(s.bridgeAvailabilityTopic(), 1, true, "online").Wait()
 		s.publishAllDevices()
+		// Listen for control commands from Home Assistant (select/number/switch/
+		// button entities publish the desired value here). Subscribed on every
+		// (re)connect.
+		c.Subscribe(s.cfg.baseTopic+"/device/+/cmd/+", 1, s.onCommand)
 	})
 	opts.SetConnectionLostHandler(func(_ mqtt.Client, err error) {
 		fmt.Printf("[mqtt] connection lost: %v\n", err)
@@ -286,6 +293,14 @@ func (s *MQTTService) RemoveDevice(deviceID uint) {
 	}
 	client.Publish(s.discoveryTopic("binary_sensor", deviceID, "collage"), 1, true, "")
 	client.Publish(s.discoveryTopic("binary_sensor", deviceID, "deep_sleep"), 1, true, "")
+	// Control entities (select/number/switch/button) + their gating topic.
+	client.Publish(s.discoveryTopic("select", deviceID, "source"), 1, true, "")
+	client.Publish(s.discoveryTopic("select", deviceID, "image_order"), 1, true, "")
+	client.Publish(s.discoveryTopic("number", deviceID, "refresh_interval"), 1, true, "")
+	client.Publish(s.discoveryTopic("switch", deviceID, "deep_sleep"), 1, true, "")
+	client.Publish(s.discoveryTopic("switch", deviceID, "auto_rotate"), 1, true, "")
+	client.Publish(s.discoveryTopic("button", deviceID, "rotate"), 1, true, "")
+	client.Publish(s.controlsAvailabilityTopic(deviceID), 1, true, "")
 	client.Publish(s.stateTopic(deviceID), 1, true, "")
 	client.Publish(s.imageTopic(deviceID), 1, true, "")
 	client.Publish(s.prevImageTopic(deviceID), 1, true, "")
@@ -324,6 +339,182 @@ func (s *MQTTService) publishDevice(device *model.Device) {
 		prevAvail = "online"
 	}
 	client.Publish(s.prevAvailabilityTopic(device.ID), 1, true, prevAvail)
+	// Gate the "Rotate Now" button on whether the board can act on a live command.
+	controls := "offline"
+	if boardSupportsLiveControl(device.BoardName) {
+		controls = "online"
+	}
+	client.Publish(s.controlsAvailabilityTopic(device.ID), 1, true, controls)
+}
+
+// controlsAvailabilityTopic gates the "Rotate Now" button: "offline" for boards
+// that can't act on a live command (deep-sleeping FireBeetle), so HA shows it
+// Unavailable until a capable board is connected.
+func (s *MQTTService) controlsAvailabilityTopic(id uint) string {
+	return fmt.Sprintf("%s/device/%d/controls_available", s.cfg.baseTopic, id)
+}
+
+func (s *MQTTService) commandTopic(id uint, field string) string {
+	return fmt.Sprintf("%s/device/%d/cmd/%s", s.cfg.baseTopic, id, field)
+}
+
+// boardSupportsLiveControl reports whether a board can act on an immediate
+// "rotate now" push. The FireBeetle deep-sleeps almost always, so a live push
+// only lands in a rare wake window — gate the button off there. Always-reachable
+// boards (and unknown/newer boards) get it.
+func boardSupportsLiveControl(boardName string) bool {
+	switch boardName {
+	case "dfrobot_firebeetle_esp32e":
+		return false
+	default:
+		return true
+	}
+}
+
+// onCommand routes an HA control command published to
+// <base>/device/<id>/cmd/<field>.
+func (s *MQTTService) onCommand(_ mqtt.Client, msg mqtt.Message) {
+	parts := strings.Split(msg.Topic(), "/")
+	// Parse from the right so a base topic containing slashes still works.
+	if len(parts) < 4 || parts[len(parts)-2] != "cmd" {
+		return
+	}
+	field := parts[len(parts)-1]
+	id64, err := strconv.ParseUint(parts[len(parts)-3], 10, 64)
+	if err != nil {
+		return
+	}
+	s.handleCommand(uint(id64), field, strings.TrimSpace(string(msg.Payload())))
+}
+
+func (s *MQTTService) handleCommand(deviceID uint, field, payload string) {
+	var device model.Device
+	if err := s.db.First(&device, deviceID).Error; err != nil {
+		return
+	}
+	switch field {
+	case "image_order":
+		order := labelToDisplayOrder(payload)
+		s.db.Model(&device).Update("display_order", order)
+		device.DisplayOrder = order
+	case "source":
+		// Swap the /image/<source> tail of the configured image_url (which points
+		// back at this server), reissuing a device token for the new URL.
+		s.applyConfigChange(&device, func(cfg map[string]interface{}) {
+			if url, ok := cfg["image_url"].(string); ok {
+				cfg["image_url"] = replaceSourceInURL(url, payload)
+			}
+		}, true)
+	case "refresh_interval":
+		mins, err := strconv.ParseFloat(payload, 64)
+		if err != nil || mins <= 0 {
+			return
+		}
+		s.applyConfigChange(&device, func(cfg map[string]interface{}) {
+			cfg["rotate_interval"] = int(mins * 60)
+		}, false)
+	case "deep_sleep":
+		on := payload == "ON"
+		s.applyConfigChange(&device, func(cfg map[string]interface{}) { cfg["deep_sleep_enabled"] = on }, false)
+	case "auto_rotate":
+		on := payload == "ON"
+		s.applyConfigChange(&device, func(cfg map[string]interface{}) { cfg["auto_rotate"] = on }, false)
+	case "rotate":
+		if !boardSupportsLiveControl(device.BoardName) || device.Host == "" {
+			return
+		}
+		host := device.Host
+		go func() {
+			if err := photoframe.NewClient(host).Rotate(); err != nil {
+				fmt.Printf("[mqtt] rotate command failed for device %d: %v\n", deviceID, err)
+			}
+		}()
+		return
+	default:
+		return
+	}
+	// Reflect the change back to HA.
+	s.publishDevice(&device)
+}
+
+// applyConfigChange merges mutate(cfg) into the device's stored config, bumps the
+// config timestamp (so an asleep frame picks it up via config-sync on its next
+// pull), persists it, and pushes to an awake frame — mirroring the web UI's
+// UpdateDeviceConfig so commands behave identically.
+func (s *MQTTService) applyConfigChange(device *model.Device, mutate func(map[string]interface{}), reinjectToken bool) {
+	var cfg map[string]interface{}
+	if device.DeviceConfig != "" && device.DeviceConfig != "{}" {
+		json.Unmarshal([]byte(device.DeviceConfig), &cfg)
+	}
+	if cfg == nil {
+		cfg = map[string]interface{}{}
+	}
+	mutate(cfg)
+	if reinjectToken && s.auth != nil {
+		if url, ok := cfg["image_url"].(string); ok && strings.Contains(url, "/image/") {
+			var user model.User
+			if err := s.db.Order("id").First(&user).Error; err == nil && user.ID > 0 {
+				if tok, err := s.auth.GetOrGenerateDeviceToken(user.ID, user.Username, device.Name, &device.ID); err == nil {
+					cfg["access_token"] = tok
+				}
+			}
+		}
+	}
+	merged, err := json.Marshal(cfg)
+	if err != nil {
+		return
+	}
+	ts := time.Now().Unix()
+	s.db.Model(device).Updates(map[string]interface{}{
+		"device_config":       string(merged),
+		"config_last_updated": ts,
+	})
+	device.DeviceConfig = string(merged)
+	device.ConfigLastUpdated = ts
+	if device.Host != "" {
+		// Push best-effort in the background so a slow/unreachable frame doesn't
+		// block this command handler (and thus the next queued command). An asleep
+		// frame picks the change up via config-sync on its next pull regardless.
+		host, id := device.Host, device.ID
+		go func() {
+			if err := photoframe.NewClient(host).PushConfig(cfg); err != nil {
+				fmt.Printf("[mqtt] config push to device %d failed (will sync on next pull): %v\n", id, err)
+			}
+		}()
+	}
+}
+
+// replaceSourceInURL swaps the "/image/<source>" tail of an image URL, preserving
+// any query string or trailing path.
+func replaceSourceInURL(raw, newSource string) string {
+	i := strings.Index(raw, "/image/")
+	if i < 0 || newSource == "" {
+		return raw
+	}
+	base := raw[:i+len("/image/")]
+	rest := raw[i+len("/image/"):]
+	suffix := ""
+	if q := strings.IndexAny(rest, "?/"); q >= 0 {
+		suffix = rest[q:]
+	}
+	return base + newSource + suffix
+}
+
+// labelToDisplayOrder maps the HA "Image Order" select option back to the stored
+// display-order value (inverse of displayOrderLabel; also accepts raw values).
+func labelToDisplayOrder(label string) string {
+	switch label {
+	case "Shuffle":
+		return model.DisplayOrderShuffle
+	case "Newest first":
+		return model.DisplayOrderChronoNewest
+	case "Oldest first":
+		return model.DisplayOrderChronoOldest
+	case "Custom":
+		return model.DisplayOrderCustom
+	default:
+		return model.NormalizeDisplayOrder(label)
+	}
 }
 
 func (s *MQTTService) publishState(client mqtt.Client, device *model.Device) {
@@ -386,11 +577,17 @@ func (s *MQTTService) publishState(client mqtt.Client, device *model.Device) {
 	if t := triggerLabel(device.LastTrigger); t != "" {
 		state["trigger"] = t
 	}
-	// Deep-sleep on/off (binary_sensor); the frame deep-sleeps between rotations.
+	// Deep-sleep + auto-rotate on/off (switches); state mirrors the config so the
+	// HA control reflects the frame's current setting.
 	if pc.deepSleep {
 		state["deep_sleep"] = "ON"
 	} else {
 		state["deep_sleep"] = "OFF"
+	}
+	if pc.autoRotate {
+		state["auto_rotate"] = "ON"
+	} else {
+		state["auto_rotate"] = "OFF"
 	}
 
 	// Collage flag + an explanation of the Next Image entity's state. The Next
@@ -591,8 +788,18 @@ func (s *MQTTService) publishOneImage(client mqtt.Client, topic, thumbID string)
 	client.Publish(topic, 1, true, data)
 }
 
-// mqttSensorKeys are the value_json keys exposed as HA sensors.
-var mqttSensorKeys = []string{"battery", "battery_voltage", "days_remaining", "trend", "source", "last_seen", "refresh_interval", "sleep_schedule", "next_pull", "host", "ip_address", "next_image_status", "timezone", "rotation", "display_order", "server_host", "trigger"}
+// mqttSensorKeys are the value_json keys exposed as plain (read-only) HA sensors.
+// Image source / refresh interval / image order are now controllable select /
+// number entities (see publishDiscovery), so they are not in this list.
+var mqttSensorKeys = []string{"battery", "battery_voltage", "days_remaining", "trend", "last_seen", "sleep_schedule", "next_pull", "host", "ip_address", "next_image_status", "timezone", "rotation", "server_host", "trigger"}
+
+// commandSourceOptions are the image sources offered by the HA "Image Source"
+// select. Matches the server's registered sources (model source constants).
+var commandSourceOptions = []string{
+	model.SourceGallery, model.SourceImmich, model.SourceSynologyPhotos,
+	model.SourceGooglePhotos, model.SourcePublicArt, model.SourceAIGeneration,
+	model.SourceURLProxy, model.SourceFractal, model.SourceDLA,
+}
 
 func (s *MQTTService) discoveryTopic(component string, id uint, key string) string {
 	return fmt.Sprintf("%s/%s/photoframe_%d_%s/config", s.cfg.discoveryPrefix, component, id, key)
@@ -644,13 +851,10 @@ func (s *MQTTService) publishDiscovery(client mqtt.Client, device *model.Device)
 		"unit_of_measurement": "d", "icon": "mdi:battery-clock", "state_class": "measurement",
 	})
 	sensor("trend", "Battery Trend", "trend", map[string]interface{}{"icon": "mdi:trending-down"})
-	sensor("source", "Image Source", "source", map[string]interface{}{"icon": "mdi:image-multiple"})
 	sensor("last_seen", "Last Seen", "last_seen", map[string]interface{}{"device_class": "timestamp"})
 
-	// Frame poll / schedule + network identity.
-	sensor("refresh_interval", "Refresh Interval", "refresh_interval", map[string]interface{}{
-		"unit_of_measurement": "min", "icon": "mdi:timer-sync-outline", "entity_category": "diagnostic",
-	})
+	// (Image Source / Refresh Interval are now controllable select / number
+	// entities — see the controls section below.)
 	sensor("next_pull", "Next Image Pull", "next_pull", map[string]interface{}{
 		"device_class": "timestamp", "icon": "mdi:timer-play-outline",
 	})
@@ -676,9 +880,6 @@ func (s *MQTTService) publishDiscovery(client mqtt.Client, device *model.Device)
 	sensor("rotation", "Display Rotation", "rotation", map[string]interface{}{
 		"unit_of_measurement": "°", "icon": "mdi:screen-rotation", "entity_category": "diagnostic",
 	})
-	sensor("display_order", "Image Order", "display_order", map[string]interface{}{
-		"icon": "mdi:sort",
-	})
 	sensor("server_host", "Server Host", "server_host", map[string]interface{}{
 		"icon": "mdi:server-network", "entity_category": "diagnostic",
 	})
@@ -686,22 +887,73 @@ func (s *MQTTService) publishDiscovery(client mqtt.Client, device *model.Device)
 		"icon": "mdi:gesture-tap-button",
 	})
 
-	// Deep-sleep on/off flag (binary_sensor like collage).
-	deepSleepCfg := map[string]interface{}{
-		"name":            "Deep Sleep",
-		"unique_id":       fmt.Sprintf("photoframe_%d_deep_sleep", device.ID),
-		"object_id":       fmt.Sprintf("photoframe_%s_deep_sleep", sanitize(device.Name)),
-		"state_topic":     state,
-		"value_template":  "{{ value_json.deep_sleep }}",
-		"payload_on":      "ON",
-		"payload_off":     "OFF",
-		"icon":            "mdi:power-sleep",
-		"entity_category": "diagnostic",
-		"availability":    avail,
-		"device":          dev,
+	// --- Controllable entities (HA writes to a command topic; the server applies
+	// the change + pushes/config-syncs to the frame, then republishes state). These
+	// supersede the former read-only Image Source / Refresh Interval / Image Order /
+	// Deep Sleep entities; clear those stale discovery configs so HA doesn't keep a
+	// duplicate read-only copy alongside the new control.
+	client.Publish(s.discoveryTopic("sensor", device.ID, "source"), 1, true, "")
+	client.Publish(s.discoveryTopic("sensor", device.ID, "refresh_interval"), 1, true, "")
+	client.Publish(s.discoveryTopic("sensor", device.ID, "display_order"), 1, true, "")
+	client.Publish(s.discoveryTopic("binary_sensor", device.ID, "deep_sleep"), 1, true, "")
+
+	control := func(component, key string, cfg map[string]interface{}) {
+		cfg["unique_id"] = fmt.Sprintf("photoframe_%d_%s", device.ID, key)
+		cfg["object_id"] = fmt.Sprintf("photoframe_%s_%s", sanitize(device.Name), key)
+		cfg["command_topic"] = s.commandTopic(device.ID, key)
+		cfg["availability"] = avail
+		cfg["device"] = dev
+		payload, _ := json.Marshal(cfg)
+		client.Publish(s.discoveryTopic(component, device.ID, key), 1, true, payload)
 	}
-	deepSleepPayload, _ := json.Marshal(deepSleepCfg)
-	client.Publish(s.discoveryTopic("binary_sensor", device.ID, "deep_sleep"), 1, true, deepSleepPayload)
+
+	control("select", "source", map[string]interface{}{
+		"name": "Image Source", "icon": "mdi:image-multiple",
+		"state_topic": state, "value_template": "{{ value_json.source }}",
+		"options": commandSourceOptions,
+	})
+	control("select", "image_order", map[string]interface{}{
+		"name": "Image Order", "icon": "mdi:sort",
+		"state_topic": state, "value_template": "{{ value_json.display_order }}",
+		"options": []string{"Shuffle", "Newest first", "Oldest first", "Custom"},
+	})
+	control("number", "refresh_interval", map[string]interface{}{
+		"name": "Refresh Interval", "icon": "mdi:timer-sync-outline",
+		"state_topic": state, "value_template": "{{ value_json.refresh_interval }}",
+		"min": 1, "max": 1440, "step": 1, "unit_of_measurement": "min", "mode": "box",
+		"entity_category": "config",
+	})
+	control("switch", "deep_sleep", map[string]interface{}{
+		"name": "Deep Sleep", "icon": "mdi:power-sleep",
+		"state_topic": state, "value_template": "{{ value_json.deep_sleep }}",
+		"payload_on": "ON", "payload_off": "OFF", "entity_category": "config",
+	})
+	control("switch", "auto_rotate", map[string]interface{}{
+		"name": "Auto Rotate", "icon": "mdi:rotate-right",
+		"state_topic": state, "value_template": "{{ value_json.auto_rotate }}",
+		"payload_on": "ON", "payload_off": "OFF", "entity_category": "config",
+	})
+	// "Rotate Now" button — gated Unavailable on boards that can't act on a live
+	// command (deep-sleeping FireBeetle), available on always-reachable boards.
+	rotateAvail := append([]map[string]string{}, avail...)
+	rotateAvail = append(rotateAvail, map[string]string{
+		"topic":                 s.controlsAvailabilityTopic(device.ID),
+		"payload_available":     "online",
+		"payload_not_available": "offline",
+	})
+	rotateCfg := map[string]interface{}{
+		"name":              "Rotate Now",
+		"unique_id":         fmt.Sprintf("photoframe_%d_rotate", device.ID),
+		"object_id":         fmt.Sprintf("photoframe_%s_rotate", sanitize(device.Name)),
+		"command_topic":     s.commandTopic(device.ID, "rotate"),
+		"payload_press":     "PRESS",
+		"icon":              "mdi:rotate-3d-variant",
+		"availability":      rotateAvail,
+		"availability_mode": "all",
+		"device":            dev,
+	}
+	rotatePayload, _ := json.Marshal(rotateCfg)
+	client.Publish(s.discoveryTopic("button", device.ID, "rotate"), 1, true, rotatePayload)
 
 	// Collage on/off flag.
 	collageCfg := map[string]interface{}{
