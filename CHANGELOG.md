@@ -1,5 +1,10 @@
 # Changelog
 
+## v1.19.2
+
+### Fixed
+- **"Next Image Pull" now matches the frame's aligned wake schedule.** The sensor estimated the next pull as *last check-in + refresh interval*, which was wrong for frames using aligned rotation: those wake on clock-grid boundaries (e.g. :00/:15/:30/:45 for a 15-minute interval), so an off-cycle **button press** does not push the next auto-pull forward. The estimate now mirrors the firmware's wake scheduler (aligned grid + its "skip if <60s away" guard), and is only published when auto-rotate is enabled. (Still not adjusted for the sleep schedule — the Sleep Schedule sensor gives that context.)
+
 ## v1.19.1
 
 ### Added

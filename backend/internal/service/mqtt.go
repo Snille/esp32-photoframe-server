@@ -326,12 +326,16 @@ func (s *MQTTService) publishState(client mqtt.Client, device *model.Device) {
 	pc := parsePollConfig(device.DeviceConfig)
 	if pc.rotateInterval > 0 {
 		state["refresh_interval"] = round1(float64(pc.rotateInterval) / 60.0)
-		// "Next image pull" = last check-in + the rotate interval. Interval-based
-		// (not sleep-adjusted): the frame's local timezone isn't reliably known
-		// server-side, and the Sleep Schedule sensor gives the quiet-hours context.
-		if est.HasData && !est.LastSampledAt.IsZero() {
-			next := est.LastSampledAt.Add(time.Duration(pc.rotateInterval) * time.Second)
-			state["next_pull"] = next.UTC().Format(time.RFC3339)
+		// "Next image pull" mirrors the firmware's wake scheduler: when the frame
+		// uses aligned rotation it wakes on clock-grid boundaries (e.g. :00/:15/:30
+		// for a 15-min interval), NOT last-check-in + interval — so an off-cycle
+		// button press doesn't push the next auto-pull forward. Only published when
+		// auto-rotate is on (otherwise there is no scheduled pull). Still not
+		// sleep-schedule-adjusted; the Sleep Schedule sensor gives that context.
+		if pc.autoRotate && est.HasData && !est.LastSampledAt.IsZero() {
+			if next := computeNextPull(est.LastSampledAt, pc); !next.IsZero() {
+				state["next_pull"] = next.UTC().Format(time.RFC3339)
+			}
 		}
 	}
 	state["sleep_schedule"] = pc.sleepScheduleString()
@@ -379,13 +383,17 @@ func (s *MQTTService) nextImageStatus(device *model.Device) string {
 // device_config blob (the same JSON the config-sync pushes to the frame).
 type pollConfig struct {
 	rotateInterval int  // seconds between image pulls
+	autoRotate     bool // frame auto-rotates on a timer (vs button-only)
+	aligned        bool // wake snapped to clock-grid boundaries (auto_rotate_aligned)
 	sleepEnabled   bool // quiet-hours schedule active
 	sleepStart     int  // minutes since local midnight
 	sleepEnd       int
 }
 
 func parsePollConfig(deviceConfig string) pollConfig {
-	var pc pollConfig
+	// auto_rotate defaults on when the key is absent (older firmware); the others
+	// default to their zero value.
+	pc := pollConfig{autoRotate: true}
 	if deviceConfig == "" {
 		return pc
 	}
@@ -395,6 +403,12 @@ func parsePollConfig(deviceConfig string) pollConfig {
 	}
 	if v, ok := cfg["rotate_interval"].(float64); ok {
 		pc.rotateInterval = int(v)
+	}
+	if v, ok := cfg["auto_rotate"].(bool); ok {
+		pc.autoRotate = v
+	}
+	if v, ok := cfg["auto_rotate_aligned"].(bool); ok {
+		pc.aligned = v
 	}
 	if v, ok := cfg["sleep_schedule_enabled"].(bool); ok {
 		pc.sleepEnabled = v
@@ -406,6 +420,30 @@ func parsePollConfig(deviceConfig string) pollConfig {
 		pc.sleepEnd = int(v)
 	}
 	return pc
+}
+
+// computeNextPull predicts when the frame next wakes to fetch an image, mirroring
+// the firmware's calculate_next_wakeup_interval. With aligned rotation the wake
+// snaps to the next clock-grid boundary (a multiple of rotateInterval), with the
+// firmware's "skip if <60s away" guard — so a mid-cycle button press doesn't push
+// the estimate forward. Without alignment it's simply last-seen + interval.
+// (Alignment is computed on the absolute UTC grid, which matches the firmware's
+// local-time-of-day grid for the usual intervals that evenly divide both the hour
+// and any whole/half-hour timezone offset. Not sleep-schedule adjusted.)
+func computeNextPull(lastSeen time.Time, pc pollConfig) time.Time {
+	iv := int64(pc.rotateInterval)
+	if iv <= 0 {
+		return time.Time{}
+	}
+	if !pc.aligned {
+		return lastSeen.Add(time.Duration(iv) * time.Second)
+	}
+	t := lastSeen.Unix()
+	next := (t/iv + 1) * iv // strictly the next grid point
+	if next-t < 60 {
+		next += iv
+	}
+	return time.Unix(next, 0).UTC()
 }
 
 // sleepScheduleString renders the quiet-hours window as "HH:MM–HH:MM" (local
