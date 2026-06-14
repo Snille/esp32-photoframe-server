@@ -290,6 +290,36 @@ func FormatRotationOverlay(rs RotationStatus, showTotal bool) (text, icon string
 	return text, icon
 }
 
+// ApplySkip pins the image N steps from the current one in the device's ordered
+// rotation (positive = forward, negative = back, 0 = re-show current), so the
+// next ordered pull jumps there and then continues from that point. Wraps at
+// both ends. Returns the pinned image ID, or 0 on a no-op: collage / non-ordered
+// sources, an empty pool, or steps == 0. Shared by the HA "Skip Queue" command
+// and the server WebGUI / REST skip endpoint so both behave identically. The
+// caller is responsible for republishing state (e.g. NotifyDeviceUpdated).
+func ApplySkip(db *gorm.DB, device *model.Device, steps int) uint {
+	if device == nil || steps == 0 || device.EnableCollage {
+		return 0
+	}
+	source := deviceSourceFromConfig(device.DeviceConfig)
+	if !model.IsOrderedSource(source) {
+		return 0
+	}
+	ids, _, err := orderedCandidateIDs(db, device, source, devicePoolScopes(device, source, true)...)
+	if err != nil || len(ids) == 0 {
+		return 0
+	}
+	curIdx := indexOfUint(ids, lastServedImageID(db, device.ID, source))
+	if curIdx < 0 {
+		curIdx = 0
+	}
+	target := ((curIdx+steps)%len(ids) + len(ids)) % len(ids)
+	pin := ids[target]
+	db.Model(device).Update("pending_next_image_id", pin)
+	device.PendingNextImageID = pin
+	return pin
+}
+
 // pickOrderedPhoto selects the next photo for a device according to its
 // DisplayOrder mode. Every mode reduces to the same idea: build the canonical
 // ordered list of candidate image IDs for the source, find where the
@@ -309,6 +339,25 @@ func pickOrderedPhoto(db *gorm.DB, device *model.Device, source string, preview 
 	}
 	if len(ids) == 0 {
 		return model.Image{}, gorm.ErrRecordNotFound
+	}
+
+	// A manual "skip" pins the exact next image (HA "Skip Queue"). Honor it before
+	// the normal cursor: a real pull serves it and clears the pin (rotation then
+	// continues from there); a preview shows it without consuming. A pin no longer
+	// in the pool (hidden/deleted/out of the current scope) is simply ignored, so a
+	// stale pin can never get the rotation stuck.
+	if device.PendingNextImageID != 0 {
+		if idx := indexOfUint(ids, device.PendingNextImageID); idx >= 0 {
+			pinned := device.PendingNextImageID
+			if !preview {
+				device.PendingNextImageID = 0
+				db.Model(device).Update("pending_next_image_id", 0)
+			}
+			var item model.Image
+			if err := db.First(&item, pinned).Error; err == nil {
+				return item, nil
+			}
+		}
 	}
 
 	next := 0

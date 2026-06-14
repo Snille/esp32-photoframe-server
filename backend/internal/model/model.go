@@ -201,8 +201,17 @@ type Device struct {
 	// the HA "Last Trigger" sensor: "timer" (auto-rotate wake), "button" (wake
 	// button), "boot" (cold boot/reset), "push" (server-initiated) or "pull"
 	// (firmware too old to report a wake reason). Set on every real serve.
-	LastTrigger string    `json:"last_trigger" gorm:"default:''"`
-	CreatedAt   time.Time `json:"created_at"`
+	LastTrigger string `json:"last_trigger" gorm:"default:''"`
+	// NextWakeAt is the unix epoch the frame told us it intends to wake next
+	// (X-Next-Wake-Time header), captured on each check-in. It already accounts
+	// for clock-aligned wakes and the quiet-hours sleep schedule, so the HA "Next
+	// Image Pull" sensor prefers it over the server's own estimate. 0 = unknown.
+	NextWakeAt int64 `json:"next_wake_at" gorm:"default:0"`
+	// PendingNextImageID pins the exact image the next ordered pull should serve,
+	// set by the HA "Skip Queue" command to jump N steps in the rotation. The pull
+	// serves it and clears the pin (back to 0); rotation then continues from there.
+	PendingNextImageID uint      `json:"-" gorm:"default:0"`
+	CreatedAt          time.Time `json:"created_at"`
 }
 
 const (

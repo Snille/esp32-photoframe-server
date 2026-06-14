@@ -203,6 +203,28 @@ func (h *ImageHandler) ServeImage(c echo.Context) error {
 			device.LastTrigger = trigger
 			go h.db.Model(&model.Device{}).Where("id = ?", device.ID).Update("last_trigger", trigger)
 		}
+
+		// A skip requested from the frame's own WebGUI arrives as X-Skip-Steps on an
+		// immediate re-pull. Apply it now (before the source picks a photo) so THIS
+		// serve returns the jumped-to image: ApplySkip pins the target and the
+		// ordered pick consumes the pin on this same (non-preview) pull.
+		if stepsStr := c.Request().Header.Get("X-Skip-Steps"); stepsStr != "" {
+			if steps, err := strconv.Atoi(strings.TrimSpace(stepsStr)); err == nil && steps != 0 {
+				service.ApplySkip(h.db, &device, steps)
+			}
+		}
+
+		// The frame reports exactly when it will wake next (X-Next-Wake-Time, a unix
+		// epoch). Storing it lets the HA "Next Image Pull" sensor show the frame's
+		// real scheduled wake (already sleep-schedule / clock-align aware) instead of
+		// the server re-deriving it. Only accept a plausible future-ish epoch.
+		if wakeStr := c.Request().Header.Get("X-Next-Wake-Time"); wakeStr != "" {
+			if epoch, err := strconv.ParseInt(strings.TrimSpace(wakeStr), 10, 64); err == nil &&
+				epoch > 1700000000 && epoch != device.NextWakeAt {
+				device.NextWakeAt = epoch
+				go h.db.Model(&model.Device{}).Where("id = ?", device.ID).Update("next_wake_at", epoch)
+			}
+		}
 	}
 
 	// (The MQTT bridge is notified at the end of the serve, once current_thumb_id

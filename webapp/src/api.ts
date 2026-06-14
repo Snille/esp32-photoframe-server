@@ -333,6 +333,14 @@ export const deleteDevice = async (id: number) => {
   return response.data;
 };
 
+// Jump the device's rotation queue by `steps` (positive = forward, negative =
+// back). The next ordered pull jumps to that image; no-op for collage / non-
+// ordered sources.
+export const skipQueue = async (id: number, steps: number) => {
+  const response = await api.post(`/devices/${id}/skip`, { steps });
+  return response.data;
+};
+
 export const pushToDevice = async (deviceID: number, imageID: number) => {
   const response = await api.post(`/devices/${deviceID}/push`, {
     image_id: imageID,

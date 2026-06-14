@@ -1840,6 +1840,50 @@
                               </div>
                             </template>
 
+                            <!-- This server: skip queue (jump in rotation) -->
+                            <template v-if="useThisServer && editingDevice.id">
+                              <div
+                                class="d-flex align-center ml-8 mt-2"
+                                style="gap: 8px"
+                              >
+                                <span class="text-body-2">Skip queue</span>
+                                <v-btn
+                                  size="small"
+                                  variant="tonal"
+                                  icon="mdi-chevron-double-left"
+                                  :loading="skipping"
+                                  :disabled="skipping || !deviceConfig.auto_rotate"
+                                  title="Jump back"
+                                  @click="doSkip(-Math.abs(skipSteps || 1))"
+                                ></v-btn>
+                                <v-text-field
+                                  v-model.number="skipSteps"
+                                  type="number"
+                                  min="1"
+                                  density="compact"
+                                  variant="outlined"
+                                  hide-details
+                                  style="max-width: 84px"
+                                ></v-text-field>
+                                <v-btn
+                                  size="small"
+                                  variant="tonal"
+                                  icon="mdi-chevron-double-right"
+                                  :loading="skipping"
+                                  :disabled="skipping || !deviceConfig.auto_rotate"
+                                  title="Jump forward"
+                                  @click="doSkip(Math.abs(skipSteps || 1))"
+                                ></v-btn>
+                              </div>
+                              <div
+                                class="text-caption text-medium-emphasis mb-2 ml-8"
+                              >
+                                One-time jump in the rotation, applied on the
+                                frame's next pull — not a permanent setting (it
+                                won't skip on every pull). Ordered sources only.
+                              </div>
+                            </template>
+
                             <!-- Custom URL -->
                             <v-text-field
                               v-if="!useThisServer"
@@ -3288,6 +3332,7 @@ import {
   deleteDevice,
   updateDevice,
   refreshDevice,
+  skipQueue,
   type Device,
   createURLSource,
   updateURLSource,
@@ -3566,6 +3611,8 @@ const editingDevice = reactive<Partial<Device>>({});
 const deviceDialogTab = ref('general');
 const savingDeviceConfig = ref(false);
 const syncingFromDevice = ref(false);
+const skipping = ref(false);
+const skipSteps = ref(1);
 
 // Device config (synced remotely to device)
 const deviceConfig = reactive<Record<string, any>>({
@@ -3926,6 +3973,26 @@ const syncFromDevice = async () => {
     );
   } finally {
     syncingFromDevice.value = false;
+  }
+};
+
+const doSkip = async (steps: number) => {
+  if (!editingDevice.id || !steps) return;
+  skipping.value = true;
+  try {
+    await skipQueue(editingDevice.id, steps);
+    showMessage(
+      steps > 0
+        ? `Skipping ${steps} forward on next pull`
+        : `Skipping ${-steps} back on next pull`
+    );
+  } catch (e: any) {
+    showMessage(
+      'Failed to skip: ' + (e.response?.data?.error || e.message),
+      true
+    );
+  } finally {
+    skipping.value = false;
   }
 };
 

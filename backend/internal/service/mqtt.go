@@ -314,6 +314,7 @@ func (s *MQTTService) RemoveDevice(deviceID uint) {
 	client.Publish(s.discoveryTopic("switch", deviceID, "auto_rotate"), 1, true, "")
 	client.Publish(s.discoveryTopic("button", deviceID, "rotate"), 1, true, "")
 	client.Publish(s.discoveryTopic("button", deviceID, "reshuffle"), 1, true, "")
+	client.Publish(s.discoveryTopic("number", deviceID, "skip"), 1, true, "")
 	client.Publish(s.discoveryTopic("button", deviceID, "hide"), 1, true, "")
 	client.Publish(s.discoveryTopic("button", deviceID, "favorite"), 1, true, "")
 	client.Publish(s.discoveryTopic("switch", deviceID, "on_this_day"), 1, true, "")
@@ -443,6 +444,14 @@ func (s *MQTTService) handleCommand(deviceID uint, field, payload string) {
 		// Bump the shuffle seed → the next pull computes a fresh shuffle order.
 		s.db.Model(&device).Update("shuffle_seed", device.ShuffleSeed+1)
 		device.ShuffleSeed++
+	case "skip":
+		// Jump N steps in the rotation queue (positive = forward, negative = back,
+		// 0 = re-show current); the next ordered pull serves the pinned image. No-op
+		// for collage / non-ordered sources. The HA number snaps back to 0 via the
+		// republish below.
+		if n, err := strconv.Atoi(payload); err == nil {
+			ApplySkip(s.db, &device, n)
+		}
 	case "hide":
 		// Globally hide the photo currently on the frame; it's skipped from the
 		// next pull onward (the frame keeps showing it until then).
@@ -591,15 +600,22 @@ func (s *MQTTService) publishState(client mqtt.Client, device *model.Device) {
 	pc := parsePollConfig(device.DeviceConfig)
 	if pc.rotateInterval > 0 {
 		state["refresh_interval"] = round1(float64(pc.rotateInterval) / 60.0)
-		// "Next image pull" mirrors the firmware's wake scheduler: when the frame
-		// uses aligned rotation it wakes on clock-grid boundaries (e.g. :00/:15/:30
-		// for a 15-min interval), NOT last-check-in + interval — so an off-cycle
-		// button press doesn't push the next auto-pull forward. Only published when
-		// auto-rotate is on (otherwise there is no scheduled pull). Still not
-		// sleep-schedule-adjusted; the Sleep Schedule sensor gives that context.
-		if pc.autoRotate && est.HasData && !est.LastSampledAt.IsZero() {
-			if next := computeNextPull(est.LastSampledAt, pc); !next.IsZero() {
-				state["next_pull"] = next.UTC().Format(time.RFC3339)
+		// "Next image pull" prefers the time the FRAME reported it will wake next
+		// (X-Next-Wake-Time → device.NextWakeAt): that value is computed on the
+		// frame's own clock and already accounts for clock-aligned wakes AND the
+		// quiet-hours sleep schedule, so it's the ground truth. We use it as long as
+		// it's still in the future (a stale past value means the frame missed/never
+		// reported its last scheduled wake). Firmware too old to send the header (or
+		// a just-missed wake) falls back to the server's own estimate, which mirrors
+		// the aligned-grid scheduler but can't replay the sleep schedule. Only
+		// published when auto-rotate is on (otherwise there is no scheduled pull).
+		if pc.autoRotate {
+			if device.NextWakeAt > 0 && time.Unix(device.NextWakeAt, 0).After(time.Now()) {
+				state["next_pull"] = time.Unix(device.NextWakeAt, 0).UTC().Format(time.RFC3339)
+			} else if est.HasData && !est.LastSampledAt.IsZero() {
+				if next := computeNextPull(est.LastSampledAt, pc); !next.IsZero() {
+					state["next_pull"] = next.UTC().Format(time.RFC3339)
+				}
 			}
 		}
 	}
@@ -618,6 +634,9 @@ func (s *MQTTService) publishState(client mqtt.Client, device *model.Device) {
 	}
 	state["rotation"] = device.DisplayRotationDeg
 	state["display_order"] = displayOrderLabel(device.DisplayOrder)
+	// "Skip Queue" is a momentary control: always reported as 0 so the HA number
+	// snaps back after a jump is applied (the jump amount arrives via the command).
+	state["skip"] = 0
 	if host := serverHostFromURL(pc.imageURL); host != "" {
 		state["server_host"] = host
 	}
@@ -1164,6 +1183,16 @@ func (s *MQTTService) publishDiscovery(client mqtt.Client, device *model.Device)
 	}
 	reshufflePayload, _ := json.Marshal(reshuffleCfg)
 	client.Publish(s.discoveryTopic("button", device.ID, "reshuffle"), 1, true, reshufflePayload)
+
+	// "Skip Queue" — jump N steps in the rotation (positive forward, negative back).
+	// Set the number and the next ordered pull jumps to that image, then the control
+	// snaps back to 0. Server-side, always available; a no-op for collage / non-
+	// ordered sources.
+	control("number", "skip", map[string]interface{}{
+		"name": "Skip Queue", "icon": "mdi:debug-step-over",
+		"state_topic": state, "value_template": "{{ value_json.skip }}",
+		"min": -500, "max": 500, "step": 1, "mode": "box",
+	})
 
 	// "Hide Current Photo" + "Toggle Favorite" buttons — act on the photo the frame
 	// is showing now. Server-side, always available.

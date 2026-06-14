@@ -307,6 +307,32 @@ func (h *DeviceHandler) BatteryEstimate(c echo.Context) error {
 	return c.JSON(http.StatusOK, h.battery.Estimate(uint(id)))
 }
 
+// POST /api/devices/:id/skip
+// Jumps the device's rotation queue by req.Steps (positive = forward, negative =
+// back, 0 = re-show current). Pins the target image so the next ordered pull
+// jumps there; rotation then continues from that point. No-op for collage /
+// non-ordered sources. Mirrors the Home Assistant "Skip Queue" control.
+func (h *DeviceHandler) SkipQueue(c echo.Context) error {
+	id, _ := strconv.Atoi(c.Param("id"))
+	var req struct {
+		Steps int `json:"steps"`
+	}
+	if err := c.Bind(&req); err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid request"})
+	}
+	var device model.Device
+	if err := h.db.First(&device, id).Error; err != nil {
+		return c.JSON(http.StatusNotFound, map[string]string{"error": "device not found"})
+	}
+	pinned := service.ApplySkip(h.db, &device, req.Steps)
+	// Reflect the new "next image" in Home Assistant (Next Image preview refreshes
+	// on the frame's next pull).
+	if h.mqtt != nil {
+		h.mqtt.NotifyDeviceUpdated(device.ID)
+	}
+	return c.JSON(http.StatusOK, map[string]interface{}{"status": "ok", "pinned_image_id": pinned})
+}
+
 // DELETE /api/devices/:id
 func (h *DeviceHandler) DeleteDevice(c echo.Context) error {
 	id, _ := strconv.Atoi(c.Param("id"))

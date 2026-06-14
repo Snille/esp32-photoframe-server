@@ -1,5 +1,14 @@
 # Changelog
 
+## v1.24.0
+
+### Added
+- **Skip forward/back in the rotation.** Jump the photo queue by any number of steps from three places — Home Assistant (the **Skip Queue** number), the server web UI (Devices → edit → Auto Rotate → **Skip queue**), and the frame's own web UI (the skip menu in the top bar, which jumps *and* refreshes the frame immediately while it's awake). It's a **one-time** jump applied on the frame's next pull — not a permanent setting; it won't skip on every pull. Works for ordered sources (Shuffle / Newest / Oldest / Custom); a no-op in collage mode. *(The frame web UI / immediate-refresh part needs firmware ≥ firebeetle-v2.9.6.)*
+- **Ready-made Home Assistant dashboard card.** A polished [Mushroom card](docs/home-assistant-card.md) showing the frame's current image with a side panel of battery / days remaining, next pull, rotation status, refresh interval, sleep schedule and the Skip Queue control.
+
+### Changed
+- **Accurate "Next Image Pull" sensor.** The frame now reports its exact next wake time (which already accounts for clock-aligned wakes *and* the quiet-hours sleep schedule), so the Home Assistant sensor matches reality instead of the server re-deriving (and drifting from) it. Frames on older firmware fall back to the previous server estimate. *(Requires firmware ≥ firebeetle-v2.9.6.)*
+
 ## v1.23.0
 
 ### Added
