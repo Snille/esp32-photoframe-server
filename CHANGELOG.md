@@ -1,5 +1,10 @@
 # Changelog
 
+## v1.25.0
+
+### Fixed
+- **Rotation no longer restarts once a day.** The periodic Immich/Synology auto-sync used to hard-delete every photo row and re-import with fresh IDs, which orphaned each frame's rotation history and silently restarted the slideshow from the top on every sync (visible as the "N of M left" counter jumping back to the start once per day). Auto-sync is now incremental: it keeps stable photo IDs, adds new photos, and prunes removed ones with a soft-delete — so a frame works through the whole library before cycling. The explicit **Clear and Resync** button still does a full reset.
+
 ## v1.24.0
 
 ### Added
