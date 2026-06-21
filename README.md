@@ -1,6 +1,6 @@
 # ESP32 PhotoFrame Server
 
-A image server for the [ESP32 PhotoFrame](https://github.com/aitjcize/esp32-photoframe) project. This server acts as a bridge between the E-paper display and various photo sources (Google Photos, Synology Photos, Telegram), handling image processing, resizing, dithering, and overlay generation.
+A image server for the [ESP32 PhotoFrame](https://github.com/Snille/esp32-photoframe) project. This server acts as a bridge between the E-paper display and various photo sources (Google Photos, Synology Photos, Telegram), handling image processing, resizing, dithering, and overlay generation.
 
 ## Features
 
