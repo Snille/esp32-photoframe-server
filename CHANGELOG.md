@@ -1,5 +1,10 @@
 # Changelog
 
+## v1.26.0
+
+### Fixed
+- **"Next Image Pull" no longer shows a time far in the future.** The Home Assistant *Next Image Pull* sensor (and the dashboard card's "Nästa hämtning") could show the next pull ~an hour out for a frame that actually refreshes every few minutes, because it trusted the frame's self-reported wake time — which the firmware builds *before* the per-cycle config sync and so can compute against stale/default settings (e.g. the 60-minute firmware default while the frame really wakes every 15). The server now derives the next pull from the **observed cadence** (last check-in + the configured interval, adjusted for the quiet-hours sleep schedule using the frame's timezone) and only uses the frame's self-reported time when it agrees to within one interval. Works for any refresh interval, not just ones that divide the hour.
+
 ## v1.25.0
 
 ### Fixed

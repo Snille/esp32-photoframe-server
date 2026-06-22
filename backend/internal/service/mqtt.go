@@ -600,22 +600,35 @@ func (s *MQTTService) publishState(client mqtt.Client, device *model.Device) {
 	pc := parsePollConfig(device.DeviceConfig)
 	if pc.rotateInterval > 0 {
 		state["refresh_interval"] = round1(float64(pc.rotateInterval) / 60.0)
-		// "Next image pull" prefers the time the FRAME reported it will wake next
-		// (X-Next-Wake-Time → device.NextWakeAt): that value is computed on the
-		// frame's own clock and already accounts for clock-aligned wakes AND the
-		// quiet-hours sleep schedule, so it's the ground truth. We use it as long as
-		// it's still in the future (a stale past value means the frame missed/never
-		// reported its last scheduled wake). Firmware too old to send the header (or
-		// a just-missed wake) falls back to the server's own estimate, which mirrors
-		// the aligned-grid scheduler but can't replay the sleep schedule. Only
-		// published when auto-rotate is on (otherwise there is no scheduled pull).
+		// "Next image pull" is derived from the OBSERVED cadence: the frame checks
+		// in every rotate_interval, so last-check-in + interval (sleep-schedule
+		// adjusted) tracks reality. We deliberately do NOT blindly trust the frame's
+		// self-reported X-Next-Wake-Time (device.NextWakeAt): the firmware builds
+		// that value as a request header *before* the per-cycle config sync is
+		// applied, so a frame running on stale/default config reports a bogus time
+		// (e.g. top-of-the-hour from the 3600s firmware default while it actually
+		// wakes every 15 min). We accept the reported value only when it agrees with
+		// our estimate to within one interval — then it's a more precise
+		// clock-aligned figure worth using. Only published when auto-rotate is on.
 		if pc.autoRotate {
-			if device.NextWakeAt > 0 && time.Unix(device.NextWakeAt, 0).After(time.Now()) {
-				state["next_pull"] = time.Unix(device.NextWakeAt, 0).UTC().Format(time.RFC3339)
-			} else if est.HasData && !est.LastSampledAt.IsZero() {
-				if next := computeNextPull(est.LastSampledAt, pc); !next.IsZero() {
-					state["next_pull"] = next.UTC().Format(time.RFC3339)
+			var nextPull time.Time
+			if est.HasData && !est.LastSampledAt.IsZero() {
+				nextPull = computeNextPull(est.LastSampledAt, pc)
+			}
+			if device.NextWakeAt > 0 {
+				if reported := time.Unix(device.NextWakeAt, 0); reported.After(time.Now()) {
+					iv := time.Duration(pc.rotateInterval) * time.Second
+					if nextPull.IsZero() {
+						// No sample data to cross-check; the frame report is all we have.
+						nextPull = reported
+					} else if d := reported.Sub(nextPull); d > -iv && d < iv {
+						// Report agrees with the observed cadence — prefer its precision.
+						nextPull = reported
+					}
 				}
+			}
+			if !nextPull.IsZero() {
+				state["next_pull"] = nextPull.UTC().Format(time.RFC3339)
 			}
 		}
 	}
@@ -915,28 +928,132 @@ func triggerLabel(t string) string {
 	}
 }
 
-// computeNextPull predicts when the frame next wakes to fetch an image, mirroring
-// the firmware's calculate_next_wakeup_interval. With aligned rotation the wake
-// snaps to the next clock-grid boundary (a multiple of rotateInterval), with the
-// firmware's "skip if <60s away" guard — so a mid-cycle button press doesn't push
-// the estimate forward. Without alignment it's simply last-seen + interval.
-// (Alignment is computed on the absolute UTC grid, which matches the firmware's
-// local-time-of-day grid for the usual intervals that evenly divide both the hour
-// and any whole/half-hour timezone offset. Not sleep-schedule adjusted.)
+// computeNextPull predicts when the frame next wakes to fetch an image from the
+// OBSERVED cadence: the frame checks in every rotate_interval, so the next pull
+// is the last check-in plus one interval (the clock-aligned phase, if any, is
+// already baked into lastSeen — anchoring on it tracks reality better than
+// re-deriving a grid the frame may not actually use). Missed wakes are rolled
+// forward so the result is always in the future. When a quiet-hours sleep
+// schedule is configured and the candidate falls inside it, the wake is pushed
+// to the local end-of-window, mirroring the firmware's calculate_next_wakeup_interval.
 func computeNextPull(lastSeen time.Time, pc pollConfig) time.Time {
-	iv := int64(pc.rotateInterval)
-	if iv <= 0 {
+	return computeNextPullAt(lastSeen, time.Now(), pc)
+}
+
+// computeNextPullAt is computeNextPull with an injectable "now" for testing.
+func computeNextPullAt(lastSeen, now time.Time, pc pollConfig) time.Time {
+	iv := pc.rotateInterval
+	if iv <= 0 || lastSeen.IsZero() {
 		return time.Time{}
 	}
-	if !pc.aligned {
-		return lastSeen.Add(time.Duration(iv) * time.Second)
+	step := time.Duration(iv) * time.Second
+	candidate := lastSeen.Add(step)
+	for candidate.Before(now) {
+		candidate = candidate.Add(step)
 	}
-	t := lastSeen.Unix()
-	next := (t/iv + 1) * iv // strictly the next grid point
-	if next-t < 60 {
-		next += iv
+	if !pc.sleepEnabled {
+		return candidate
 	}
-	return time.Unix(next, 0).UTC()
+	offset, ok := parsePosixOffsetSeconds(pc.timezone)
+	if !ok {
+		// Can't place the candidate on the frame's local clock, so we can't tell
+		// whether it lands in the quiet window — return the interval estimate.
+		return candidate
+	}
+	startSec := normMinutes(pc.sleepStart) * 60
+	endSec := normMinutes(pc.sleepEnd) * 60
+	if startSec == endSec {
+		return candidate // zero-length / disabled window
+	}
+	loc := time.FixedZone("frame", offset)
+	lt := candidate.In(loc)
+	sod := lt.Hour()*3600 + lt.Minute()*60 + lt.Second()
+	if !inSleepWindow(sod, startSec, endSec) {
+		return candidate
+	}
+	// In the quiet window: resume at the local end-of-window.
+	delta := endSec - sod
+	if delta <= 0 {
+		delta += 86400
+	}
+	return candidate.Add(time.Duration(delta) * time.Second)
+}
+
+// inSleepWindow reports whether second-of-day sod lies in [start, end), handling
+// windows that wrap past local midnight (start > end, e.g. 22:00–07:00).
+func inSleepWindow(sod, start, end int) bool {
+	if start == end {
+		return false
+	}
+	if start < end {
+		return sod >= start && sod < end
+	}
+	return sod >= start || sod < end
+}
+
+// normMinutes clamps a minutes-since-midnight value into [0,1440).
+func normMinutes(m int) int {
+	return ((m % 1440) + 1440) % 1440
+}
+
+// parsePosixOffsetSeconds extracts the standard-time UTC offset (seconds EAST of
+// UTC, for time.FixedZone) from a POSIX TZ string like "UTC-2", "CET-1CEST,...",
+// "UTC0" or "<+05>-5". POSIX offsets are inverted (they are added to local time
+// to reach UTC), so we negate. DST transitions are not modelled — the standard
+// offset is used year-round, which is exact for fixed zones (e.g. "UTC-2") and
+// only off by the DST hour during summer for zones that switch. Returns ok=false
+// when no numeric offset is present (e.g. a bare "UTC").
+func parsePosixOffsetSeconds(tz string) (int, bool) {
+	tz = strings.TrimSpace(tz)
+	if tz == "" {
+		return 0, false
+	}
+	i := 0
+	if tz[0] == '<' {
+		j := strings.IndexByte(tz, '>')
+		if j < 0 {
+			return 0, false
+		}
+		i = j + 1
+	} else {
+		for i < len(tz) && ((tz[i] >= 'A' && tz[i] <= 'Z') || (tz[i] >= 'a' && tz[i] <= 'z')) {
+			i++
+		}
+	}
+	rest := tz[i:]
+	if rest == "" {
+		return 0, false
+	}
+	sign := 1
+	switch rest[0] {
+	case '+':
+		rest = rest[1:]
+	case '-':
+		sign = -1
+		rest = rest[1:]
+	}
+	end := 0
+	for end < len(rest) && ((rest[end] >= '0' && rest[end] <= '9') || rest[end] == ':') {
+		end++
+	}
+	numStr := rest[:end]
+	if numStr == "" {
+		return 0, false
+	}
+	parts := strings.Split(numStr, ":")
+	hh, err := strconv.Atoi(parts[0])
+	if err != nil {
+		return 0, false
+	}
+	mm, ss := 0, 0
+	if len(parts) > 1 {
+		mm, _ = strconv.Atoi(parts[1])
+	}
+	if len(parts) > 2 {
+		ss, _ = strconv.Atoi(parts[2])
+	}
+	posix := sign * (hh*3600 + mm*60 + ss)
+	return -posix, true // seconds east of UTC
 }
 
 // sleepScheduleString renders the quiet-hours window as "HH:MM–HH:MM" (local
