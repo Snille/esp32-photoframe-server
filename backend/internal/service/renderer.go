@@ -82,8 +82,15 @@ type RenderOptions struct {
 	ShowDescription     bool
 	Description         string
 	DescriptionPosition string
+	// Rotation-position chip. The caller precomputes the display text + Material
+	// Symbols icon (see FormatRotationOverlay); the renderer just places it. Only
+	// shows on photo_overlay.
+	ShowRotation     bool
+	RotationText     string
+	RotationIcon     string
+	RotationPosition string
 	// OverlayHiddenIcons is a comma-separated list of element keys whose leading
-	// icon is suppressed (photo_date, weather, names, location, description).
+	// icon is suppressed (photo_date, weather, names, location, description, rotation).
 	OverlayHiddenIcons string
 }
 
@@ -370,11 +377,16 @@ func (s *RendererService) Render(opts RenderOptions) (image.Image, error) {
 		ShowDescription:     opts.ShowDescription && opts.Description != "",
 		Description:         opts.Description,
 		DescriptionPosition: model.NormalizeOverlayPosition(opts.DescriptionPosition, "wide-bottom"),
+		ShowRotation:        opts.ShowRotation && opts.RotationText != "",
+		RotationText:        opts.RotationText,
+		RotationIcon:        opts.RotationIcon,
+		RotationPosition:    model.NormalizeOverlayPosition(opts.RotationPosition, "bottom-right"),
 		ShowPhotoDateIcon:   !model.OverlayIconHidden(opts.OverlayHiddenIcons, "photo_date"),
 		ShowWeatherIcon:     !model.OverlayIconHidden(opts.OverlayHiddenIcons, "weather"),
 		ShowNamesIcon:       !model.OverlayIconHidden(opts.OverlayHiddenIcons, "names"),
 		ShowLocationIcon:    !model.OverlayIconHidden(opts.OverlayHiddenIcons, "location"),
 		ShowDescriptionIcon: !model.OverlayIconHidden(opts.OverlayHiddenIcons, "description"),
+		ShowRotationIcon:    !model.OverlayIconHidden(opts.OverlayHiddenIcons, "rotation"),
 	}
 
 	// Determine whether the top/bottom corner rows hold any chip, so the wide
@@ -393,6 +405,7 @@ func (s *RendererService) Render(opts RenderOptions) (image.Image, error) {
 	markUsed(ov && data.ShowNames, data.NamesPosition)
 	markUsed(ov && data.ShowLocation, data.LocationPosition)
 	markUsed(ov && data.ShowDescription, data.DescriptionPosition)
+	markUsed(ov && data.ShowRotation, data.RotationPosition)
 	markUsed(data.ShowBattery, data.BatteryPosition)
 	data.TopRowUsed = used["top-left"] || used["top-center"] || used["top-right"]
 	data.BottomRowUsed = used["bottom-left"] || used["bottom-center"] || used["bottom-right"]
@@ -498,12 +511,17 @@ type templateData struct {
 	ShowDescription     bool
 	Description         string
 	DescriptionPosition string
+	ShowRotation        bool
+	RotationText        string
+	RotationIcon        string
+	RotationPosition    string
 	// Per-chip icon visibility (true = draw the leading icon).
 	ShowPhotoDateIcon   bool
 	ShowWeatherIcon     bool
 	ShowNamesIcon       bool
 	ShowLocationIcon    bool
 	ShowDescriptionIcon bool
+	ShowRotationIcon    bool
 	// TopRowUsed/BottomRowUsed report whether any corner chip occupies the top
 	// or bottom corner row. When false, the wide band in that region collapses
 	// up/down into the corner row's place instead of leaving a blank row.
@@ -647,6 +665,7 @@ const layoutTemplate = `
 {{- define "el_names"}}<div class="ov-chip names">{{if .ShowNamesIcon}}<span class="material-symbols-outlined">group</span> {{end}}{{.Names}}</div>{{end}}
 {{- define "el_location"}}<div class="ov-chip location">{{if .ShowLocationIcon}}<span class="material-symbols-outlined">place</span> {{end}}{{.Location}}</div>{{end}}
 {{- define "el_description"}}<div class="ov-chip description">{{if .ShowDescriptionIcon}}<span class="material-symbols-outlined">notes</span> {{end}}{{.Description}}</div>{{end}}
+{{- define "el_rotation"}}<div class="ov-chip rotation">{{if .ShowRotationIcon}}<span class="material-symbols-outlined">{{.RotationIcon}}</span> {{end}}{{.RotationText}}</div>{{end}}
 {{- define "ov_slot"}}
   <div class="ov-slot {{.Pos}}">
     {{if and .D.IsOverlayLayout .D.ShowDate (eq .D.DatePosition .Pos)}}{{template "el_date" .D}}{{end}}
@@ -656,6 +675,7 @@ const layoutTemplate = `
     {{if and .D.IsOverlayLayout .D.ShowNames (eq .D.NamesPosition .Pos)}}{{template "el_names" .D}}{{end}}
     {{if and .D.IsOverlayLayout .D.ShowLocation (eq .D.LocationPosition .Pos)}}{{template "el_location" .D}}{{end}}
     {{if and .D.IsOverlayLayout .D.ShowDescription (eq .D.DescriptionPosition .Pos)}}{{template "el_description" .D}}{{end}}
+    {{if and .D.IsOverlayLayout .D.ShowRotation (eq .D.RotationPosition .Pos)}}{{template "el_rotation" .D}}{{end}}
     {{if and .D.ShowBattery (eq .D.BatteryPosition .Pos)}}{{template "el_battery" .D}}{{end}}
   </div>
 {{- end}}

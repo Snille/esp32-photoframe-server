@@ -9,7 +9,8 @@ A image server for the [ESP32 PhotoFrame](https://github.com/Snille/esp32-photof
     - **Synology Photos**: Connect directly to your Synology NAS (supports DSM 7 Personal and Shared spaces).
     - **Telegram Bot**: Send photos directly to your frame via a Telegram bot.
     - **URL Proxy**: Display images from any URL.
-    - **AI Generation**: Generate unique images using OpenAI (GPT Image, DALL-E), Google Gemini, or a local ComfyUI server.
+    - **AI Generation**: Generate unique images using OpenAI (GPT Image, DALL-E), Google Gemini, MiniMax, or a local ComfyUI server.
+    - **Public Art**: Open-access museum artwork (Cleveland Museum of Art) — search the collection, preview & crop, and auto-rotate famous paintings on your frame. No API key.
 - **Smart Image Processing**:
     - Automatic cropping to device aspect ratio (800x480 or 480x800).
     - **Smart Collage**: Automatically combines two landscape photos in portrait mode (or vice versa) to maximize screen usage.
@@ -21,6 +22,7 @@ A image server for the [ESP32 PhotoFrame](https://github.com/Snille/esp32-photof
     - **Battery badge**: shows the frame's battery level (icon, text, or both) using the level the device reports on each fetch. The icon can be rotated (0/90/180/270°), the percentage text placed on any side of it, and its size scaled independently of the overlay text.
     - **Per-element placement**: position Date, Photo Date, Weather and Battery in any of six slots (top/bottom × left/center/right), with an adjustable size scale and a live preview in the device settings.
     - "iPhone Lockscreen" style aesthetics with Inter font and drop shadows.
+- **Home Assistant MQTT**: Publishes each frame to your Home Assistant MQTT broker via MQTT discovery — **battery, battery voltage, days-remaining, trend, last-seen, sleep schedule, next image pull, host, IP-address, timezone, display rotation, server host, last trigger, collage, next-image-status, rotation size/status/position/remaining, rotation completes, current photo date, Immich albums, online/offline and current-photo-favorite** sensors, writable **Image Source / Image Order / Refresh Interval / Deep Sleep / Auto Rotate / On This Day / Favorites Only** controls, **Rotate Now**, **Reshuffle**, **Hide Current Photo** and **Toggle Favorite** buttons, plus **Previous / Current / Next image** entities per frame, ready for automations. (Next Image shows as *Unavailable* on frames running collage mode, which has no deterministic next image.) Runs as a plain MQTT client (its own broker credentials); no add-on required. Configure it under Settings → **Home Assistant**.
 - **Authentication**:
     - User account system with login/registration.
     - Revocable API tokens for device access.
@@ -202,6 +204,7 @@ http(s)://<hostname/IP address>:9607/image/<source>
 - **`GET /image/telegram`**: Returns the last photo sent via **Telegram Bot**.
 - **`GET /image/url_proxy`**: Returns a random image from configured URLs.
 - **`GET /image/ai_generation`**: Returns a newly generated AI image based on device prompt.
+- **`GET /image/public_art`**: Returns open-access museum artwork (Cleveland Museum of Art) — a locked selection, or the best-ranked result for the configured query.
 
 ### Authentication
 

@@ -42,7 +42,9 @@ func NewSynologyService(db *gorm.DB, settings *SettingsService) *SynologyService
 		},
 		IsConfigured: svc.isAutoSyncConfigured,
 		GetConfig:    svc.getAutoSyncConfig,
-		RunSync:      svc.clearAndResyncInternal,
+		// Incremental upsert + prune, NOT clear-and-reinsert (see ImmichService):
+		// a periodic clear churns image IDs and resets frame rotation cursors.
+		RunSync: svc.ImportPhotos,
 	})
 	return svc
 }
@@ -247,6 +249,11 @@ func (s *SynologyService) ImportPhotos() error {
 	limit := 500 // Fetch 500 at a time
 	totalFetched := 0
 
+	// Track every photo ID seen this sync so removed photos can be pruned without
+	// churning the IDs of the ones that remain (which would orphan DeviceHistory
+	// and reset each frame's rotation cursor).
+	seen := make(map[int]struct{})
+
 	// Get album ID from settings (required)
 	albumIDStr, _ := s.settings.Get("synology_album_id")
 	if albumIDStr == "" {
@@ -282,11 +289,17 @@ func (s *SynologyService) ImportPhotos() error {
 
 		count := 0
 		for _, p := range photos {
+			seen[p.ID] = struct{}{}
 			// Dedup by SynologyID
 			var existing model.Image
-			result := s.db.Where("synology_photo_id = ? AND source = ?", p.ID, model.SourceSynologyPhotos).First(&existing)
+			result := s.db.Unscoped().Where("synology_photo_id = ? AND source = ?", p.ID, model.SourceSynologyPhotos).First(&existing)
 
 			if result.Error == nil {
+				// Revive a previously-pruned photo that reappeared, keeping its row
+				// ID so any DeviceHistory referencing it stays valid.
+				if existing.DeletedAt.Valid {
+					s.db.Unscoped().Model(&existing).Update("deleted_at", nil)
+				}
 				// Update cache key and backfill orientation if missing
 				updated := false
 				if existing.ThumbnailKey != p.Additional.Thumbnail.M {
@@ -350,7 +363,27 @@ func (s *SynologyService) ImportPhotos() error {
 		offset += limit
 	}
 
-	log.Printf("ImportPhotos complete: fetched %d photos total", totalFetched)
+	// Prune photos no longer in the album by SOFT-deleting them (the rotation
+	// query filters deleted_at IS NULL, so they drop out while history stays
+	// valid). Skip when we hit the 1000-photo fetch ceiling — beyond it we
+	// haven't "seen" the rest, so pruning would wrongly drop valid photos.
+	pruned := int64(0)
+	capped := offset >= 1000
+	if !capped && len(seen) > 0 {
+		keep := make([]int, 0, len(seen))
+		for id := range seen {
+			keep = append(keep, id)
+		}
+		res := s.db.Where("source = ? AND synology_photo_id NOT IN ?", model.SourceSynologyPhotos, keep).
+			Delete(&model.Image{})
+		if res.Error != nil {
+			log.Printf("Synology prune failed: %v", res.Error)
+		} else {
+			pruned = res.RowsAffected
+		}
+	}
+
+	log.Printf("ImportPhotos complete: fetched %d photos total; %d pruned", totalFetched, pruned)
 	return nil
 }
 
@@ -363,16 +396,14 @@ func (s *SynologyService) ClearPhotos() error {
 	return nil
 }
 
-// ClearAndResync deletes all Synology photos and re-imports them
+// ClearAndResync hard-deletes all Synology photos and re-imports from scratch.
+// This is the explicit user-triggered path (it intentionally resets rotation
+// cursors); the periodic auto-sync uses the non-destructive ImportPhotos.
 func (s *SynologyService) ClearAndResync() error {
-	return s.autoSync.SyncNow()
-}
-
-func (s *SynologyService) clearAndResyncInternal() error {
 	if err := s.ClearPhotos(); err != nil {
 		return err
 	}
-	return s.ImportPhotos()
+	return s.autoSync.SyncNow()
 }
 
 // GetPhotoCount returns the number of Synology photos in the database

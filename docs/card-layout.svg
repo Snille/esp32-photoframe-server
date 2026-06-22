@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="360" height="430" viewBox="0 0 360 430" font-family="Segoe UI, Roboto, sans-serif">
+  <rect x="8" y="8" width="344" height="414" rx="16" fill="#1c1c1e" stroke="#3a3a3c"/>
+  <!-- image -->
+  <rect x="24" y="24" width="312" height="170" rx="10" fill="#2c2c2e"/>
+  <text x="180" y="115" fill="#8e8e93" font-size="14" text-anchor="middle">Current image</text>
+  <!-- rows -->
+  <g>
+    <g transform="translate(24,210)"><circle cx="18" cy="18" r="18" fill="#34c759" opacity="0.25"/><circle cx="18" cy="18" r="9" fill="#34c759"/><text x="46" y="15" fill="#fff" font-size="14" font-weight="600">87% · 12 d kvar</text><text x="46" y="32" fill="#8e8e93" font-size="11">Batteri</text></g>
+    <g transform="translate(24,254)"><circle cx="18" cy="18" r="18" fill="#5e5ce6" opacity="0.25"/><circle cx="18" cy="18" r="9" fill="#5e5ce6"/><text x="46" y="15" fill="#fff" font-size="14" font-weight="600">14:45 (om 12 min)</text><text x="46" y="32" fill="#8e8e93" font-size="11">Nästa hämtning</text></g>
+    <g transform="translate(24,298)"><circle cx="18" cy="18" r="18" fill="#30b0c7" opacity="0.25"/><circle cx="18" cy="18" r="9" fill="#30b0c7"/><text x="46" y="15" fill="#fff" font-size="14" font-weight="600">6 of 21 left</text><text x="46" y="32" fill="#8e8e93" font-size="11">Rotation</text></g>
+    <g transform="translate(24,342)"><circle cx="18" cy="18" r="18" fill="#0a84ff" opacity="0.25"/><circle cx="18" cy="18" r="9" fill="#0a84ff"/><text x="46" y="15" fill="#fff" font-size="14" font-weight="600">15 min</text><text x="46" y="32" fill="#8e8e93" font-size="11">Uppdateringsintervall</text></g>
+    <g transform="translate(24,386)"><circle cx="18" cy="18" r="18" fill="#bf5af2" opacity="0.25"/><circle cx="18" cy="18" r="9" fill="#bf5af2"/><text x="46" y="15" fill="#fff" font-size="14" font-weight="600">22:00–07:00</text><text x="46" y="32" fill="#8e8e93" font-size="11">Sömnschema</text></g>
+  </g>
+</svg>

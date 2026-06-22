@@ -1,5 +1,131 @@
 # Changelog
 
+## v1.26.0
+
+### Fixed
+- **"Next Image Pull" no longer shows a time far in the future.** The Home Assistant *Next Image Pull* sensor (and the dashboard card's "Nästa hämtning") could show the next pull ~an hour out for a frame that actually refreshes every few minutes, because it trusted the frame's self-reported wake time — which the firmware builds *before* the per-cycle config sync and so can compute against stale/default settings (e.g. the 60-minute firmware default while the frame really wakes every 15). The server now derives the next pull from the **observed cadence** (last check-in + the configured interval, adjusted for the quiet-hours sleep schedule using the frame's timezone) and only uses the frame's self-reported time when it agrees to within one interval. Works for any refresh interval, not just ones that divide the hour.
+
+## v1.25.0
+
+### Fixed
+- **Rotation no longer restarts once a day.** The periodic Immich/Synology auto-sync used to hard-delete every photo row and re-import with fresh IDs, which orphaned each frame's rotation history and silently restarted the slideshow from the top on every sync (visible as the "N of M left" counter jumping back to the start once per day). Auto-sync is now incremental: it keeps stable photo IDs, adds new photos, and prunes removed ones with a soft-delete — so a frame works through the whole library before cycling. The explicit **Clear and Resync** button still does a full reset.
+
+## v1.24.0
+
+### Added
+- **Skip forward/back in the rotation.** Jump the photo queue by any number of steps from three places — Home Assistant (the **Skip Queue** number), the server web UI (Devices → edit → Auto Rotate → **Skip queue**), and the frame's own web UI (the skip menu in the top bar, which jumps *and* refreshes the frame immediately while it's awake). It's a **one-time** jump applied on the frame's next pull — not a permanent setting; it won't skip on every pull. Works for ordered sources (Shuffle / Newest / Oldest / Custom); a no-op in collage mode. *(The frame web UI / immediate-refresh part needs firmware ≥ firebeetle-v2.9.6.)*
+- **Ready-made Home Assistant dashboard card.** A polished [Mushroom card](docs/home-assistant-card.md) showing the frame's current image with a side panel of battery / days remaining, next pull, rotation status, refresh interval, sleep schedule and the Skip Queue control.
+
+### Changed
+- **Accurate "Next Image Pull" sensor.** The frame now reports its exact next wake time (which already accounts for clock-aligned wakes *and* the quiet-hours sleep schedule), so the Home Assistant sensor matches reality instead of the server re-deriving (and drifting from) it. Frames on older firmware fall back to the previous server estimate. *(Requires firmware ≥ firebeetle-v2.9.6.)*
+
+## v1.23.0
+
+### Added
+- **"On this day" mode.** A per-frame toggle that shows only photos taken on today's date (any year), so the frame becomes a daily memories slideshow. On days with no matching photo it falls back to the full library, so the frame is never blank. Works for the ordered sources (Gallery / Immich / Synology / Google Photos).
+- **Hide and favorite photos.** Star the photos you love and hide the ones you don't — from Home Assistant or the web UI:
+  - **Hide Current Photo** (MQTT button) — removes the photo on the frame from every frame's rotation (a "take it out of the slideshow" flag; it isn't deleted from your library).
+  - **Toggle Favorite** (MQTT button) — stars/unstars the photo currently on the frame.
+  - **Favorites Only** (per-frame toggle / MQTT switch) — restrict a frame's rotation to starred photos (falls back to the full library when none are starred).
+  - **Current Photo Favorite** (MQTT binary sensor) — whether the photo on the frame right now is starred.
+- **Per-frame Online/Offline sensor (MQTT).** A connectivity sensor that flips to *offline* when a frame hasn't checked in for roughly two rotation cycles, so you can alert on a frame that has gone quiet (dead battery, lost Wi-Fi). The server now re-publishes state every few minutes so this stays current even without a check-in.
+
+## v1.22.0
+
+### Added
+- **"Where am I in the rotation?" — new Home Assistant sensors (MQTT).** Each frame now reports its position in its photo rotation (for ordered sources — Gallery / Immich / Synology / Google Photos, with collage off):
+  - **Rotation Size** — how many photos are in the frame's rotation (respecting its Immich album filter).
+  - **Rotation Status** — a one-line summary: in shuffle mode "*N* of *T* left" (counts down to a fresh shuffle), in chronological/custom mode "Image *P* of *T*".
+  - **Rotation Position** / **Rotation Remaining** — the numeric position and images-left (diagnostic).
+  - **Rotation Completes** — a timestamp estimate of when the current cycle finishes (a fresh shuffle / wrap), based on the rotate interval. Only when auto-rotate is on.
+- **Current Photo Date (MQTT)** — the capture date of the photo currently on the frame.
+- **Immich Albums (MQTT)** — the names of the Immich albums the frame pulls from (falls back to album IDs until the album list has been loaded once).
+- **Reshuffle button (MQTT)** — reshuffles the frame's photo order for the next pull. Server-side, so it works on any board.
+- **Rotation-position overlay.** A new opt-in overlay chip bakes the rotation position onto the photo itself, with selectable placement like the other overlay elements. Kept compact to stay out of the way: in shuffle mode it shows images left (with a shuffle icon), in chronological/custom mode the image number (with a "#" icon); a per-frame **Show total** toggle switches between e.g. `23` and `23/183`. It hides itself for sources that have no fixed rotation (Public Art, AI, URL proxy) and in collage mode.
+
+## v1.21.0
+
+### Added
+- **Control your frames from Home Assistant (MQTT).** The HA bridge gains writable controls so automations can change a frame, not just read it:
+  - **Image Source** (select) — switch the frame's photo source (Immich, Gallery, Public Art, …). Applies to the next pull and reissues the device token automatically.
+  - **Image Order** (select) — Shuffle / Newest first / Oldest first / Custom.
+  - **Refresh Interval** (number) — minutes between image pulls.
+  - **Deep Sleep** and **Auto Rotate** (switches) — toggle the frame's power/rotation behaviour (synced to the frame on its next pull).
+  - **Rotate Now** (button) — advance the frame immediately. Shown but **Unavailable on always-sleeping boards** (e.g. the FireBeetle) where a live command can't reliably land; it activates automatically on always-reachable boards.
+
+  These replace the former read-only Image Source / Refresh Interval / Image Order / Deep Sleep sensors (the controls show the same state and let you change it); the old read-only entities are removed automatically.
+
+## v1.20.0
+
+### Added
+- **Six more Home Assistant sensors per frame (MQTT).** Each frame now also exposes:
+  - **Timezone** — the frame's configured POSIX timezone.
+  - **Display Rotation** — how the frame is mounted (0/90/180/270°).
+  - **Image Order** — the photo-ordering mode (Shuffle / Newest first / Oldest first / Custom).
+  - **Server Host** — the server (host:port) the frame pulls its images from.
+  - **Deep Sleep** — binary sensor for whether the frame deep-sleeps between rotations.
+  - **Last Trigger** — what caused the most recent image change: Timer (auto-rotate wake), Button (wake button), Boot (cold boot), Push (server-initiated) or Pull. Distinguishing Timer/Button/Boot requires the matching firmware (it reports the wake reason via a new `X-Wake-Reason` header); older firmware shows "Pull".
+
+### Fixed
+- **"Previous Image" no longer shows a broken-image icon in Home Assistant.** When a frame had no previous image yet (fresh device, or just after a source change) the Previous Image entity published an empty payload, which Home Assistant renders as a broken icon. It now goes **Unavailable** in that case, mirroring the Next Image entity.
+- **Clicking a frame's miniature now opens the image at a usable size.** The full-image lightbox rendered the image at the panel's small native resolution (~600 px) instead of scaling it up to fill the viewport, so it looked shrunk. It now scales to fit the screen while preserving aspect ratio.
+
+### Security
+- **Each install now uses a unique JWT signing secret.** Without an explicit `JWT_SECRET`, the server previously fell back to a hardcoded default, which would let anyone forge admin and device tokens. It now generates a strong random secret on first run and persists it (with restrictive permissions) in the data directory. **Note:** on first start after this upgrade, existing tokens become invalid — re-log in to the web UI, and re-save each frame's configuration once (while it is awake) to push it a fresh device token.
+
+### Changed
+- Internal cleanups: removed a duplicate settings route, fixed a flaky test helper, corrected the Google OAuth callback-port example (9607), and suppressed a false-positive lint warning on the firmware installer button.
+
+## v1.19.2
+
+### Fixed
+- **"Next Image Pull" now matches the frame's aligned wake schedule.** The sensor estimated the next pull as *last check-in + refresh interval*, which was wrong for frames using aligned rotation: those wake on clock-grid boundaries (e.g. :00/:15/:30/:45 for a 15-minute interval), so an off-cycle **button press** does not push the next auto-pull forward. The estimate now mirrors the firmware's wake scheduler (aligned grid + its "skip if <60s away" guard), and is only published when auto-rotate is enabled. (Still not adjusted for the sleep schedule — the Sleep Schedule sensor gives that context.)
+
+## v1.19.1
+
+### Added
+- **Collage sensor + clearer Next Image state in Home Assistant.** When a frame runs in **collage** mode there is no deterministic "next image" (collage shuffles random pairs), so the Next Image entity was simply empty with no explanation. Now:
+  - A new **Collage** binary sensor shows whether collage is on for each frame.
+  - The **Next Image** entity is marked **Unavailable** (visibly disabled) when collage is on or the source has no fixed next image, instead of being silently empty.
+  - A new **Next Image Status** sensor explains why (e.g. "Disabled — collage mode shuffles random pairs, so there is no fixed next image" / "Active").
+
+## v1.19.0
+
+### Added
+- **More Home Assistant sensors per frame (MQTT).** Each frame now also exposes:
+  - **Refresh Interval** — how often the frame is set to pull a new image (minutes, from `rotate_interval`).
+  - **Sleep Schedule** — the frame's configured quiet hours as `HH:MM–HH:MM` (or `Off`), during which it pauses all updates.
+  - **Next Image Pull** — a timestamp for when the frame *should* next fetch an image (last check-in + the refresh interval). Interval-based; the Sleep Schedule sensor gives the quiet-hours context.
+  - **Host** and **IP Address** — the frame's hostname (as the server addresses it) and the client IP it last checked in from.
+- **Battery days-remaining in the Devices list.** The Battery column now shows the estimated days of runtime left (e.g. `~45 d left`) under the percentage, not just in the hover tooltip.
+
+## v1.18.0
+
+### Added
+- **Home Assistant now shows Previous / Current / Next image per frame.** The MQTT bridge previously exposed a single "Current Image" entity that, because it published before the frame's new image had finished rendering, often lagged a rotation behind (it showed the *last* image, not the one on the wall). Each frame now exposes three image entities:
+  - **Current Image** — what's on the frame right now. The bridge is notified *after* the new thumbnail is committed, so it's always truthful (no more off-by-one lag).
+  - **Previous Image** — the image that was on the frame before the current one.
+  - **Next Image** — a non-mutating preview render of what the next pull will show (overlays + the real e-paper dither), for the ordered DB-backed sources (gallery, Immich, Synology, Google Photos). Synthetic sources (AI/fractal/DLA), URL proxy, public art and collage mode have no deterministic "next", so that entity stays empty for them.
+
+### Fixed
+- **"Current Image" no longer shows the previous rotation's photo.** The MQTT publish was triggered at the start of the image request with a fixed 1.5s delay, which lost the race against image download + dithering on slower pulls. It now fires once `current_thumb_id` is committed.
+
+## v1.17.2
+
+### Fixed
+- **MQTT bridge no longer fights itself when two servers share one broker.** The MQTT client used a fixed client ID (`esp32-photoframe-server`), so running two instances against the same broker (e.g. a Portainer prod container plus a dev container, or any second copy) made them repeatedly kick each other off in an endless `connected → connection lost: EOF` loop. The client ID is now made unique per instance by appending the hostname (the container ID under Docker), so multiple servers can connect to the same Home Assistant broker without disconnecting one another.
+
+## v1.17.1
+
+### Fixed
+- **MiniMax is now selectable in the UI.** v1.17.0 added the MiniMax server-side image provider to the backend but never exposed it in the web app. Settings → AI Generation now has **MiniMax Global / MiniMax China API Key** fields, and the per-device AI provider dropdown offers **MiniMax (Global)** and **MiniMax (China)** with the Image-01 model.
+
+## v1.17.0
+
+### Added
+- **Public Art image source** (`public_art`): auto-rotate or lock open-access museum artwork from the **Cleveland Museum of Art** on a frame — no API key. A new "Public Art" tab in Settings → Data Sources lets you search the collection, preview & crop (drag to pan, scroll to zoom, cover/fit), pick an artwork to lock, or push one to a frame. Point a frame's source at `public_art` to rotate by a saved query with de-duplication. Migration **000041** adds the serving-history table. (A source selector is present for future collections.) Also adds a **MiniMax** server-side AI image provider.
+- **Home Assistant MQTT bridge**: the server publishes each frame to your Home Assistant MQTT broker using HA's MQTT discovery, so every frame shows up as a device with **Battery %, Battery Voltage, Battery Days Remaining, Battery Trend, Image Source, Last Seen** sensors and a **Current Image** entity — ready for automations (low-battery alerts, dashboards, etc.). The server is a plain MQTT client (its own broker user/pass) and does **not** need to run as an HA add-on. Configure it in the new Settings → **Home Assistant** tab (enable, broker host/port, credentials, advanced topics) with a live connection-status indicator.
+
 ## v1.16.0
 
 ### Added

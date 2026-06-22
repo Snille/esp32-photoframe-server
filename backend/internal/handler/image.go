@@ -49,6 +49,7 @@ type ImageHandlerDeps struct {
 	Auth           *service.AuthService
 	DB             *gorm.DB
 	DataDir        string
+	MQTT           *service.MQTTService
 }
 
 type ImageHandler struct {
@@ -62,6 +63,7 @@ type ImageHandler struct {
 	auth           *service.AuthService
 	db             *gorm.DB
 	battery        *service.BatteryService
+	mqtt           *service.MQTTService
 	dataDir        string
 }
 
@@ -77,6 +79,7 @@ func NewImageHandler(deps ImageHandlerDeps) *ImageHandler {
 		auth:           deps.Auth,
 		db:             deps.DB,
 		battery:        service.NewBatteryService(deps.DB),
+		mqtt:           deps.MQTT,
 		dataDir:        deps.DataDir,
 	}
 }
@@ -175,6 +178,59 @@ func (h *ImageHandler) ServeImage(c echo.Context) error {
 		}
 		go h.battery.RecordSample(device.ID, batteryPercent, voltageMV)
 	}
+
+	// Remember the IP the frame checked in from (for the HA IP-address sensor).
+	// RealIP honours X-Forwarded-For, so this is the frame's LAN IP even behind a
+	// reverse proxy that forwards it. Only write on change to avoid churn.
+	if deviceFound && !preview {
+		if ip := c.RealIP(); ip != "" && ip != device.LastIP {
+			device.LastIP = ip
+			go h.db.Model(&model.Device{}).Where("id = ?", device.ID).Update("last_ip", ip)
+		}
+		// Record what triggered this pull (for the HA "Last Trigger" sensor). The
+		// firmware reports its deep-sleep wake cause via X-Wake-Reason; firmware too
+		// old to send it is recorded as a generic "pull".
+		trigger := "pull"
+		switch strings.ToLower(c.Request().Header.Get("X-Wake-Reason")) {
+		case "timer":
+			trigger = "timer"
+		case "button":
+			trigger = "button"
+		case "boot":
+			trigger = "boot"
+		}
+		if trigger != device.LastTrigger {
+			device.LastTrigger = trigger
+			go h.db.Model(&model.Device{}).Where("id = ?", device.ID).Update("last_trigger", trigger)
+		}
+
+		// A skip requested from the frame's own WebGUI arrives as X-Skip-Steps on an
+		// immediate re-pull. Apply it now (before the source picks a photo) so THIS
+		// serve returns the jumped-to image: ApplySkip pins the target and the
+		// ordered pick consumes the pin on this same (non-preview) pull.
+		if stepsStr := c.Request().Header.Get("X-Skip-Steps"); stepsStr != "" {
+			if steps, err := strconv.Atoi(strings.TrimSpace(stepsStr)); err == nil && steps != 0 {
+				service.ApplySkip(h.db, &device, steps)
+			}
+		}
+
+		// The frame reports exactly when it will wake next (X-Next-Wake-Time, a unix
+		// epoch). Storing it lets the HA "Next Image Pull" sensor show the frame's
+		// real scheduled wake (already sleep-schedule / clock-align aware) instead of
+		// the server re-deriving it. Only accept a plausible future-ish epoch.
+		if wakeStr := c.Request().Header.Get("X-Next-Wake-Time"); wakeStr != "" {
+			if epoch, err := strconv.ParseInt(strings.TrimSpace(wakeStr), 10, 64); err == nil &&
+				epoch > 1700000000 && epoch != device.NextWakeAt {
+				device.NextWakeAt = epoch
+				go h.db.Model(&model.Device{}).Where("id = ?", device.ID).Update("next_wake_at", epoch)
+			}
+		}
+	}
+
+	// (The MQTT bridge is notified at the end of the serve, once current_thumb_id
+	// is committed and the next-image preview is rendered — see post-serve hook
+	// below. Notifying here would race the thumbnail write and publish the
+	// previous rotation's image as "Current".)
 
 	// ALWAYS overrides logical resolution/orientation from Headers if present
 	if wStr := c.Request().Header.Get("X-Display-Width"); wStr != "" {
@@ -316,6 +372,13 @@ func (h *ImageHandler) ServeImage(c echo.Context) error {
 
 		applyConfigSyncHeader(c, &device, deviceFound)
 
+		// These sources ship a panel-ready image with no stored thumbnail, so
+		// there's no current/next image to publish — just refresh the bridge
+		// state (battery / last-seen) for the frame.
+		if deviceFound && !preview && h.mqtt != nil {
+			h.mqtt.NotifyDeviceUpdated(device.ID)
+		}
+
 		c.Response().Header().Set("Content-Length", fmt.Sprintf("%d", len(body)))
 		return c.Blob(http.StatusOK, "image/png", body)
 	}
@@ -364,8 +427,22 @@ func (h *ImageHandler) ServeImage(c echo.Context) error {
 		}(device.ID, servedImageIDs)
 	}
 
+	// Rotation-position chip: where the just-served photo sits in this frame's
+	// rotation (computed from the in-flight served id so it's truthful before the
+	// async DeviceHistory write). Empty for non-ordered sources / collage.
+	rotationText, rotationIcon := "", ""
+	if device.ShowRotation {
+		curID := uint(0)
+		if len(servedImageIDs) > 0 {
+			curID = servedImageIDs[0]
+		}
+		rs := service.ComputeRotationStatus(h.db, &device, source, curID)
+		rotationText, rotationIcon = service.FormatRotationOverlay(rs, device.RotationShowTotal)
+	}
+	showRotation := device.ShowRotation && rotationText != ""
+
 	// 2. Render layout (photo + overlay + calendar)
-	needsOverlay := showDate || showPhotoDate || showWeather || showCalendar || showBattery || showNames || showLocation || showDescription
+	needsOverlay := showDate || showPhotoDate || showWeather || showCalendar || showBattery || showNames || showLocation || showDescription || showRotation
 	var imgWithOverlay image.Image
 
 	// People-names + location + description strings, formatted per device
@@ -455,6 +532,10 @@ func (h *ImageHandler) ServeImage(c echo.Context) error {
 			ShowDescription:     showDescription,
 			Description:         descriptionStr,
 			DescriptionPosition: device.DescriptionPosition,
+			ShowRotation:        showRotation,
+			RotationText:        rotationText,
+			RotationIcon:        rotationIcon,
+			RotationPosition:    device.RotationPosition,
 			OverlayHiddenIcons:  device.OverlayHiddenIcons,
 		})
 		if renderErr != nil {
@@ -582,11 +663,16 @@ func (h *ImageHandler) ServeImage(c echo.Context) error {
 				} else if werr := os.WriteFile(filepath.Join(h.dataDir, fmt.Sprintf("full_%s.jpg", thumbID)), fullJPEG, 0644); werr != nil {
 					fmt.Printf("Failed to save full preview: %v\n", werr)
 				}
-				if device.CurrentThumbID != "" && device.CurrentThumbID != thumbID {
-					os.Remove(filepath.Join(h.dataDir, fmt.Sprintf("thumb_%s.jpg", device.CurrentThumbID)))
-					os.Remove(filepath.Join(h.dataDir, fmt.Sprintf("full_%s.jpg", device.CurrentThumbID)))
+				// Rotate Previous ← Current ← new (keeps the demoted image as
+				// "previous", deletes the one leaving the retained set).
+				service.SetCurrentThumb(h.db, h.dataDir, &device, thumbID)
+
+				// Post-serve hook: render the next image (non-mutating preview) and
+				// notify the Home Assistant MQTT bridge once current_thumb_id is
+				// committed. Async so it never delays the frame's response.
+				if h.mqtt != nil {
+					h.afterServe(device, source, servedImageIDs)
 				}
-				h.db.Model(&device).Update("current_thumb_id", thumbID)
 			}
 		} else {
 			fmt.Printf("Failed to save served thumbnail: %v\n", err)

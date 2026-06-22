@@ -35,6 +35,7 @@
         <v-tabs v-model="activeMainTab" color="primary" grow>
           <v-tab value="devices">Devices</v-tab>
           <v-tab value="datasources">Data Sources</v-tab>
+          <v-tab value="homeassistant">Home Assistant</v-tab>
           <v-tab value="security">Security</v-tab>
         </v-tabs>
 
@@ -53,6 +54,7 @@
               <v-tab value="synology_photos">Synology</v-tab>
               <v-tab value="url">URL Proxy</v-tab>
               <v-tab value="ai_generation">AI Generation</v-tab>
+              <v-tab value="public_art">Public Art</v-tab>
             </v-tabs>
 
             <v-text-field
@@ -235,7 +237,7 @@
                       and add the redirect URI:
                       <br />
                       <code
-                        >http://[YOUR_SERVER_IP]:8080/api/auth/google/callback</code
+                        >http://[YOUR_SERVER_IP]:9607/api/auth/google/callback</code
                       >
                     </div>
                   </v-alert>
@@ -882,6 +884,42 @@
                   </div>
 
                   <v-text-field
+                    v-model="form.minimax_global_api_key"
+                    label="MiniMax Global API Key"
+                    type="password"
+                    variant="outlined"
+                    class="mb-1"
+                    persistent-hint
+                  ></v-text-field>
+                  <div class="text-caption text-grey ml-2 mb-4">
+                    Uses <code>api.minimax.io</code>. Get your API key at
+                    <a
+                      href="https://platform.minimax.io"
+                      target="_blank"
+                      class="text-primary text-decoration-none"
+                      >platform.minimax.io</a
+                    >
+                  </div>
+
+                  <v-text-field
+                    v-model="form.minimax_china_api_key"
+                    label="MiniMax China API Key"
+                    type="password"
+                    variant="outlined"
+                    class="mb-1"
+                    persistent-hint
+                  ></v-text-field>
+                  <div class="text-caption text-grey ml-2 mb-4">
+                    Uses <code>api.minimaxi.com</code>. Get your API key at
+                    <a
+                      href="https://platform.minimaxi.com"
+                      target="_blank"
+                      class="text-primary text-decoration-none"
+                      >platform.minimaxi.com</a
+                    >
+                  </div>
+
+                  <v-text-field
                     v-model="form.comfyui_host"
                     label="ComfyUI Server (local)"
                     variant="outlined"
@@ -964,6 +1002,36 @@
                   </v-expansion-panels>
 
                   <v-btn color="primary" @click="save">Save AI Settings</v-btn>
+                </v-card-text>
+              </v-window-item>
+
+              <!-- Public Art -->
+              <v-window-item value="public_art">
+                <v-card-text>
+                  <v-alert type="info" variant="tonal" class="mb-4" density="compact">
+                    Public-domain / open-access artwork from museum collections
+                    (Art Institute of Chicago, Cleveland Museum of Art). Point a
+                    frame's source at <code>public_art</code> to auto-rotate by
+                    the query below, or lock a single artwork from the search.
+                  </v-alert>
+
+                  <v-text-field
+                    :model-value="getImageUrl('public_art')"
+                    label="Image Endpoint URL (for firmware config)"
+                    readonly
+                    variant="outlined"
+                    density="compact"
+                    append-inner-icon="mdi-content-copy"
+                    @click:append-inner="copyToClipboard(getImageUrl('public_art'))"
+                    class="mb-4"
+                  ></v-text-field>
+
+                  <PublicArtPanel
+                    :form="form"
+                    :devices="availableDevices"
+                    :save="saveSettingsInternal"
+                    @message="(m: string, e?: boolean) => showMessage(m, e)"
+                  />
                 </v-card-text>
               </v-window-item>
             </v-window>
@@ -1187,6 +1255,132 @@
               </v-table>
             </v-card-text>
           </v-window-item>
+
+          <!-- Home Assistant (MQTT) Tab -->
+          <v-window-item value="homeassistant">
+            <v-card-text>
+              <v-alert type="info" variant="tonal" density="compact" class="mb-4">
+                Publish each frame to your Home Assistant MQTT broker (e.g. the
+                Mosquitto add-on) using HA's MQTT discovery. Each frame appears
+                as a device with <strong>battery</strong>, <strong>days
+                remaining</strong>, <strong>last seen</strong>,
+                <strong>source</strong> and <strong>current image</strong>
+                entities — ready for automations. The server is a plain MQTT
+                client; it does not need to run as an HA add-on.
+              </v-alert>
+
+              <div class="d-flex align-center ga-3 mb-4">
+                <v-switch
+                  v-model="form.mqtt_enabled"
+                  color="primary"
+                  label="Enable MQTT bridge"
+                  hide-details
+                  density="compact"
+                  @update:model-value="saveSettingsInternal()"
+                ></v-switch>
+                <v-chip
+                  :color="mqttStatus.connected ? 'success' : (form.mqtt_enabled ? 'warning' : 'grey')"
+                  variant="tonal"
+                  size="small"
+                >
+                  <v-icon
+                    :icon="mqttStatus.connected ? 'mdi-lan-connect' : 'mdi-lan-disconnect'"
+                    start
+                    size="small"
+                  ></v-icon>
+                  {{ mqttStatus.connected ? 'Connected' : (form.mqtt_enabled ? 'Not connected' : 'Disabled') }}
+                </v-chip>
+                <v-btn
+                  variant="text"
+                  size="small"
+                  prepend-icon="mdi-refresh"
+                  @click="refreshMqttStatus"
+                >
+                  Refresh
+                </v-btn>
+              </div>
+
+              <v-row>
+                <v-col cols="12" md="7">
+                  <v-text-field
+                    v-model="form.mqtt_host"
+                    label="Broker host"
+                    placeholder="e.g. 192.168.1.10 or homeassistant.local"
+                    variant="outlined"
+                    density="compact"
+                    prepend-inner-icon="mdi-server-network"
+                  ></v-text-field>
+                </v-col>
+                <v-col cols="12" md="5">
+                  <v-text-field
+                    v-model.number="form.mqtt_port"
+                    label="Broker port"
+                    type="number"
+                    placeholder="1883"
+                    variant="outlined"
+                    density="compact"
+                  ></v-text-field>
+                </v-col>
+              </v-row>
+              <v-row>
+                <v-col cols="12" md="6">
+                  <v-text-field
+                    v-model="form.mqtt_username"
+                    label="MQTT username"
+                    variant="outlined"
+                    density="compact"
+                    autocomplete="off"
+                  ></v-text-field>
+                </v-col>
+                <v-col cols="12" md="6">
+                  <v-text-field
+                    v-model="form.mqtt_password"
+                    label="MQTT password"
+                    type="password"
+                    variant="outlined"
+                    density="compact"
+                    autocomplete="new-password"
+                  ></v-text-field>
+                </v-col>
+              </v-row>
+
+              <v-expansion-panels variant="accordion" class="mb-4">
+                <v-expansion-panel title="Advanced (topics)">
+                  <v-expansion-panel-text>
+                    <v-row>
+                      <v-col cols="12" md="6">
+                        <v-text-field
+                          v-model="form.mqtt_discovery_prefix"
+                          label="Discovery prefix"
+                          placeholder="homeassistant"
+                          variant="outlined"
+                          density="compact"
+                          hint="Must match HA's MQTT discovery prefix (default homeassistant)."
+                          persistent-hint
+                        ></v-text-field>
+                      </v-col>
+                      <v-col cols="12" md="6">
+                        <v-text-field
+                          v-model="form.mqtt_base_topic"
+                          label="Base topic"
+                          placeholder="esp32photoframe"
+                          variant="outlined"
+                          density="compact"
+                          hint="Root for this server's state/image topics."
+                          persistent-hint
+                        ></v-text-field>
+                      </v-col>
+                    </v-row>
+                  </v-expansion-panel-text>
+                </v-expansion-panel>
+              </v-expansion-panels>
+
+              <v-btn color="primary" prepend-icon="mdi-content-save" @click="saveMqttSettings">
+                Save &amp; Connect
+              </v-btn>
+            </v-card-text>
+          </v-window-item>
+
           <!-- Devices Tab -->
           <v-window-item value="devices">
             <v-card-text>
@@ -1277,26 +1471,35 @@
                       {{ device.host }}
                     </td>
                     <td>
-                      <div
-                        v-if="(device.battery_percent ?? -1) >= 0"
-                        class="d-flex align-center"
-                        :title="batteryTitle(device)"
-                      >
-                        <v-icon
-                          size="small"
-                          :color="batteryColor(device.battery_percent!)"
-                          >{{ batteryIcon(device.battery_percent!) }}</v-icon
+                      <template v-if="(device.battery_percent ?? -1) >= 0">
+                        <div
+                          class="d-flex align-center"
+                          :title="batteryTitle(device)"
                         >
-                        <span
-                          class="ml-1"
-                          :class="
-                            device.battery_percent! <= 15
-                              ? 'text-error'
-                              : 'text-medium-emphasis'
-                          "
-                          >{{ device.battery_percent }}%</span
+                          <v-icon
+                            size="small"
+                            :color="batteryColor(device.battery_percent!)"
+                            >{{ batteryIcon(device.battery_percent!) }}</v-icon
+                          >
+                          <span
+                            class="ml-1"
+                            :class="
+                              device.battery_percent! <= 15
+                                ? 'text-error'
+                                : 'text-medium-emphasis'
+                            "
+                            >{{ device.battery_percent }}%</span
+                          >
+                        </div>
+                        <div
+                          v-if="(device.battery_days_remaining ?? -1) > 0"
+                          class="text-caption text-medium-emphasis"
+                          :title="batteryTitle(device)"
                         >
-                      </div>
+                          ~{{ formatDaysRemaining(device.battery_days_remaining!) }}
+                          left
+                        </div>
+                      </template>
                       <span v-else class="text-grey">—</span>
                     </td>
                     <td class="text-right">
@@ -1342,6 +1545,8 @@
                   </v-toolbar>
                   <v-img
                     :src="fullImageUrl"
+                    :width="fullImageWidth"
+                    :height="fullImageHeight"
                     max-height="85vh"
                     max-width="96vw"
                     contain
@@ -1605,6 +1810,80 @@
                               Set the order in the Gallery tab (Reorder).
                             </div>
 
+                            <!-- This server: rotation-pool filters -->
+                            <template v-if="useThisServer">
+                              <v-checkbox
+                                v-model="editingDevice.on_this_day"
+                                label="On this day only"
+                                color="primary"
+                                density="compact"
+                                hide-details
+                                class="ml-8"
+                              ></v-checkbox>
+                              <v-checkbox
+                                v-model="editingDevice.favorites_only"
+                                label="Favorites only"
+                                color="primary"
+                                density="compact"
+                                hide-details
+                                class="ml-8"
+                              ></v-checkbox>
+                              <div
+                                v-if="
+                                  editingDevice.on_this_day ||
+                                  editingDevice.favorites_only
+                                "
+                                class="text-caption text-medium-emphasis mb-2 ml-8"
+                              >
+                                Filters the rotation pool (ordered sources). Falls
+                                back to all photos when no photo matches.
+                              </div>
+                            </template>
+
+                            <!-- This server: skip queue (jump in rotation) -->
+                            <template v-if="useThisServer && editingDevice.id">
+                              <div
+                                class="d-flex align-center ml-8 mt-2"
+                                style="gap: 8px"
+                              >
+                                <span class="text-body-2">Skip queue</span>
+                                <v-btn
+                                  size="small"
+                                  variant="tonal"
+                                  icon="mdi-chevron-double-left"
+                                  :loading="skipping"
+                                  :disabled="skipping || !deviceConfig.auto_rotate"
+                                  title="Jump back"
+                                  @click="doSkip(-Math.abs(skipSteps || 1))"
+                                ></v-btn>
+                                <v-text-field
+                                  v-model.number="skipSteps"
+                                  type="number"
+                                  min="1"
+                                  density="compact"
+                                  variant="outlined"
+                                  hide-details
+                                  style="max-width: 84px"
+                                ></v-text-field>
+                                <v-btn
+                                  size="small"
+                                  variant="tonal"
+                                  icon="mdi-chevron-double-right"
+                                  :loading="skipping"
+                                  :disabled="skipping || !deviceConfig.auto_rotate"
+                                  title="Jump forward"
+                                  @click="doSkip(Math.abs(skipSteps || 1))"
+                                ></v-btn>
+                              </div>
+                              <div
+                                class="text-caption text-medium-emphasis mb-2 ml-8"
+                              >
+                                One-time jump in the rotation, applied on the
+                                frame's next pull — not a permanent setting (it
+                                won't skip on every pull). Ordered sources only.
+                              </div>
+                            </template>
+
                             <!-- Custom URL -->
                             <v-text-field
                               v-if="!useThisServer"
@@ -1770,6 +2049,12 @@
                               color="primary"
                               hide-details
                             ></v-checkbox>
+                            <v-checkbox
+                              v-model="editingDevice.show_rotation"
+                              label="Show Rotation Position"
+                              color="primary"
+                              hide-details
+                            ></v-checkbox>
                           </div>
 
                           <!-- People name options (Immich face metadata) -->
@@ -1859,6 +2144,22 @@
                               </span>
                             </template>
                           </v-slider>
+                          <!-- Rotation-position chip options -->
+                          <template v-if="editingDevice.show_rotation">
+                            <div class="text-caption text-disabled mt-3 mb-1">
+                              A compact "where am I in the rotation" chip. Shuffle
+                              shows images left in the cycle, chronological/custom
+                              the current image number. Only ordered sources
+                              (Gallery / Immich / Synology / Google, collage off)
+                              have a rotation — it hides itself otherwise.
+                            </div>
+                            <v-checkbox
+                              v-model="editingDevice.rotation_show_total"
+                              label="Show total (e.g. 23/183 instead of 23)"
+                              color="primary"
+                              hide-details
+                            ></v-checkbox>
+                          </template>
                           <v-select
                             v-if="editingDevice.show_date"
                             v-model="editingDevice.date_format"
@@ -2092,6 +2393,31 @@
                                   :model-value="!isIconHidden('description')"
                                   @update:model-value="
                                     (v: any) => setIconShown('description', !!v)
+                                  "
+                                  label="Show icon"
+                                  density="compact"
+                                  hide-details
+                                ></v-checkbox>
+                              </v-col>
+                              <v-col
+                                v-if="editingDevice.show_rotation"
+                                cols="12"
+                                sm="6"
+                              >
+                                <v-select
+                                  v-model="editingDevice.rotation_position"
+                                  :items="positionOptions"
+                                  item-title="label"
+                                  item-value="value"
+                                  label="Rotation position"
+                                  variant="outlined"
+                                  density="compact"
+                                  hide-details
+                                ></v-select>
+                                <v-checkbox
+                                  :model-value="!isIconHidden('rotation')"
+                                  @update:model-value="
+                                    (v: any) => setIconShown('rotation', !!v)
                                   "
                                   label="Show icon"
                                   density="compact"
@@ -2816,6 +3142,8 @@
                             { title: 'None', value: '' },
                             { title: 'OpenAI', value: 'openai' },
                             { title: 'Google Gemini', value: 'google' },
+                            { title: 'MiniMax (Global)', value: 'minimax_global' },
+                            { title: 'MiniMax (China)', value: 'minimax_china' },
                             { title: 'ComfyUI (local)', value: 'comfyui' },
                           ]"
                           label="AI Provider"
@@ -3004,6 +3332,7 @@ import {
   deleteDevice,
   updateDevice,
   refreshDevice,
+  skipQueue,
   type Device,
   createURLSource,
   updateURLSource,
@@ -3020,9 +3349,11 @@ import {
   listCalendars,
   googleCalendarLogin,
   googleCalendarLogout,
+  getMqttStatus,
 } from '../api';
 import Gallery from './Gallery.vue';
 import ConfirmDialog from './ConfirmDialog.vue';
+import PublicArtPanel from './PublicArtPanel.vue';
 
 const store = useSettingsStore();
 const synologyStore = useSynologyStore();
@@ -3032,6 +3363,29 @@ const authStore = useAuthStore();
 const galleryStore = useGalleryStore();
 const activeMainTab = ref('devices');
 const activeDataSourceTab = ref('gallery');
+
+// Home Assistant / MQTT bridge connection status (polled for the Settings tab).
+const mqttStatus = reactive({ enabled: false, connected: false });
+const refreshMqttStatus = async () => {
+  try {
+    const s = await getMqttStatus();
+    mqttStatus.enabled = s.enabled;
+    mqttStatus.connected = s.connected;
+  } catch {
+    mqttStatus.connected = false;
+  }
+};
+const saveMqttSettings = async () => {
+  await saveSettingsInternal();
+  showMessage('MQTT settings saved — connecting…');
+  // Give the bridge a moment to (re)connect, then reflect status.
+  setTimeout(refreshMqttStatus, 1500);
+  setTimeout(refreshMqttStatus, 4000);
+};
+watch(activeMainTab, (t) => {
+  if (t === 'homeassistant') refreshMqttStatus();
+});
+
 const galleryTab = ref('gallery');
 const confirmDialog = ref();
 
@@ -3074,6 +3428,7 @@ const sourceTitles: Record<string, string> = {
   synology_photos: 'Synology Photos',
   url_proxy: 'URL Proxy',
   ai_generation: 'AI Generation',
+  public_art: 'Public Art',
   fractal: 'Fractal (Mandelbrot zoom)',
   dla: 'DLA (diffusion-limited aggregation)',
 };
@@ -3256,6 +3611,8 @@ const editingDevice = reactive<Partial<Device>>({});
 const deviceDialogTab = ref('general');
 const savingDeviceConfig = ref(false);
 const syncingFromDevice = ref(false);
+const skipping = ref(false);
+const skipSteps = ref(1);
 
 // Device config (synced remotely to device)
 const deviceConfig = reactive<Record<string, any>>({
@@ -3279,6 +3636,22 @@ const deviceConfig = reactive<Record<string, any>>({
   ha_url: '',
   openai_api_key: '',
   google_api_key: '',
+  minimax_global_api_key: '',
+  minimax_china_api_key: '',
+  // Home Assistant MQTT bridge
+  mqtt_enabled: false,
+  mqtt_host: '',
+  mqtt_port: 1883,
+  mqtt_username: '',
+  mqtt_password: '',
+  mqtt_discovery_prefix: 'homeassistant',
+  mqtt_base_topic: 'esp32photoframe',
+  // Public Art (Cleveland Museum open-access artwork source)
+  public_art_provider: 'cma',
+  public_art_query: 'art',
+  public_art_orientation: 'auto',
+  public_art_min_image_long_edge: 1600,
+  public_art_preferred_image_long_edge: 2000,
 });
 
 // Device processing settings (synced remotely)
@@ -3600,6 +3973,26 @@ const syncFromDevice = async () => {
     );
   } finally {
     syncingFromDevice.value = false;
+  }
+};
+
+const doSkip = async (steps: number) => {
+  if (!editingDevice.id || !steps) return;
+  skipping.value = true;
+  try {
+    await skipQueue(editingDevice.id, steps);
+    showMessage(
+      steps > 0
+        ? `Skipping ${steps} forward on next pull`
+        : `Skipping ${-steps} back on next pull`
+    );
+  } catch (e: any) {
+    showMessage(
+      'Failed to skip: ' + (e.response?.data?.error || e.message),
+      true
+    );
+  } finally {
+    skipping.value = false;
   }
 };
 
@@ -3984,6 +4377,20 @@ const previewElements = computed<PreviewEl[]>(() => {
         sample.length > max ? sample.slice(0, max - 1).trimEnd() + '…' : sample,
     });
   }
+  if (ov && editingDevice.show_rotation) {
+    const total = 183;
+    const showTotal = editingDevice.rotation_show_total !== false;
+    // Sample mirrors the renderer: shuffle → images left; otherwise image number.
+    const shuffle = (editingDevice.display_order || 'shuffle') === 'shuffle';
+    const n = shuffle ? 23 : 26;
+    els.push({
+      key: 'rotation',
+      pos: editingDevice.rotation_position || 'bottom-right',
+      kind: 'rotation',
+      emoji: isIconHidden('rotation') ? undefined : shuffle ? '🔀' : '#️⃣',
+      text: showTotal ? `${n}/${total}` : `${n}`,
+    });
+  }
   if (editingDevice.show_battery) {
     const style = editingDevice.battery_style || 'both';
     const pct = 76;
@@ -4141,6 +4548,8 @@ const aiModelOptionsForProvider = (provider: string | undefined) => {
       { title: 'Gemini 3 Pro Image', value: 'gemini-3-pro-image-preview' },
       { title: 'Gemini 2.5 Flash Image', value: 'gemini-2.5-flash-image' },
     ];
+  } else if (provider === 'minimax_global' || provider === 'minimax_china') {
+    return [{ title: 'Image-01', value: 'image-01' }];
   }
   return [];
 };
@@ -4218,6 +4627,8 @@ const openAddDeviceDialog = () => {
     date_format: '',
     show_battery: false,
     display_order: 'shuffle',
+    on_this_day: false,
+    favorites_only: false,
     date_position: 'bottom-left',
     photo_date_position: 'bottom-left',
     weather_position: 'bottom-right',
@@ -4240,6 +4651,9 @@ const openAddDeviceDialog = () => {
     show_description: false,
     description_position: 'wide-bottom',
     description_max_len: 80,
+    show_rotation: false,
+    rotation_position: 'bottom-right',
+    rotation_show_total: true,
   });
   Object.assign(deviceConfig, {
     auto_rotate: false,
@@ -4380,6 +4794,8 @@ const saveDevice = async () => {
         date_format: editingDevice.date_format || '',
         show_battery: editingDevice.show_battery || false,
         display_order: editingDevice.display_order || 'shuffle',
+        on_this_day: editingDevice.on_this_day || false,
+        favorites_only: editingDevice.favorites_only || false,
         date_position: editingDevice.date_position || 'bottom-left',
         photo_date_position:
           editingDevice.photo_date_position || 'bottom-left',
@@ -4404,6 +4820,9 @@ const saveDevice = async () => {
         description_position:
           editingDevice.description_position || 'wide-bottom',
         description_max_len: editingDevice.description_max_len ?? 80,
+        show_rotation: editingDevice.show_rotation || false,
+        rotation_position: editingDevice.rotation_position || 'bottom-right',
+        rotation_show_total: editingDevice.rotation_show_total !== false,
         immich_album_ids: editingDevice.immich_album_ids || '',
         overlay_hidden_icons: editingDevice.overlay_hidden_icons || '',
       });
@@ -4466,8 +4885,13 @@ const saveDevice = async () => {
           description_position:
             editingDevice.description_position || 'wide-bottom',
           description_max_len: editingDevice.description_max_len ?? 80,
+          show_rotation: editingDevice.show_rotation || false,
+          rotation_position: editingDevice.rotation_position || 'bottom-right',
+          rotation_show_total: editingDevice.rotation_show_total !== false,
           display_order: editingDevice.display_order || 'shuffle',
           immich_album_ids: editingDevice.immich_album_ids || '',
+          on_this_day: editingDevice.on_this_day || false,
+          favorites_only: editingDevice.favorites_only || false,
           overlay_hidden_icons: editingDevice.overlay_hidden_icons || '',
         }
       );
@@ -4608,11 +5032,38 @@ const getServedFullUrl = (thumbId: string) =>
 const fullImageDialog = ref(false);
 const fullImageUrl = ref('');
 const fullImageTitle = ref('');
+// Explicit display size so the lightbox scales the (small, native-resolution)
+// panel image UP to fill the viewport instead of rendering at its ~600px native
+// size. Undefined falls back to the CSS max-width/height only.
+const fullImageWidth = ref<number | undefined>(undefined);
+const fullImageHeight = ref<number | undefined>(undefined);
 
 const openFullImage = (device: Device) => {
   if (!device.current_thumb_id) return;
   fullImageUrl.value = getServedFullUrl(device.current_thumb_id);
   fullImageTitle.value = device.name || 'Current image';
+  // The full image is rendered at the panel's native resolution; viewing
+  // dimensions swap at 90/270. Scale to fill most of the viewport (upscaling
+  // allowed) so it isn't tiny on a desktop.
+  const nw = device.width || 0;
+  const nh = device.height || 0;
+  const deg = (((device.display_rotation_deg || 0) % 360) + 360) % 360;
+  let vw = nw;
+  let vh = nh;
+  if (deg === 90 || deg === 270) {
+    vw = nh;
+    vh = nw;
+  }
+  if (vw > 0 && vh > 0) {
+    const maxW = window.innerWidth * 0.92;
+    const maxH = window.innerHeight * 0.8;
+    const scale = Math.min(maxW / vw, maxH / vh);
+    fullImageWidth.value = Math.round(vw * scale);
+    fullImageHeight.value = Math.round(vh * scale);
+  } else {
+    fullImageWidth.value = undefined;
+    fullImageHeight.value = undefined;
+  }
   fullImageDialog.value = true;
 };
 
@@ -4631,6 +5082,12 @@ const batteryTitle = (device: Device) => {
     return `Battery ${device.battery_percent}% · ~${days.toFixed(1)} days remaining`;
   }
   return `Battery ${device.battery_percent}%`;
+};
+
+// Compact days-remaining for the Devices table: one decimal under 10 days,
+// whole days above (no false precision on long estimates).
+const formatDaysRemaining = (days: number) => {
+  return days >= 10 ? `${Math.round(days)} d` : `${days.toFixed(1)} d`;
 };
 
 const removeDevice = async (id: number) => {
@@ -4803,10 +5260,39 @@ onMounted(async () => {
     ),
     openai_api_key: store.settings.openai_api_key || '',
     google_api_key: store.settings.google_api_key || '',
+    minimax_global_api_key: store.settings.minimax_global_api_key || '',
+    minimax_china_api_key: store.settings.minimax_china_api_key || '',
     comfyui_host: store.settings.comfyui_host || '',
     comfyui_workflow: store.settings.comfyui_workflow || '',
     device_image_base_url: store.settings.device_image_base_url || '',
+    mqtt_enabled: store.settings.mqtt_enabled === 'true',
+    mqtt_host: store.settings.mqtt_host || '',
+    mqtt_port: parseInt(store.settings.mqtt_port || '1883'),
+    mqtt_username: store.settings.mqtt_username || '',
+    mqtt_password: store.settings.mqtt_password || '',
+    mqtt_discovery_prefix: store.settings.mqtt_discovery_prefix || 'homeassistant',
+    mqtt_base_topic: store.settings.mqtt_base_topic || 'esp32photoframe',
   });
+
+  // Public Art config is stored server-side as a single JSON blob
+  // (public_art_config) consumed by the auto-rotate source. Unpack it into
+  // the individual form fields the Public Art tab edits.
+  try {
+    const pa = store.settings.public_art_config
+      ? JSON.parse(store.settings.public_art_config)
+      : {};
+    form.public_art_provider = 'cma';
+    form.public_art_query = pa.query || 'art';
+    form.public_art_orientation =
+      pa.orientation === 'landscape' || pa.orientation === 'portrait'
+        ? pa.orientation
+        : 'auto';
+    form.public_art_min_image_long_edge = pa.min_image_long_edge || 1600;
+    form.public_art_preferred_image_long_edge =
+      pa.preferred_image_long_edge || 2000;
+  } catch (e) {
+    console.error('Failed to parse public_art_config', e);
+  }
 
   // Load cached albums if available
   if (store.settings.synology_albums_cache) {
@@ -4900,9 +5386,31 @@ const saveSettingsInternal = async () => {
     ),
     openai_api_key: form.openai_api_key,
     google_api_key: form.google_api_key,
+    minimax_global_api_key: form.minimax_global_api_key,
+    minimax_china_api_key: form.minimax_china_api_key,
     comfyui_host: form.comfyui_host,
     comfyui_workflow: form.comfyui_workflow,
     device_image_base_url: (form.device_image_base_url || '').trim(),
+    mqtt_enabled: String(form.mqtt_enabled),
+    mqtt_host: (form.mqtt_host || '').trim(),
+    mqtt_port: String(form.mqtt_port || 1883),
+    mqtt_username: form.mqtt_username || '',
+    mqtt_password: form.mqtt_password || '',
+    mqtt_discovery_prefix: (form.mqtt_discovery_prefix || 'homeassistant').trim(),
+    mqtt_base_topic: (form.mqtt_base_topic || 'esp32photoframe').trim(),
+    public_art_config: JSON.stringify({
+      provider: form.public_art_provider || 'cma',
+      query: form.public_art_query || 'art',
+      // Only persist an explicit orientation; auto/any defer to the frame.
+      orientation:
+        form.public_art_orientation === 'landscape' ||
+        form.public_art_orientation === 'portrait'
+          ? form.public_art_orientation
+          : '',
+      min_image_long_edge: Number(form.public_art_min_image_long_edge) || 1600,
+      preferred_image_long_edge:
+        Number(form.public_art_preferred_image_long_edge) || 2000,
+    }),
   });
 };
 

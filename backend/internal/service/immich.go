@@ -76,7 +76,11 @@ func NewImmichService(db *gorm.DB, settings *SettingsService) *ImmichService {
 		},
 		IsConfigured: svc.isAutoSyncConfigured,
 		GetConfig:    svc.getAutoSyncConfig,
-		RunSync:      svc.clearAndResyncInternal,
+		// Incremental upsert + prune, NOT clear-and-reinsert: a periodic clear
+		// hard-deletes every Immich row and re-imports with fresh auto-increment
+		// IDs, orphaning DeviceHistory and silently restarting every frame's
+		// rotation cursor on each sync. ImportPhotos keeps stable IDs.
+		RunSync: svc.ImportPhotos,
 	})
 	return svc
 }
@@ -187,6 +191,14 @@ func (s *ImmichService) ListAlbums() ([]immich.Album, error) {
 	sort.SliceStable(albums, func(i, j int) bool {
 		return strings.ToLower(albums[i].AlbumName) < strings.ToLower(albums[j].AlbumName)
 	})
+	// Cache album names by UUID so the Home Assistant "Immich Albums" sensor can
+	// resolve a frame's selected album IDs without an Immich round-trip.
+	for _, a := range albums {
+		s.db.Clauses(clause.OnConflict{
+			Columns:   []clause.Column{{Name: "immich_album_id"}},
+			DoUpdates: clause.AssignmentColumns([]string{"album_name"}),
+		}).Create(&model.ImmichAlbum{ImmichAlbumID: a.ID, AlbumName: a.AlbumName})
+	}
 	return albums, nil
 }
 
@@ -202,6 +214,12 @@ func (s *ImmichService) ImportPhotos() error {
 
 	deviceAlbums := s.collectDeviceAlbumIDs()
 
+	// Track every asset ID we successfully see this sync so we can prune rows for
+	// assets removed from Immich WITHOUT churning the IDs of the ones that remain
+	// (which would orphan DeviceHistory and reset each frame's rotation cursor).
+	seen := make(map[string]struct{})
+	fetchFailed := false
+
 	// 1) Global pool per the configured mode (album / all / favorites / memories).
 	assets, err := s.fetchAssetsForMode(client)
 	if err != nil {
@@ -215,7 +233,12 @@ func (s *ImmichService) ImportPhotos() error {
 	}
 	globalNew := 0
 	for _, asset := range assets {
-		if _, isNew, e := s.upsertAsset(client, asset); e == nil && isNew {
+		id, isNew, e := s.upsertAsset(client, asset)
+		if e != nil || id == 0 {
+			continue
+		}
+		seen[asset.ID] = struct{}{}
+		if isNew {
 			globalNew++
 		}
 	}
@@ -226,6 +249,7 @@ func (s *ImmichService) ImportPhotos() error {
 		albumAssets, e := client.GetAlbumAssets(albumID)
 		if e != nil {
 			log.Printf("Immich: failed to fetch album %s: %v", albumID, e)
+			fetchFailed = true
 			continue
 		}
 		// Rebuild this album's membership from scratch so removals propagate.
@@ -235,6 +259,7 @@ func (s *ImmichService) ImportPhotos() error {
 			if e != nil || id == 0 {
 				continue
 			}
+			seen[asset.ID] = struct{}{}
 			if isNew {
 				albumNew++
 			}
@@ -243,8 +268,27 @@ func (s *ImmichService) ImportPhotos() error {
 		}
 	}
 
-	log.Printf("Immich ImportPhotos complete: %d new (global) + %d new (albums); %d album(s) selected across frames",
-		globalNew, albumNew, len(deviceAlbums))
+	// 3) Prune assets no longer in any synced pool by SOFT-deleting them: the
+	// rotation query filters deleted_at IS NULL so they drop out gracefully while
+	// history rows referencing them stay valid. Guarded against a partial/failed
+	// fetch or an empty result so a transient Immich error can't wipe the pool.
+	pruned := int64(0)
+	if !fetchFailed && len(seen) > 0 {
+		keep := make([]string, 0, len(seen))
+		for id := range seen {
+			keep = append(keep, id)
+		}
+		res := s.db.Where("source = ? AND immich_asset_id NOT IN ?", model.SourceImmich, keep).
+			Delete(&model.Image{})
+		if res.Error != nil {
+			log.Printf("Immich prune failed: %v", res.Error)
+		} else {
+			pruned = res.RowsAffected
+		}
+	}
+
+	log.Printf("Immich ImportPhotos complete: %d new (global) + %d new (albums); %d pruned; %d album(s) selected across frames",
+		globalNew, albumNew, pruned, len(deviceAlbums))
 	return nil
 }
 
@@ -261,8 +305,13 @@ func (s *ImmichService) upsertAsset(client *immich.Client, asset immich.Asset) (
 	}
 
 	var existing model.Image
-	if s.db.Where("immich_asset_id = ? AND source = ?", asset.ID, model.SourceImmich).
+	if s.db.Unscoped().Where("immich_asset_id = ? AND source = ?", asset.ID, model.SourceImmich).
 		First(&existing).Error == nil {
+		// Revive a previously-pruned asset that reappeared, keeping its row ID so
+		// any DeviceHistory referencing it stays valid (the cursor survives).
+		if existing.DeletedAt.Valid {
+			s.db.Unscoped().Model(&existing).Update("deleted_at", nil)
+		}
 		return existing.ID, false, nil
 	}
 
@@ -357,16 +406,14 @@ func (s *ImmichService) ClearPhotos() error {
 	return nil
 }
 
-// ClearAndResync deletes all Immich photos and re-imports from the configured album
+// ClearAndResync hard-deletes all Immich photos and re-imports from scratch. This
+// is the explicit user-triggered "Clear and Resync" path (it intentionally resets
+// rotation cursors); the periodic auto-sync uses the non-destructive ImportPhotos.
 func (s *ImmichService) ClearAndResync() error {
-	return s.autoSync.SyncNow()
-}
-
-func (s *ImmichService) clearAndResyncInternal() error {
 	if err := s.ClearPhotos(); err != nil {
 		return err
 	}
-	return s.ImportPhotos()
+	return s.autoSync.SyncNow()
 }
 
 // parseImmichDate parses ISO 8601 date strings from the Immich API.

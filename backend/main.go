@@ -1,16 +1,20 @@
 package main
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"log"
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/aitjcize/esp32-photoframe-server/backend/internal/db"
 	"github.com/aitjcize/esp32-photoframe-server/backend/internal/handler"
 	"github.com/aitjcize/esp32-photoframe-server/backend/internal/imagesource"
 	"github.com/aitjcize/esp32-photoframe-server/backend/internal/middleware"
 	"github.com/aitjcize/esp32-photoframe-server/backend/internal/model"
+	"github.com/aitjcize/esp32-photoframe-server/backend/internal/publicart"
 	"github.com/aitjcize/esp32-photoframe-server/backend/internal/service"
 	"github.com/aitjcize/esp32-photoframe-server/backend/pkg/gcalendar"
 	"github.com/aitjcize/esp32-photoframe-server/backend/pkg/googlephotos"
@@ -19,6 +23,35 @@ import (
 	echoMiddleware "github.com/labstack/echo/v4/middleware"
 	"gorm.io/gorm"
 )
+
+// resolveJWTSecret returns the JWT signing secret. An explicit JWT_SECRET env
+// wins; otherwise a strong random secret is read from (or, on first run,
+// generated and written to) <dataDir>/jwt_secret with 0600 perms, so each
+// install has a unique key. Only if persistence fails entirely does it fall back
+// to the in-service default (logged loudly).
+func resolveJWTSecret(dataDir string) string {
+	if s := strings.TrimSpace(os.Getenv("JWT_SECRET")); s != "" {
+		return s
+	}
+	path := filepath.Join(dataDir, "jwt_secret")
+	if b, err := os.ReadFile(path); err == nil {
+		if s := strings.TrimSpace(string(b)); s != "" {
+			return s
+		}
+	}
+	buf := make([]byte, 32)
+	if _, err := rand.Read(buf); err != nil {
+		log.Printf("WARNING: could not generate a JWT secret (%v); falling back to the insecure default. Set JWT_SECRET to fix.", err)
+		return ""
+	}
+	secret := hex.EncodeToString(buf)
+	if err := os.WriteFile(path, []byte(secret), 0600); err != nil {
+		log.Printf("WARNING: generated a JWT secret but could not persist it to %s (%v); it will change on restart and invalidate existing tokens. Set JWT_SECRET to fix.", path, err)
+	} else {
+		log.Printf("Generated a new persistent JWT secret at %s", path)
+	}
+	return secret
+}
 
 func main() {
 	// Initialize Database
@@ -132,8 +165,12 @@ func main() {
 	// Initialize Services
 	settingsService := service.NewSettingsService(database)
 	tokenStore := service.NewDBTokenStore(database, "photos")
-	// JWT Secret - In production, this should come from env but for Addon we might generate or fix it
-	jwtSecret := os.Getenv("JWT_SECRET")
+	// JWT Secret: prefer an explicit JWT_SECRET env; otherwise use a strong random
+	// secret persisted in the data dir (generated once on first run) so every
+	// install gets a unique, non-guessable signing key instead of the hardcoded
+	// default. Falling back to a fixed default would let anyone forge admin /
+	// device tokens.
+	jwtSecret := resolveJWTSecret(dataDir)
 	authService := service.NewAuthService(database, jwtSecret)
 
 	// Migrate All Models
@@ -179,6 +216,16 @@ func main() {
 	aiGenerationService := service.NewAIGenerationService(settingsService)
 	// Initialize Generative (procedural) Service — fractal / DLA / …
 	generativeService := service.NewGenerativeService(database)
+	// Initialize Public Art Service — server-side open-access museum artwork
+	// from the Cleveland Museum of Art (open API + CDN, no key, reliable for
+	// both browse thumbnails and the frame's hourly pull).
+	publicArtService := publicart.NewService(publicart.ServiceOptions{
+		Provider:       publicart.NewCMAProvider("", nil),
+		ConfigProvider: publicart.NewSettingsConfigProvider(settingsService),
+		Settings:       settingsService,
+		CacheDir:       filepath.Join(dataDir, "public_art_cache"),
+		HistoryDB:      publicart.NewDedupHistoryDB(database),
+	})
 
 	// Image-source registry: every image source — synthetic and library —
 	// registers here as its own plugin. The order below mirrors the order
@@ -191,6 +238,7 @@ func main() {
 	sourceRegistry.Register(service.NewSynologyPhotosSource(database, synologyService))
 	sourceRegistry.Register(service.NewURLProxySource(database))
 	sourceRegistry.Register(service.NewAIGenerationSource(aiGenerationService))
+	sourceRegistry.Register(service.NewPublicArtSource(publicArtService))
 	sourceRegistry.Register(service.NewFractalSource(generativeService))
 	sourceRegistry.Register(service.NewDLASource(generativeService))
 
@@ -217,6 +265,14 @@ func main() {
 		DataDir:        dataDir,
 	})
 	deviceHandler := handler.NewDeviceHandler(deviceService, synologyService, immichService, database)
+
+	// Initialize MQTT bridge — publishes each frame to a Home Assistant MQTT
+	// broker (HA discovery: battery / status / current-image entities). Off
+	// until configured in Settings; the server is a plain MQTT client and does
+	// not need to run as an HA add-on.
+	mqttService := service.NewMQTTService(database, settingsService, service.NewBatteryService(database), authService, dataDir)
+	mqttService.Start()
+	deviceHandler.SetMQTT(mqttService)
 
 	// Initialize Telegram Service
 	// Pass deviceService as Pusher
@@ -247,7 +303,9 @@ func main() {
 		Auth:           authService,
 		DB:             database,
 		DataDir:        dataDir,
+		MQTT:           mqttService,
 	})
+	pah := handler.NewPublicArtHandler(publicArtService, settingsService)
 	ch := handler.NewCalendarHandler(googleCalendarClient, calendarClient)
 	ah := handler.NewAuthHandler(authService)
 
@@ -289,13 +347,18 @@ func main() {
 	e.GET("/served-image-thumbnail/:id", ih.GetServedImageThumbnail)
 	e.GET("/served-image-full/:id", ih.GetServedImageFull)
 
+	// Public Art thumbnail/preview — only fetches from public external museum
+	// IIIF URLs and writes nothing to the DB, so no auth is needed. These are
+	// GET image endpoints because the browser loads them through an <img> tag.
+	e.GET("/api/public-art/thumbnail", pah.Thumbnail)
+	e.GET("/api/public-art/preview", pah.Preview)
+
 	// Device Config Sync (Protected - device token or session auth)
 	e.POST("/api/device-config/sync", ih.SyncDeviceConfig, authMiddleware)
 
 	// Protected API Routes
 	// 1. Protected API Group
 	protectedApi := e.Group("/api", authMiddleware)
-	protectedApi.GET("/settings", h.GetSettings)
 	protectedApi.GET("/settings", h.GetSettings)
 	protectedApi.POST("/settings", h.UpdateSettings)
 
@@ -306,6 +369,7 @@ func main() {
 	protectedApi.DELETE("/devices/:id", deviceHandler.DeleteDevice)
 	protectedApi.POST("/devices/:id/push", deviceHandler.PushToDevice)
 	protectedApi.POST("/devices/:id/refresh", deviceHandler.RefreshDevice)
+	protectedApi.POST("/devices/:id/skip", deviceHandler.SkipQueue)
 	protectedApi.GET("/devices/:id/battery", deviceHandler.BatteryEstimate)
 	protectedApi.GET("/devices/:id/config", ih.GetDeviceConfig)
 	protectedApi.PUT("/devices/:id/config", ih.UpdateDeviceConfig)
@@ -332,6 +396,18 @@ func main() {
 	protectedApi.GET("/gallery/urls", gh.ListURLSources)
 	protectedApi.PUT("/gallery/urls/:id", gh.UpdateURLSource)
 	protectedApi.DELETE("/gallery/urls/:id", gh.DeleteURLSource)
+
+	// MQTT bridge status (Protected) — {enabled, connected} for the Settings UI.
+	protectedApi.GET("/mqtt/status", func(c echo.Context) error {
+		enabled, connected := mqttService.Status()
+		return c.JSON(http.StatusOK, map[string]bool{"enabled": enabled, "connected": connected})
+	})
+
+	// Public Art (Protected)
+	protectedApi.POST("/public-art/search", pah.Search)
+	protectedApi.POST("/public-art/select", pah.Select)
+	protectedApi.DELETE("/public-art/select", pah.ClearSelection)
+	protectedApi.POST("/public-art/preview", pah.Preview)
 
 	// Google Picker (Protected)
 	protectedApi.GET("/google/picker/session", googleHandler.CreatePickerSession)

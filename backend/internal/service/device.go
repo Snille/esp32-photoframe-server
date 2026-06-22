@@ -67,7 +67,7 @@ func (s *DeviceService) ListDevices() ([]model.Device, error) {
 	return devices, nil
 }
 
-func (s *DeviceService) AddDevice(host string, enableCollage, showDate, showPhotoDate, showWeather bool, weatherLat, weatherLon float64, layout string, displayMode string, showCalendar bool, calendarID string, dateFormat string, showBattery bool, displayOrder string, immichAlbumIDs string, overlay model.OverlaySettings) (*model.Device, error) {
+func (s *DeviceService) AddDevice(host string, enableCollage, showDate, showPhotoDate, showWeather bool, weatherLat, weatherLon float64, layout string, displayMode string, showCalendar bool, calendarID string, dateFormat string, showBattery bool, displayOrder string, immichAlbumIDs string, onThisDay, favoritesOnly bool, overlay model.OverlaySettings) (*model.Device, error) {
 	// Try to fetch device info (works on LAN, fails for remote devices)
 	var name string
 	var width, height int
@@ -156,6 +156,8 @@ func (s *DeviceService) AddDevice(host string, enableCollage, showDate, showPhot
 		ShowBattery:              showBattery,
 		DisplayOrder:             model.NormalizeDisplayOrder(displayOrder),
 		ImmichAlbumIDs:           model.NormalizeImmichAlbumIDs(immichAlbumIDs),
+		OnThisDay:                onThisDay,
+		FavoritesOnly:            favoritesOnly,
 		DatePosition:             model.NormalizeOverlayPosition(overlay.DatePosition, "bottom-left"),
 		PhotoDatePosition:        model.NormalizeOverlayPosition(overlay.PhotoDatePosition, "bottom-left"),
 		WeatherPosition:          model.NormalizeOverlayPosition(overlay.WeatherPosition, "bottom-right"),
@@ -178,6 +180,9 @@ func (s *DeviceService) AddDevice(host string, enableCollage, showDate, showPhot
 		ShowDescription:          overlay.ShowDescription,
 		DescriptionPosition:      model.NormalizeOverlayPosition(overlay.DescriptionPosition, "wide-bottom"),
 		DescriptionMaxLen:        model.NormalizeDescriptionMaxLen(overlay.DescriptionMaxLen),
+		ShowRotation:             overlay.ShowRotation,
+		RotationPosition:         model.NormalizeOverlayPosition(overlay.RotationPosition, "bottom-right"),
+		RotationShowTotal:        overlay.RotationShowTotal,
 		OverlayHiddenIcons:       model.NormalizeOverlayHiddenIcons(overlay.OverlayHiddenIcons),
 		DeviceConfig:             deviceConfig,
 		DeviceProcessingSettings: deviceProc,
@@ -198,7 +203,7 @@ func (s *DeviceService) AddDevice(host string, enableCollage, showDate, showPhot
 // Hardware-derived fields (Width, Height, BoardName, DeviceConfig,
 // DeviceProcessingSettings, DeviceColorPalette) are only written by
 // AddDevice and RefreshDeviceFromHardware.
-func (s *DeviceService) UpdateDevice(id uint, name, host, orientation string, enableCollage, showDate, showPhotoDate, showWeather bool, weatherLat, weatherLon float64, aiProvider, aiModel, aiPrompt string, layout string, displayMode string, showCalendar bool, calendarID string, dateFormat string, showBattery bool, displayOrder string, immichAlbumIDs string, overlay model.OverlaySettings) (*model.Device, error) {
+func (s *DeviceService) UpdateDevice(id uint, name, host, orientation string, enableCollage, showDate, showPhotoDate, showWeather bool, weatherLat, weatherLon float64, aiProvider, aiModel, aiPrompt string, layout string, displayMode string, showCalendar bool, calendarID string, dateFormat string, showBattery bool, displayOrder string, immichAlbumIDs string, onThisDay, favoritesOnly bool, overlay model.OverlaySettings) (*model.Device, error) {
 	var device model.Device
 	if err := s.db.First(&device, id).Error; err != nil {
 		return nil, errors.New("device not found")
@@ -237,6 +242,8 @@ func (s *DeviceService) UpdateDevice(id uint, name, host, orientation string, en
 	device.ShowBattery = showBattery
 	device.DisplayOrder = model.NormalizeDisplayOrder(displayOrder)
 	device.ImmichAlbumIDs = model.NormalizeImmichAlbumIDs(immichAlbumIDs)
+	device.OnThisDay = onThisDay
+	device.FavoritesOnly = favoritesOnly
 	device.DatePosition = model.NormalizeOverlayPosition(overlay.DatePosition, "bottom-left")
 	device.PhotoDatePosition = model.NormalizeOverlayPosition(overlay.PhotoDatePosition, "bottom-left")
 	device.WeatherPosition = model.NormalizeOverlayPosition(overlay.WeatherPosition, "bottom-right")
@@ -259,6 +266,9 @@ func (s *DeviceService) UpdateDevice(id uint, name, host, orientation string, en
 	device.ShowDescription = overlay.ShowDescription
 	device.DescriptionPosition = model.NormalizeOverlayPosition(overlay.DescriptionPosition, "wide-bottom")
 	device.DescriptionMaxLen = model.NormalizeDescriptionMaxLen(overlay.DescriptionMaxLen)
+	device.ShowRotation = overlay.ShowRotation
+	device.RotationPosition = model.NormalizeOverlayPosition(overlay.RotationPosition, "bottom-right")
+	device.RotationShowTotal = overlay.RotationShowTotal
 	device.OverlayHiddenIcons = model.NormalizeOverlayHiddenIcons(overlay.OverlayHiddenIcons)
 
 	if err := s.db.Save(&device).Error; err != nil {
@@ -594,15 +604,19 @@ func (s *DeviceService) PushToHost(device *model.Device, imagePath string, extra
 				} else if werr := os.WriteFile(filepath.Join(s.dataDir, fmt.Sprintf("full_%s.jpg", thumbID)), fullJPEG, 0644); werr != nil {
 					log.Printf("Failed to save full preview for device %d: %v", device.ID, werr)
 				}
-				if device.CurrentThumbID != "" && device.CurrentThumbID != thumbID {
-					os.Remove(filepath.Join(s.dataDir, fmt.Sprintf("thumb_%s.jpg", device.CurrentThumbID)))
-					os.Remove(filepath.Join(s.dataDir, fmt.Sprintf("full_%s.jpg", device.CurrentThumbID)))
-				}
-				s.db.Model(device).Update("current_thumb_id", thumbID)
+				// Rotate Previous ← Current ← new (and clean up the demoted file).
+				SetCurrentThumb(s.db, s.dataDir, device, thumbID)
 			} else {
 				log.Printf("Failed to save current thumbnail for device %d: %v", device.ID, writeErr)
 			}
 		}
+	}
+
+	// This image change was server-initiated, so record "push" as the trigger for
+	// the HA "Last Trigger" sensor (the pull path records timer/button/boot).
+	if device.LastTrigger != "push" {
+		device.LastTrigger = "push"
+		s.db.Model(device).Update("last_trigger", "push")
 	}
 
 	if rawEPD {

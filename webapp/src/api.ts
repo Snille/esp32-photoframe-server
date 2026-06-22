@@ -107,10 +107,20 @@ export interface Device {
   show_description?: boolean;
   description_position?: string;
   description_max_len?: number;
+  // Rotation-position overlay chip (where in the rotation the frame is).
+  show_rotation?: boolean;
+  rotation_position?: string;
+  rotation_show_total?: boolean;
   // Comma-separated Immich album IDs this frame is restricted to (empty = all).
   immich_album_ids?: string;
+  // Rotation-pool filters: only photos from today's date / only favorites.
+  on_this_day?: boolean;
+  favorites_only?: boolean;
   // Comma-separated overlay element keys whose icon is hidden (empty = all shown).
   overlay_hidden_icons?: string;
+  // How the frame is mounted relative to the panel's native orientation
+  // (0/90/180/270). Drives the lightbox's viewing dimensions.
+  display_rotation_deg?: number;
   // Id of the most recent served-image thumbnail, served via
   // /served-image-thumbnail/:id — drives the Devices-list current-image preview.
   current_thumb_id?: string;
@@ -165,7 +175,12 @@ export const addDevice = async (params: {
   show_description?: boolean;
   description_position?: string;
   description_max_len?: number;
+  show_rotation?: boolean;
+  rotation_position?: string;
+  rotation_show_total?: boolean;
   immich_album_ids?: string;
+  on_this_day?: boolean;
+  favorites_only?: boolean;
   overlay_hidden_icons?: string;
 }) => {
   const response = await api.post('devices', params);
@@ -218,8 +233,13 @@ export const updateDevice = async (
     show_description?: boolean;
     description_position?: string;
     description_max_len?: number;
+    show_rotation?: boolean;
+    rotation_position?: string;
+    rotation_show_total?: boolean;
     display_order?: string;
     immich_album_ids?: string;
+    on_this_day?: boolean;
+    favorites_only?: boolean;
     overlay_hidden_icons?: string;
   }
 ) => {
@@ -264,8 +284,13 @@ export const updateDevice = async (
     show_description: overlayPositions?.show_description || false,
     description_position: overlayPositions?.description_position || 'wide-bottom',
     description_max_len: overlayPositions?.description_max_len ?? 80,
+    show_rotation: overlayPositions?.show_rotation || false,
+    rotation_position: overlayPositions?.rotation_position || 'bottom-right',
+    rotation_show_total: overlayPositions?.rotation_show_total ?? true,
     display_order: overlayPositions?.display_order || 'shuffle',
     immich_album_ids: overlayPositions?.immich_album_ids ?? '',
+    on_this_day: overlayPositions?.on_this_day || false,
+    favorites_only: overlayPositions?.favorites_only || false,
     overlay_hidden_icons: overlayPositions?.overlay_hidden_icons ?? '',
   });
   return response.data;
@@ -308,10 +333,92 @@ export const deleteDevice = async (id: number) => {
   return response.data;
 };
 
+// Jump the device's rotation queue by `steps` (positive = forward, negative =
+// back). The next ordered pull jumps to that image; no-op for collage / non-
+// ordered sources.
+export const skipQueue = async (id: number, steps: number) => {
+  const response = await api.post(`/devices/${id}/skip`, { steps });
+  return response.data;
+};
+
 export const pushToDevice = async (deviceID: number, imageID: number) => {
   const response = await api.post(`/devices/${deviceID}/push`, {
     image_id: imageID,
   });
+  return response.data;
+};
+
+export const pushPublicArtToDevice = async (
+  deviceID: number,
+  candidate: unknown,
+  composition: unknown
+) => {
+  const response = await api.post(`/devices/${deviceID}/push`, {
+    public_art: {
+      candidate,
+      composition,
+    },
+  });
+  return response.data;
+};
+
+// ── Public Art ──────────────────────────────────────────────────────────────
+
+export type PublicArtSearchConfig = {
+  provider?: string;
+  query?: string;
+  orientation?: string;
+  min_image_long_edge?: number;
+  preferred_image_long_edge?: number;
+  limit?: number;
+};
+
+export const searchPublicArt = async (config: PublicArtSearchConfig) => {
+  const response = await api.post('public-art/search', config);
+  return response.data;
+};
+
+export const selectPublicArt = async (
+  candidate: unknown,
+  composition: unknown
+) => {
+  const response = await api.post('public-art/select', {
+    candidate,
+    composition,
+  });
+  return response.data;
+};
+
+export const clearPublicArtSelection = async () => {
+  const response = await api.delete('public-art/select');
+  return response.data;
+};
+
+const apiBase = () => (api.defaults.baseURL || 'api').replace(/\/$/, '');
+
+// Public (no-auth) image endpoints — used directly as <img> src.
+export const publicArtThumbnailSrc = (candidate: {
+  image_url?: string;
+  thumbnail_url?: string;
+}) => {
+  const params = new URLSearchParams();
+  if (candidate.image_url) params.set('candidate_image_url', candidate.image_url);
+  if (candidate.thumbnail_url)
+    params.set('candidate_thumbnail_url', candidate.thumbnail_url);
+  return `${apiBase()}/public-art/thumbnail?${params.toString()}`;
+};
+
+export const publicArtPreviewSrc = (params: Record<string, string>) => {
+  return `${apiBase()}/public-art/preview?${new URLSearchParams(
+    params
+  ).toString()}`;
+};
+
+export const getMqttStatus = async (): Promise<{
+  enabled: boolean;
+  connected: boolean;
+}> => {
+  const response = await api.get('mqtt/status');
   return response.data;
 };
 

@@ -1,7 +1,9 @@
 package handler
 
 import (
+	"bytes"
 	"fmt"
+	"image"
 	"net/http"
 	"os"
 	"strconv"
@@ -11,6 +13,7 @@ import (
 	"io/ioutil"
 
 	"github.com/aitjcize/esp32-photoframe-server/backend/internal/model"
+	"github.com/aitjcize/esp32-photoframe-server/backend/internal/publicart"
 	"github.com/aitjcize/esp32-photoframe-server/backend/internal/service"
 	"github.com/labstack/echo/v4"
 	"gorm.io/gorm"
@@ -21,6 +24,7 @@ type DeviceHandler struct {
 	synologyService *service.SynologyService
 	immichService   *service.ImmichService
 	battery         *service.BatteryService
+	mqtt            *service.MQTTService
 	db              *gorm.DB
 }
 
@@ -33,6 +37,10 @@ func NewDeviceHandler(deviceService *service.DeviceService, synologyService *ser
 		db:              db,
 	}
 }
+
+// SetMQTT wires the optional MQTT bridge so device CRUD can refresh / clean up
+// Home Assistant entities.
+func (h *DeviceHandler) SetMQTT(m *service.MQTTService) { h.mqtt = m }
 
 // ... existing methods ... (List, Add, Update, Delete, Push)
 
@@ -87,6 +95,8 @@ func (h *DeviceHandler) AddDevice(c echo.Context) error {
 		ShowBattery   bool    `json:"show_battery"`
 		DisplayOrder  string  `json:"display_order"`
 		ImmichAlbumIDs    string `json:"immich_album_ids"`
+		OnThisDay         bool   `json:"on_this_day"`
+		FavoritesOnly     bool   `json:"favorites_only"`
 		DatePosition      string `json:"date_position"`
 		PhotoDatePosition string `json:"photo_date_position"`
 		WeatherPosition   string `json:"weather_position"`
@@ -109,6 +119,9 @@ func (h *DeviceHandler) AddDevice(c echo.Context) error {
 		ShowDescription     bool   `json:"show_description"`
 		DescriptionPosition string `json:"description_position"`
 		DescriptionMaxLen   int    `json:"description_max_len"`
+		ShowRotation        bool   `json:"show_rotation"`
+		RotationPosition    string `json:"rotation_position"`
+		RotationShowTotal   bool   `json:"rotation_show_total"`
 		OverlayHiddenIcons  string `json:"overlay_hidden_icons"`
 	}
 	if err := c.Bind(&req); err != nil {
@@ -123,7 +136,7 @@ func (h *DeviceHandler) AddDevice(c echo.Context) error {
 		req.Layout = model.LayoutPhotoOverlay
 	}
 
-	device, err := h.deviceService.AddDevice(req.Host, req.EnableCollage, req.ShowDate, req.ShowPhotoDate, req.ShowWeather, req.WeatherLat, req.WeatherLon, req.Layout, req.DisplayMode, req.ShowCalendar, req.CalendarID, req.DateFormat, req.ShowBattery, req.DisplayOrder, req.ImmichAlbumIDs, model.OverlaySettings{
+	device, err := h.deviceService.AddDevice(req.Host, req.EnableCollage, req.ShowDate, req.ShowPhotoDate, req.ShowWeather, req.WeatherLat, req.WeatherLon, req.Layout, req.DisplayMode, req.ShowCalendar, req.CalendarID, req.DateFormat, req.ShowBattery, req.DisplayOrder, req.ImmichAlbumIDs, req.OnThisDay, req.FavoritesOnly, model.OverlaySettings{
 		DatePosition:      req.DatePosition,
 		PhotoDatePosition: req.PhotoDatePosition,
 		WeatherPosition:   req.WeatherPosition,
@@ -146,6 +159,9 @@ func (h *DeviceHandler) AddDevice(c echo.Context) error {
 		ShowDescription:     req.ShowDescription,
 		DescriptionPosition: req.DescriptionPosition,
 		DescriptionMaxLen:   req.DescriptionMaxLen,
+		ShowRotation:        req.ShowRotation,
+		RotationPosition:    req.RotationPosition,
+		RotationShowTotal:   req.RotationShowTotal,
 		OverlayHiddenIcons:  req.OverlayHiddenIcons,
 	})
 	if err != nil {
@@ -155,6 +171,9 @@ func (h *DeviceHandler) AddDevice(c echo.Context) error {
 	// background so the frame's chosen photos become available.
 	if device.ImmichAlbumIDs != "" && h.immichService != nil {
 		go h.immichService.ImportPhotos()
+	}
+	if h.mqtt != nil {
+		h.mqtt.NotifyDeviceUpdated(device.ID)
 	}
 	return c.JSON(http.StatusCreated, device)
 }
@@ -185,6 +204,8 @@ func (h *DeviceHandler) UpdateDevice(c echo.Context) error {
 		ShowBattery   bool    `json:"show_battery"`
 		DisplayOrder  string  `json:"display_order"`
 		ImmichAlbumIDs    string `json:"immich_album_ids"`
+		OnThisDay         bool   `json:"on_this_day"`
+		FavoritesOnly     bool   `json:"favorites_only"`
 		DatePosition      string `json:"date_position"`
 		PhotoDatePosition string `json:"photo_date_position"`
 		WeatherPosition   string `json:"weather_position"`
@@ -207,6 +228,9 @@ func (h *DeviceHandler) UpdateDevice(c echo.Context) error {
 		ShowDescription     bool   `json:"show_description"`
 		DescriptionPosition string `json:"description_position"`
 		DescriptionMaxLen   int    `json:"description_max_len"`
+		ShowRotation        bool   `json:"show_rotation"`
+		RotationPosition    string `json:"rotation_position"`
+		RotationShowTotal   bool   `json:"rotation_show_total"`
 		OverlayHiddenIcons  string `json:"overlay_hidden_icons"`
 	}
 	if err := c.Bind(&req); err != nil {
@@ -217,7 +241,7 @@ func (h *DeviceHandler) UpdateDevice(c echo.Context) error {
 		req.Layout = model.LayoutPhotoOverlay
 	}
 
-	device, err := h.deviceService.UpdateDevice(uint(id), req.Name, req.Host, req.Orientation, req.EnableCollage, req.ShowDate, req.ShowPhotoDate, req.ShowWeather, req.WeatherLat, req.WeatherLon, req.AIProvider, req.AIModel, req.AIPrompt, req.Layout, req.DisplayMode, req.ShowCalendar, req.CalendarID, req.DateFormat, req.ShowBattery, req.DisplayOrder, req.ImmichAlbumIDs, model.OverlaySettings{
+	device, err := h.deviceService.UpdateDevice(uint(id), req.Name, req.Host, req.Orientation, req.EnableCollage, req.ShowDate, req.ShowPhotoDate, req.ShowWeather, req.WeatherLat, req.WeatherLon, req.AIProvider, req.AIModel, req.AIPrompt, req.Layout, req.DisplayMode, req.ShowCalendar, req.CalendarID, req.DateFormat, req.ShowBattery, req.DisplayOrder, req.ImmichAlbumIDs, req.OnThisDay, req.FavoritesOnly, model.OverlaySettings{
 		DatePosition:      req.DatePosition,
 		PhotoDatePosition: req.PhotoDatePosition,
 		WeatherPosition:   req.WeatherPosition,
@@ -240,6 +264,9 @@ func (h *DeviceHandler) UpdateDevice(c echo.Context) error {
 		ShowDescription:     req.ShowDescription,
 		DescriptionPosition: req.DescriptionPosition,
 		DescriptionMaxLen:   req.DescriptionMaxLen,
+		ShowRotation:        req.ShowRotation,
+		RotationPosition:    req.RotationPosition,
+		RotationShowTotal:   req.RotationShowTotal,
 		OverlayHiddenIcons:  req.OverlayHiddenIcons,
 	})
 	if err != nil {
@@ -248,6 +275,9 @@ func (h *DeviceHandler) UpdateDevice(c echo.Context) error {
 	// Import any newly-selected Immich albums (+ membership) in the background.
 	if device.ImmichAlbumIDs != "" && h.immichService != nil {
 		go h.immichService.ImportPhotos()
+	}
+	if h.mqtt != nil {
+		h.mqtt.NotifyDeviceUpdated(device.ID)
 	}
 	return c.JSON(http.StatusOK, device)
 }
@@ -277,11 +307,40 @@ func (h *DeviceHandler) BatteryEstimate(c echo.Context) error {
 	return c.JSON(http.StatusOK, h.battery.Estimate(uint(id)))
 }
 
+// POST /api/devices/:id/skip
+// Jumps the device's rotation queue by req.Steps (positive = forward, negative =
+// back, 0 = re-show current). Pins the target image so the next ordered pull
+// jumps there; rotation then continues from that point. No-op for collage /
+// non-ordered sources. Mirrors the Home Assistant "Skip Queue" control.
+func (h *DeviceHandler) SkipQueue(c echo.Context) error {
+	id, _ := strconv.Atoi(c.Param("id"))
+	var req struct {
+		Steps int `json:"steps"`
+	}
+	if err := c.Bind(&req); err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid request"})
+	}
+	var device model.Device
+	if err := h.db.First(&device, id).Error; err != nil {
+		return c.JSON(http.StatusNotFound, map[string]string{"error": "device not found"})
+	}
+	pinned := service.ApplySkip(h.db, &device, req.Steps)
+	// Reflect the new "next image" in Home Assistant (Next Image preview refreshes
+	// on the frame's next pull).
+	if h.mqtt != nil {
+		h.mqtt.NotifyDeviceUpdated(device.ID)
+	}
+	return c.JSON(http.StatusOK, map[string]interface{}{"status": "ok", "pinned_image_id": pinned})
+}
+
 // DELETE /api/devices/:id
 func (h *DeviceHandler) DeleteDevice(c echo.Context) error {
 	id, _ := strconv.Atoi(c.Param("id"))
 	if err := h.deviceService.DeleteDevice(uint(id)); err != nil {
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": err.Error()})
+	}
+	if h.mqtt != nil {
+		h.mqtt.RemoveDevice(uint(id))
 	}
 	return c.JSON(http.StatusOK, map[string]string{"status": "deleted"})
 }
@@ -290,8 +349,12 @@ func (h *DeviceHandler) DeleteDevice(c echo.Context) error {
 func (h *DeviceHandler) PushToDevice(c echo.Context) error {
 	deviceID, _ := strconv.Atoi(c.Param("id"))
 	var req struct {
-		ImageID uint   `json:"image_id"`
-		URL     string `json:"url"` // Optional direct URL/Path
+		ImageID   uint   `json:"image_id"`
+		URL       string `json:"url"` // Optional direct URL/Path
+		PublicArt *struct {
+			Candidate   publicart.Candidate   `json:"candidate"`
+			Composition publicart.Composition `json:"composition"`
+		} `json:"public_art"`
 	}
 	if err := c.Bind(&req); err != nil {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid request"})
@@ -359,6 +422,18 @@ func (h *DeviceHandler) PushToDevice(c echo.Context) error {
 		} else {
 			imagePath = img.FilePath
 		}
+	} else if req.PublicArt != nil {
+		composedPath, err := h.composePublicArtForDevice(
+			uint(deviceID),
+			req.PublicArt.Candidate,
+			req.PublicArt.Composition,
+		)
+		if err != nil {
+			return c.JSON(http.StatusBadGateway, map[string]string{"error": err.Error()})
+		}
+		defer os.Remove(composedPath)
+		tempFile = composedPath
+		imagePath = tempFile
 	}
 
 	if imagePath == "" {
@@ -381,4 +456,80 @@ func (h *DeviceHandler) PushToDevice(c echo.Context) error {
 	}
 
 	return c.JSON(http.StatusOK, map[string]string{"status": "pushed"})
+}
+
+func (h *DeviceHandler) composePublicArtForDevice(deviceID uint, candidate publicart.Candidate, comp publicart.Composition) (string, error) {
+	if candidate.ImageURL == "" {
+		return "", fmt.Errorf("public art image_url is required")
+	}
+
+	var device model.Device
+	if err := h.db.First(&device, deviceID).Error; err != nil {
+		return "", fmt.Errorf("device not found")
+	}
+
+	targetW, targetH := device.Width, device.Height
+	if targetW <= 0 || targetH <= 0 {
+		targetW, targetH = 800, 480
+	}
+	if device.Orientation == "portrait" && targetW > targetH {
+		targetW, targetH = targetH, targetW
+	} else if device.Orientation == "landscape" && targetW < targetH {
+		targetW, targetH = targetH, targetW
+	}
+
+	data, err := downloadPublicArtImage(candidate.ImageURL, candidate.ThumbnailURL)
+	if err != nil {
+		return "", fmt.Errorf("failed to fetch public art image: %w", err)
+	}
+	img, _, err := image.Decode(bytes.NewReader(data))
+	if err != nil {
+		return "", fmt.Errorf("failed to decode public art image: %w", err)
+	}
+	if comp.ScaleMode == "" {
+		comp = publicart.DefaultComposition()
+	}
+	composed := publicart.ComposeImage(img, comp, targetW, targetH)
+
+	tmp, err := ioutil.TempFile("", "public_art_push_*.png")
+	if err != nil {
+		return "", fmt.Errorf("failed to create temp file")
+	}
+	if err := publicart.EncodeImage(tmp, composed, "png"); err != nil {
+		tmp.Close()
+		os.Remove(tmp.Name())
+		return "", fmt.Errorf("failed to encode public art image: %w", err)
+	}
+	if err := tmp.Close(); err != nil {
+		os.Remove(tmp.Name())
+		return "", fmt.Errorf("failed to close temp file: %w", err)
+	}
+	return tmp.Name(), nil
+}
+
+func downloadPublicArtImage(primaryURL, fallbackURL string) ([]byte, error) {
+	if data, err := downloadPublicHTTPImage(primaryURL); err == nil {
+		return data, nil
+	}
+	if fallbackURL != "" && fallbackURL != primaryURL {
+		if data, err := downloadPublicHTTPImage(fallbackURL); err == nil {
+			return data, nil
+		}
+	}
+	return nil, fmt.Errorf("all public art image URLs failed")
+}
+
+func downloadPublicHTTPImage(url string) ([]byte, error) {
+	if url == "" {
+		return nil, fmt.Errorf("empty URL")
+	}
+	resp, err := http.Get(url)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return nil, fmt.Errorf("HTTP %d", resp.StatusCode)
+	}
+	return ioutil.ReadAll(resp.Body)
 }
