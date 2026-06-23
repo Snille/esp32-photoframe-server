@@ -1,5 +1,10 @@
 # Changelog
 
+## v1.27.0
+
+### Fixed
+- **"Next Image Pull" can no longer show a time more than one interval out.** For an awake frame that wakes every N minutes, the next pull is by definition at most N minutes away — but the sensor could still show it further out (e.g. ~25 min for a 15-minute frame) because it would prefer the frame's self-reported wake time when that landed within one interval of the estimate, and a stale/bogus report could sit almost two intervals in the future. The server now derives the next pull **purely from the observed cadence** (last check-in + the configured interval, rolled forward and adjusted for the quiet-hours sleep schedule) and resets it on every check-in. The frame's self-reported `X-Next-Wake-Time` is ignored entirely, so the value no longer depends on the frame reporting a correct time. The Home Assistant *Next Image Pull* entity and the dashboard card are unchanged — only the underlying value is now reliable.
+
 ## v1.26.0
 
 ### Fixed

@@ -600,34 +600,17 @@ func (s *MQTTService) publishState(client mqtt.Client, device *model.Device) {
 	pc := parsePollConfig(device.DeviceConfig)
 	if pc.rotateInterval > 0 {
 		state["refresh_interval"] = round1(float64(pc.rotateInterval) / 60.0)
-		// "Next image pull" is derived from the OBSERVED cadence: the frame checks
-		// in every rotate_interval, so last-check-in + interval (sleep-schedule
-		// adjusted) tracks reality. We deliberately do NOT blindly trust the frame's
-		// self-reported X-Next-Wake-Time (device.NextWakeAt): the firmware builds
-		// that value as a request header *before* the per-cycle config sync is
-		// applied, so a frame running on stale/default config reports a bogus time
-		// (e.g. top-of-the-hour from the 3600s firmware default while it actually
-		// wakes every 15 min). We accept the reported value only when it agrees with
-		// our estimate to within one interval — then it's a more precise
-		// clock-aligned figure worth using. Only published when auto-rotate is on.
-		if pc.autoRotate {
-			var nextPull time.Time
-			if est.HasData && !est.LastSampledAt.IsZero() {
-				nextPull = computeNextPull(est.LastSampledAt, pc)
-			}
-			if device.NextWakeAt > 0 {
-				if reported := time.Unix(device.NextWakeAt, 0); reported.After(time.Now()) {
-					iv := time.Duration(pc.rotateInterval) * time.Second
-					if nextPull.IsZero() {
-						// No sample data to cross-check; the frame report is all we have.
-						nextPull = reported
-					} else if d := reported.Sub(nextPull); d > -iv && d < iv {
-						// Report agrees with the observed cadence — prefer its precision.
-						nextPull = reported
-					}
-				}
-			}
-			if !nextPull.IsZero() {
+		// "Next image pull" is derived purely from the OBSERVED cadence: the frame
+		// checks in every rotate_interval, so last-check-in + interval (rolled
+		// forward past now, sleep-schedule adjusted) tracks reality. We deliberately
+		// do NOT use the frame's self-reported X-Next-Wake-Time: the firmware builds
+		// that as a request header *before* the per-cycle config sync is applied, so a
+		// frame on stale/default config reports a bogus time (e.g. top-of-the-hour
+		// from the 3600s firmware default while it actually wakes every 15 min). The
+		// cadence estimate is reset on every check-in and needs no frame cooperation.
+		// Only published when auto-rotate is on.
+		if pc.autoRotate && est.HasData && !est.LastSampledAt.IsZero() {
+			if nextPull := computeNextPull(est.LastSampledAt, pc); !nextPull.IsZero() {
 				state["next_pull"] = nextPull.UTC().Format(time.RFC3339)
 			}
 		}

@@ -71,6 +71,36 @@ func TestComputeNextPull_SleepWindowPush(t *testing.T) {
 	}
 }
 
+// TestComputeNextPull_AwakeBoundedToOneInterval guards the screenshot bug: a
+// 15-min frame must never report a next pull more than one interval out. The
+// estimate (lastSeen+interval), rolled forward past now, is always within one
+// interval of now.
+func TestComputeNextPull_AwakeBoundedToOneInterval(t *testing.T) {
+	pc := pollConfig{rotateInterval: 900, autoRotate: true, aligned: true, sleepEnabled: false}
+	lastSeen := time.Date(2026, 6, 23, 7, 38, 0, 0, time.UTC)
+	now := time.Date(2026, 6, 23, 7, 50, 1, 0, time.UTC)
+	got := computeNextPullAt(lastSeen, now, pc)
+	if d := got.Sub(now); d <= 0 || d > 900*time.Second {
+		t.Errorf("next pull %s is %s from now; want within one 15-min interval", got.UTC(), d)
+	}
+}
+
+// TestComputeNextPull_BoundedAcrossIntervals asserts the screenshot-bug invariant
+// for every realistic cadence: an awake frame's next pull is always in the future
+// and never more than one interval out, whatever the interval (5/15/30/60 min).
+func TestComputeNextPull_BoundedAcrossIntervals(t *testing.T) {
+	now := time.Date(2026, 6, 23, 7, 50, 1, 0, time.UTC)
+	lastSeen := time.Date(2026, 6, 23, 7, 38, 0, 0, time.UTC)
+	for _, intervalSec := range []int{300, 900, 1800, 3600} {
+		pc := pollConfig{rotateInterval: intervalSec, autoRotate: true, aligned: true, sleepEnabled: false}
+		got := computeNextPullAt(lastSeen, now, pc)
+		iv := time.Duration(intervalSec) * time.Second
+		if d := got.Sub(now); d <= 0 || d > iv {
+			t.Errorf("interval %ds: next pull %s is %s from now; want within one interval", intervalSec, got.UTC(), d)
+		}
+	}
+}
+
 func TestComputeNextPull_NoSleepSchedule(t *testing.T) {
 	pc := pollConfig{rotateInterval: 600, sleepEnabled: false}
 	lastSeen := time.Date(2026, 6, 22, 12, 0, 0, 0, time.UTC)

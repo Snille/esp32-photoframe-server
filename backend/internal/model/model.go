@@ -55,10 +55,10 @@ type Image struct {
 	// PeopleJSON is a JSON array of {"name","birthDate"} for faces recognized in
 	// the photo (Immich only). Location is a formatted "City, State, Country"
 	// string from EXIF (Immich only). Both empty for sources that lack metadata.
-	PeopleJSON   string         `json:"people_json" gorm:"column:people_json"`
-	Location     string         `json:"location"`
-	Description  string         `json:"description"`   // photo description/caption (Immich exif description; gallery caption)
-	DisplayOrder int            `json:"display_order"` // Manual sort position for devices in 'custom' order mode (lower = earlier)
+	PeopleJSON   string `json:"people_json" gorm:"column:people_json"`
+	Location     string `json:"location"`
+	Description  string `json:"description"`   // photo description/caption (Immich exif description; gallery caption)
+	DisplayOrder int    `json:"display_order"` // Manual sort position for devices in 'custom' order mode (lower = earlier)
 	// Hidden photos are globally excluded from every frame's rotation (a "remove
 	// this from the slideshow" flag, toggled from HA / the web UI without deleting
 	// the asset). Favorite is a user-set star, surfaced to HA and usable as a
@@ -202,11 +202,6 @@ type Device struct {
 	// button), "boot" (cold boot/reset), "push" (server-initiated) or "pull"
 	// (firmware too old to report a wake reason). Set on every real serve.
 	LastTrigger string `json:"last_trigger" gorm:"default:''"`
-	// NextWakeAt is the unix epoch the frame told us it intends to wake next
-	// (X-Next-Wake-Time header), captured on each check-in. It already accounts
-	// for clock-aligned wakes and the quiet-hours sleep schedule, so the HA "Next
-	// Image Pull" sensor prefers it over the server's own estimate. 0 = unknown.
-	NextWakeAt int64 `json:"next_wake_at" gorm:"default:0"`
 	// PendingNextImageID pins the exact image the next ordered pull should serve,
 	// set by the HA "Skip Queue" command to jump N steps in the rotation. The pull
 	// serves it and clears the pin (back to 0); rotation then continues from there.

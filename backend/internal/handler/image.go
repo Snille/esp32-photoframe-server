@@ -213,18 +213,11 @@ func (h *ImageHandler) ServeImage(c echo.Context) error {
 				service.ApplySkip(h.db, &device, steps)
 			}
 		}
-
-		// The frame reports exactly when it will wake next (X-Next-Wake-Time, a unix
-		// epoch). Storing it lets the HA "Next Image Pull" sensor show the frame's
-		// real scheduled wake (already sleep-schedule / clock-align aware) instead of
-		// the server re-deriving it. Only accept a plausible future-ish epoch.
-		if wakeStr := c.Request().Header.Get("X-Next-Wake-Time"); wakeStr != "" {
-			if epoch, err := strconv.ParseInt(strings.TrimSpace(wakeStr), 10, 64); err == nil &&
-				epoch > 1700000000 && epoch != device.NextWakeAt {
-				device.NextWakeAt = epoch
-				go h.db.Model(&model.Device{}).Where("id = ?", device.ID).Update("next_wake_at", epoch)
-			}
-		}
+		// Note: the frame also sends X-Next-Wake-Time, but we intentionally ignore it.
+		// The HA "Next Image Pull" sensor is derived purely from the observed cadence
+		// (last check-in + interval, sleep-adjusted) in the MQTT bridge — that value is
+		// reset on every check-in and doesn't depend on the frame reporting a correct
+		// time (the header is built off pre-config-sync defaults and can be bogus).
 	}
 
 	// (The MQTT bridge is notified at the end of the serve, once current_thumb_id
