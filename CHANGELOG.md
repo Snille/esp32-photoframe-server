@@ -1,5 +1,11 @@
 # Changelog
 
+## v1.28.0
+
+### Fixed
+- **"Battery Days Remaining" no longer gets stuck at *unknown* after a recharge.** The battery-runtime estimate fits a line through the reported charge level over the trailing 14 days. A mid-window recharge (topping the frame up over USB) put an upward jump in the middle of that window, which flattened — or even inverted — the overall slope, so a frame that was plainly draining read as *stable*/*charging* and the days-remaining value was suppressed (shown as "unknown" in Home Assistant). The estimate now trims the series to the **most recent discharge run** (it detects the last recharge and regresses only the decline since then), so the drain rate and days-remaining reflect current behaviour. A frame sitting full on USB still correctly reads *stable* with no finite runtime.
+- **Dashboard card battery line no longer shows "unknown d kvar".** The Home Assistant card's battery row now appends the days-remaining only when it's a real number; otherwise it shows the trend word (*laddar* / *stabilt* / *samlar data*) — e.g. "97% · stabilt" on USB instead of "97% · unknown d kvar". See [docs/home-assistant-card.md](docs/home-assistant-card.md).
+
 ## v1.27.0
 
 ### Fixed

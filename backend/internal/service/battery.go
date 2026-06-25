@@ -34,6 +34,13 @@ const (
 	batteryFlatThreshold = 0.15
 	// Need at least this much real time spanned before a slope means anything.
 	batteryMinSpan = 6 * time.Hour
+	// A rise of more than this (%SoC) above the recent trough marks a recharge —
+	// well above the per-wake voltage/percent noise (loaded voltage jitters a few
+	// % per wake), so it won't trip on jitter; a real top-up moves 15-100%.
+	batteryChargeRise = 8.0
+	// After a charge, SoC must drop this far (%SoC) below the peak before we call
+	// the charge finished and begin the new discharge run.
+	batteryDischargeHyst = 2.0
 	// Cap the points handed back for the sparkline.
 	batteryRecentLimit = 60
 )
@@ -183,9 +190,49 @@ func (s *BatteryService) Estimate(deviceID uint) BatteryEstimate {
 		currentY = voltageToSoC(last.VoltageMV)
 	}
 
+	// Trim to the most recent discharge run. A mid-window recharge (the user
+	// tops the battery up over USB) otherwise poisons the least-squares slope:
+	// averaging the pre-charge decline, the charge jump, and the post-charge
+	// decline yields a near-flat or rising line, so a plainly-draining frame
+	// reads "stable"/"charging". Only the rate since the last charge predicts
+	// the runtime left. We find the last charge by tracking the recent trough;
+	// once SoC climbs chargeRise above it we're charging, then follow the rise
+	// to its peak (where charging ends) and start the run there.
+	if len(pts) >= 2 {
+		segStart := 0
+		minIdx := 0
+		peakIdx := 0
+		charging := false
+		for i := 1; i < len(pts); i++ {
+			if !charging {
+				if pts[i].y < pts[minIdx].y {
+					minIdx = i
+				}
+				if pts[i].y-pts[minIdx].y > batteryChargeRise {
+					charging = true
+					peakIdx = i
+				}
+			} else {
+				if pts[i].y >= pts[peakIdx].y {
+					peakIdx = i
+				} else if pts[peakIdx].y-pts[i].y > batteryDischargeHyst {
+					charging = false
+					segStart = peakIdx
+					minIdx = peakIdx
+				}
+			}
+		}
+		if charging {
+			// Window ends mid-charge; start the run at the latest peak so we
+			// don't regress over the still-rising tail.
+			segStart = peakIdx
+		}
+		pts = pts[segStart:]
+	}
+
 	span := time.Duration(0)
 	if len(pts) >= 2 {
-		span = time.Duration(pts[len(pts)-1].x * float64(24*time.Hour))
+		span = time.Duration((pts[len(pts)-1].x - pts[0].x) * float64(24*time.Hour))
 	}
 	if len(pts) < 2 || span < batteryMinSpan {
 		return est // not enough to read a trend yet; current values still shown

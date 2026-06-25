@@ -25,6 +25,7 @@ For a frame named *PhotoFrame-Mini* they look like:
 | Current image | `image.photoframe_photoframe_mini_image` |
 | Battery | `sensor.photoframe_photoframe_mini_battery` |
 | Days remaining | `sensor.photoframe_photoframe_mini_days_remaining` |
+| Battery trend | `sensor.photoframe_photoframe_mini_trend` |
 | Next pull | `sensor.photoframe_photoframe_mini_next_pull` |
 | Rotation status | `sensor.photoframe_photoframe_mini_rotation_status` |
 | Refresh interval | `number.photoframe_photoframe_mini_refresh_interval` |
@@ -54,8 +55,12 @@ cards:
   # --- Battery / days remaining ---
   - type: custom:mushroom-template-card
     primary: >-
-      {{ states('sensor.photoframe_photoframe_mini_battery') }}%
-      · {{ states('sensor.photoframe_photoframe_mini_days_remaining') }} d kvar
+      {% set b = states('sensor.photoframe_photoframe_mini_battery') %}
+      {% set d = states('sensor.photoframe_photoframe_mini_days_remaining') %}
+      {% set tr = states('sensor.photoframe_photoframe_mini_trend') %}
+      {% set extra = (d ~ ' d kvar') if d not in ['unknown','unavailable',''] else
+         {'charging':'laddar','stable':'stabilt','insufficient':'samlar data'}.get(tr,'') %}
+      {{ b }}%{% if extra %} · {{ extra }}{% endif %}
     secondary: Batteri
     icon: >-
       {% set b = states('sensor.photoframe_photoframe_mini_battery') | int(0) %}
