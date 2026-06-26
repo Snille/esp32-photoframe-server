@@ -304,6 +304,14 @@ func (s *ImmichService) upsertAsset(client *immich.Client, asset immich.Asset) (
 		return 0, false, nil
 	}
 
+	w, h := asset.ExifInfo.ExifImageWidth, asset.ExifInfo.ExifImageHeight
+	photoDate := parseImmichDate(asset.ExifInfo.DateTimeOriginal)
+	if photoDate == nil {
+		photoDate = parseImmichDate(asset.LocalDateTime)
+	}
+	location := formatImmichLocation(asset.ExifInfo)
+	description := strings.TrimSpace(asset.ExifInfo.Description)
+
 	var existing model.Image
 	if s.db.Unscoped().Where("immich_asset_id = ? AND source = ?", asset.ID, model.SourceImmich).
 		First(&existing).Error == nil {
@@ -312,10 +320,30 @@ func (s *ImmichService) upsertAsset(client *immich.Client, asset immich.Asset) (
 		if existing.DeletedAt.Valid {
 			s.db.Unscoped().Model(&existing).Update("deleted_at", nil)
 		}
+		// Refresh metadata that can change in Immich after first import (e.g. a
+		// description/comment added later, a relocated photo). These come free from
+		// the album/search listing — no extra API call — so update them in place.
+		// Without this the incremental sync (which replaced the old clear+reinsert)
+		// would never propagate edits to existing photos. People faces are NOT in
+		// the listing and are left untouched to avoid a per-asset fetch every sync.
+		updates := map[string]any{}
+		if existing.Description != description {
+			updates["description"] = description
+		}
+		if existing.Location != location {
+			updates["location"] = location
+		}
+		if !sameTimePtr(existing.PhotoTakenAt, photoDate) {
+			updates["photo_taken_at"] = photoDate
+		}
+		if len(updates) > 0 {
+			if err := s.db.Model(&existing).Updates(updates).Error; err != nil {
+				log.Printf("Immich: failed to refresh metadata for asset %s: %v", asset.ID, err)
+			}
+		}
 		return existing.ID, false, nil
 	}
 
-	w, h := asset.ExifInfo.ExifImageWidth, asset.ExifInfo.ExifImageHeight
 	img := model.Image{
 		ImmichAssetID: asset.ID,
 		Source:        model.SourceImmich,
@@ -326,13 +354,9 @@ func (s *ImmichService) upsertAsset(client *immich.Client, asset immich.Asset) (
 		CreatedAt:     time.Now(),
 		Status:        "pending",
 	}
-	photoDate := parseImmichDate(asset.ExifInfo.DateTimeOriginal)
-	if photoDate == nil {
-		photoDate = parseImmichDate(asset.LocalDateTime)
-	}
 	img.PhotoTakenAt = photoDate
-	img.Location = formatImmichLocation(asset.ExifInfo)
-	img.Description = strings.TrimSpace(asset.ExifInfo.Description)
+	img.Location = location
+	img.Description = description
 
 	// People (faces) are NOT in album/search listings — fetch the asset detail.
 	// Best-effort: a failure just leaves names empty for this photo.
@@ -406,14 +430,33 @@ func (s *ImmichService) ClearPhotos() error {
 	return nil
 }
 
+// SyncNow runs the same non-destructive incremental sync the periodic auto-sync
+// uses (upsert + soft-delete prune, stable IDs). This backs the manual "Sync Now"
+// button: it pulls new/removed/edited assets without churning IDs or resetting any
+// frame's rotation cursor. Goes through the scheduler so lastSuccessAt is updated
+// and the next periodic run is rescheduled relative to this manual one.
+func (s *ImmichService) SyncNow() error {
+	return s.autoSync.SyncNow()
+}
+
 // ClearAndResync hard-deletes all Immich photos and re-imports from scratch. This
-// is the explicit user-triggered "Clear and Resync" path (it intentionally resets
-// rotation cursors); the periodic auto-sync uses the non-destructive ImportPhotos.
+// is the explicit user-triggered "Rebuild Library" path (it intentionally resets
+// rotation cursors and re-fetches people/faces for every asset); the periodic
+// auto-sync and the "Sync Now" button use the non-destructive ImportPhotos.
 func (s *ImmichService) ClearAndResync() error {
 	if err := s.ClearPhotos(); err != nil {
 		return err
 	}
 	return s.autoSync.SyncNow()
+}
+
+// sameTimePtr reports whether two *time.Time point at the same instant (both nil
+// counts as equal), so a metadata refresh only writes when the date truly changed.
+func sameTimePtr(a, b *time.Time) bool {
+	if a == nil || b == nil {
+		return a == b
+	}
+	return a.Equal(*b)
 }
 
 // parseImmichDate parses ISO 8601 date strings from the Immich API.

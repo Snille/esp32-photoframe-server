@@ -30,11 +30,23 @@ func (h *ImmichHandler) ListAlbums(c echo.Context) error {
 	return c.JSON(http.StatusOK, albums)
 }
 
+// Sync runs the non-destructive incremental sync (new/removed/edited assets,
+// stable IDs, rotation cursors preserved). Backs the "Sync Now" button.
 func (h *ImmichHandler) Sync(c echo.Context) error {
-	if err := h.immich.ClearAndResync(); err != nil {
+	if err := h.immich.SyncNow(); err != nil {
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": err.Error()})
 	}
 	return c.JSON(http.StatusOK, map[string]string{"status": "synced"})
+}
+
+// Resync hard-deletes all Immich photos and re-imports from scratch. Destructive:
+// resets every frame's rotation cursor and re-fetches people/faces. Backs the
+// "Rebuild Library" button (UI confirms first).
+func (h *ImmichHandler) Resync(c echo.Context) error {
+	if err := h.immich.ClearAndResync(); err != nil {
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": err.Error()})
+	}
+	return c.JSON(http.StatusOK, map[string]string{"status": "resynced"})
 }
 
 func (h *ImmichHandler) Clear(c echo.Context) error {

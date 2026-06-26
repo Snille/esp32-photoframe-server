@@ -1,5 +1,13 @@
 # Changelog
 
+## v1.29.0
+
+### Fixed
+- **Immich photo descriptions/comments now sync after the fact.** When a description was added or edited on a photo in Immich *after* that photo had already been imported, the change never reached the frame — the periodic auto-sync (made incremental in v1.25.0) returned existing rows untouched, so only descriptions present at first import ever showed up. The incremental sync now refreshes the listing-derived metadata (**description, location and photo date**) on existing photos too, with no extra API calls. Recognised faces/people are still only fetched for new photos (a per-asset call), so backfilling those after tagging still needs a Rebuild Library.
+
+### Changed
+- **"Sync Now" is now non-destructive.** The Immich **Sync Now** button previously ran a full clear-and-reimport, which gave every photo a fresh ID and silently reset each frame's rotation back to the start — surprising for a button named "Sync". It now runs the same incremental sync as the periodic auto-sync (new/removed/edited photos + metadata, stable IDs, rotation preserved). The destructive full rebuild moved to a separate **Rebuild Library** button (with a confirmation dialog) for the rare cases that need it — refreshing recognised faces or recovering a corrupted pool.
+
 ## v1.28.0
 
 ### Fixed

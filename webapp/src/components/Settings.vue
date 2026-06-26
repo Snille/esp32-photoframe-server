@@ -665,6 +665,13 @@
                         @click="syncImmich"
                         >Sync Now</v-btn
                       >
+                      <v-btn
+                        color="warning"
+                        variant="outlined"
+                        :loading="immichStore.loading"
+                        @click="rebuildImmich"
+                        >Rebuild Library</v-btn
+                      >
                       <v-btn color="warning" @click="clearImmich"
                         >Clear All Photos</v-btn
                       >
@@ -674,6 +681,12 @@
                         @click="disconnectImmich"
                         >Disconnect</v-btn
                       >
+                    </div>
+                    <div class="text-caption text-medium-emphasis mt-1">
+                      Sync Now fetches new, removed and edited photos without
+                      disturbing the slideshow. Rebuild Library wipes and
+                      re-imports everything (also refreshes recognised faces) —
+                      it resets each frame's rotation, so use it sparingly.
                     </div>
                   </div>
 
@@ -5643,6 +5656,28 @@ const syncImmich = async () => {
   } catch (e: any) {
     showMessage(
       'Sync Failed: ' + (e.response?.data?.error || 'Unknown error'),
+      true
+    );
+  }
+};
+
+const rebuildImmich = async () => {
+  if (
+    !(await confirmDialog.value.open(
+      'Rebuild the Immich library? This wipes and re-imports every photo and ' +
+        "resets each frame's rotation back to the start. Only needed to " +
+        'refresh recognised faces or fix a corrupted pool — normal "Sync Now" ' +
+        'already picks up new and edited photos.'
+    ))
+  )
+    return;
+  await saveSettingsInternal();
+  try {
+    await immichStore.resync();
+    showMessage('Library rebuilt successfully!');
+  } catch (e: any) {
+    showMessage(
+      'Rebuild Failed: ' + (e.response?.data?.error || 'Unknown error'),
       true
     );
   }

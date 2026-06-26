@@ -56,5 +56,17 @@ export const useImmichStore = defineStore('immich', {
         this.loading = false;
       }
     },
+
+    async resync() {
+      this.loading = true;
+      try {
+        await api.post('/immich/resync');
+        await this.fetchCount();
+      } catch (e: any) {
+        throw e;
+      } finally {
+        this.loading = false;
+      }
+    },
   },
 });

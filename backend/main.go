@@ -426,6 +426,7 @@ func main() {
 	// Immich (Protected)
 	protectedApi.POST("/immich/test", imh.TestConnection)
 	protectedApi.POST("/immich/sync", imh.Sync)
+	protectedApi.POST("/immich/resync", imh.Resync)
 	protectedApi.POST("/immich/clear", imh.Clear)
 	protectedApi.GET("/immich/albums", imh.ListAlbums)
 	protectedApi.GET("/immich/count", imh.GetPhotoCount)
