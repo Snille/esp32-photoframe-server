@@ -596,6 +596,11 @@ func (s *MQTTService) publishState(client mqtt.Client, device *model.Device) {
 			state["last_seen"] = est.LastSampledAt.UTC().Format(time.RFC3339)
 		}
 	}
+	// Hardware-reported charge status is independent of the regression estimate,
+	// so publish it whenever the frame has reported one.
+	if device.BatteryStatus != "" {
+		state["battery_status"] = device.BatteryStatus
+	}
 	// Frame poll / schedule config (from the synced device_config) + network id.
 	pc := parsePollConfig(device.DeviceConfig)
 	if pc.rotateInterval > 0 {
@@ -1078,7 +1083,7 @@ func (s *MQTTService) publishOneImage(client mqtt.Client, topic, thumbID string)
 // mqttSensorKeys are the value_json keys exposed as plain (read-only) HA sensors.
 // Image source / refresh interval / image order are now controllable select /
 // number entities (see publishDiscovery), so they are not in this list.
-var mqttSensorKeys = []string{"battery", "battery_voltage", "days_remaining", "trend", "last_seen", "sleep_schedule", "next_pull", "host", "ip_address", "next_image_status", "timezone", "rotation", "server_host", "trigger", "rotation_total", "rotation_position", "rotation_remaining", "rotation_status", "rotation_completes", "current_photo_date", "immich_albums"}
+var mqttSensorKeys = []string{"battery", "battery_voltage", "days_remaining", "trend", "battery_status", "last_seen", "sleep_schedule", "next_pull", "host", "ip_address", "next_image_status", "timezone", "rotation", "server_host", "trigger", "rotation_total", "rotation_position", "rotation_remaining", "rotation_status", "rotation_completes", "current_photo_date", "immich_albums"}
 
 // commandSourceOptions are the image sources offered by the HA "Image Source"
 // select. Matches the server's registered sources (model source constants).
@@ -1138,6 +1143,13 @@ func (s *MQTTService) publishDiscovery(client mqtt.Client, device *model.Device)
 		"unit_of_measurement": "d", "icon": "mdi:battery-clock", "state_class": "measurement",
 	})
 	sensor("trend", "Battery Trend", "trend", map[string]interface{}{"icon": "mdi:trending-down"})
+	// Hardware-reported charge status (charging | full | on_battery), distinct
+	// from the voltage-regression "trend": only frames that can sense USB report
+	// it, so the value is omitted (and the sensor stays "unknown") on boards that
+	// can't — see X-Battery-Status / board_hal_supports_charge_status().
+	sensor("battery_status", "Battery Status", "battery_status", map[string]interface{}{
+		"icon": "mdi:battery-charging", "entity_category": "diagnostic",
+	})
 	sensor("last_seen", "Last Seen", "last_seen", map[string]interface{}{"device_class": "timestamp"})
 
 	// (Image Source / Refresh Interval are now controllable select / number

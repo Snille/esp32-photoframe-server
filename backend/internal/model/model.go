@@ -197,6 +197,10 @@ type Device struct {
 	// LastIP is the client IP the frame last checked in from (best-effort, via
 	// X-Forwarded-For when proxied), surfaced as an HA diagnostic sensor.
 	LastIP string `json:"last_ip" gorm:"default:''"`
+	// BatteryStatus is the coarse charge state the frame reports each pull
+	// (X-Battery-Status): "charging", "full" or "on_battery". Empty when the
+	// board can't sense it; surfaced as the HA "Battery Status" sensor.
+	BatteryStatus string `json:"battery_status" gorm:"default:''"`
 	// LastTrigger is what caused the frame's most recent image change, surfaced as
 	// the HA "Last Trigger" sensor: "timer" (auto-rotate wake), "button" (wake
 	// button), "boot" (cold boot/reset), "push" (server-initiated) or "pull"

@@ -1,5 +1,10 @@
 # Changelog
 
+## v1.30.0
+
+### Added
+- **Home Assistant "Battery Status" sensor (charging / full / on battery).** Frames that can sense it now report a coarse charge status on each pull, and the server publishes it as a per-frame MQTT sensor — separate from the existing voltage-regression "Battery Trend". This answers "is it charging / fully charged?" directly, including the "plugged in and full" case that the regression alone reads as merely *stable*. Currently only the **Seeed XIAO EE02** reports it (derived from a USB-present + battery-voltage heuristic, since its charger exposes no MCU-readable charge line); boards that can't sense it leave the sensor *unknown*. Migration **000049** adds `devices.battery_status`.
+
 ## v1.29.0
 
 ### Fixed

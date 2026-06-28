@@ -179,6 +179,19 @@ func (h *ImageHandler) ServeImage(c echo.Context) error {
 		go h.battery.RecordSample(device.ID, batteryPercent, voltageMV)
 	}
 
+	// Coarse charge status the frame reports (X-Battery-Status: charging | full |
+	// on_battery). Only boards that can sense it send the header; persist on
+	// change so the HA "Battery Status" sensor reflects the latest pull.
+	if deviceFound && !preview {
+		if bs := c.Request().Header.Get("X-Battery-Status"); bs != "" && bs != device.BatteryStatus {
+			switch bs {
+			case "charging", "full", "on_battery":
+				device.BatteryStatus = bs
+				go h.db.Model(&model.Device{}).Where("id = ?", device.ID).Update("battery_status", bs)
+			}
+		}
+	}
+
 	// Remember the IP the frame checked in from (for the HA IP-address sensor).
 	// RealIP honours X-Forwarded-For, so this is the frame's LAN IP even behind a
 	// reverse proxy that forwards it. Only write on change to avoid churn.
