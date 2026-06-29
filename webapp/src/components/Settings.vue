@@ -949,9 +949,7 @@
                   <v-expansion-panels variant="accordion" class="mb-4">
                     <v-expansion-panel>
                       <v-expansion-panel-title>
-                        <v-icon size="small" class="mr-2"
-                          >mdi-code-json</v-icon
-                        >
+                        <v-icon size="small" class="mr-2">mdi-code-json</v-icon>
                         ComfyUI Workflow
                         <v-chip
                           v-if="form.comfyui_workflow && !comfyuiWorkflowValid"
@@ -1021,7 +1019,12 @@
               <!-- Public Art -->
               <v-window-item value="public_art">
                 <v-card-text>
-                  <v-alert type="info" variant="tonal" class="mb-4" density="compact">
+                  <v-alert
+                    type="info"
+                    variant="tonal"
+                    class="mb-4"
+                    density="compact"
+                  >
                     Public-domain / open-access artwork from museum collections
                     (Art Institute of Chicago, Cleveland Museum of Art). Point a
                     frame's source at <code>public_art</code> to auto-rotate by
@@ -1035,7 +1038,9 @@
                     variant="outlined"
                     density="compact"
                     append-inner-icon="mdi-content-copy"
-                    @click:append-inner="copyToClipboard(getImageUrl('public_art'))"
+                    @click:append-inner="
+                      copyToClipboard(getImageUrl('public_art'))
+                    "
                     class="mb-4"
                   ></v-text-field>
 
@@ -1272,11 +1277,16 @@
           <!-- Home Assistant (MQTT) Tab -->
           <v-window-item value="homeassistant">
             <v-card-text>
-              <v-alert type="info" variant="tonal" density="compact" class="mb-4">
+              <v-alert
+                type="info"
+                variant="tonal"
+                density="compact"
+                class="mb-4"
+              >
                 Publish each frame to your Home Assistant MQTT broker (e.g. the
                 Mosquitto add-on) using HA's MQTT discovery. Each frame appears
-                as a device with <strong>battery</strong>, <strong>days
-                remaining</strong>, <strong>last seen</strong>,
+                as a device with <strong>battery</strong>,
+                <strong>days remaining</strong>, <strong>last seen</strong>,
                 <strong>source</strong> and <strong>current image</strong>
                 entities — ready for automations. The server is a plain MQTT
                 client; it does not need to run as an HA add-on.
@@ -1292,16 +1302,32 @@
                   @update:model-value="saveSettingsInternal()"
                 ></v-switch>
                 <v-chip
-                  :color="mqttStatus.connected ? 'success' : (form.mqtt_enabled ? 'warning' : 'grey')"
+                  :color="
+                    mqttStatus.connected
+                      ? 'success'
+                      : form.mqtt_enabled
+                        ? 'warning'
+                        : 'grey'
+                  "
                   variant="tonal"
                   size="small"
                 >
                   <v-icon
-                    :icon="mqttStatus.connected ? 'mdi-lan-connect' : 'mdi-lan-disconnect'"
+                    :icon="
+                      mqttStatus.connected
+                        ? 'mdi-lan-connect'
+                        : 'mdi-lan-disconnect'
+                    "
                     start
                     size="small"
                   ></v-icon>
-                  {{ mqttStatus.connected ? 'Connected' : (form.mqtt_enabled ? 'Not connected' : 'Disabled') }}
+                  {{
+                    mqttStatus.connected
+                      ? 'Connected'
+                      : form.mqtt_enabled
+                        ? 'Not connected'
+                        : 'Disabled'
+                  }}
                 </v-chip>
                 <v-btn
                   variant="text"
@@ -1388,7 +1414,11 @@
                 </v-expansion-panel>
               </v-expansion-panels>
 
-              <v-btn color="primary" prepend-icon="mdi-content-save" @click="saveMqttSettings">
+              <v-btn
+                color="primary"
+                prepend-icon="mdi-content-save"
+                @click="saveMqttSettings"
+              >
                 Save &amp; Connect
               </v-btn>
             </v-card-text>
@@ -1476,15 +1506,44 @@
                     </td>
                     <td>{{ device.name }}</td>
                     <td>
-                      {{
-                        device.board_name || `${device.width}x${device.height}`
-                      }}
+                      <a
+                        v-if="boardUrl(device)"
+                        :href="boardUrl(device)"
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        class="text-primary text-decoration-none"
+                        title="Open the vendor product page (where to buy this board)"
+                        >{{ boardLabel(device) }}</a
+                      >
+                      <template v-else>{{ boardLabel(device) }}</template>
                     </td>
                     <td>
-                      {{ device.host }}
+                      <a
+                        v-if="frameWebUrl(device)"
+                        :href="frameWebUrl(device)"
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        class="text-primary text-decoration-none"
+                        title="Open this frame's web interface"
+                        >{{ device.host }}</a
+                      >
+                      <template v-else>{{ device.host }}</template>
                     </td>
                     <td>
-                      <template v-if="(device.battery_percent ?? -1) >= 0">
+                      <template v-if="deviceCharging(device)">
+                        <div
+                          class="d-flex align-center"
+                          :title="batteryTitle(device)"
+                        >
+                          <v-icon size="small" color="success"
+                            >mdi-battery-charging</v-icon
+                          >
+                          <span class="ml-1 text-medium-emphasis"
+                            >Charging</span
+                          >
+                        </div>
+                      </template>
+                      <template v-else-if="(device.battery_percent ?? -1) >= 0">
                         <div
                           class="d-flex align-center"
                           :title="batteryTitle(device)"
@@ -1509,7 +1568,9 @@
                           class="text-caption text-medium-emphasis"
                           :title="batteryTitle(device)"
                         >
-                          ~{{ formatDaysRemaining(device.battery_days_remaining!) }}
+                          ~{{
+                            formatDaysRemaining(device.battery_days_remaining!)
+                          }}
                           left
                         </div>
                       </template>
@@ -1639,7 +1700,8 @@
                               label="Device Name"
                               variant="outlined"
                               density="compact"
-                              hide-details
+                              hint="Renaming updates the name in Home Assistant automatically. History is kept — HA entities are keyed on the device ID, not the name (the entity_id slug stays as first created)."
+                              persistent-hint
                             ></v-text-field>
                           </v-col>
                         </v-row>
@@ -1783,7 +1845,9 @@
 
                             <!-- This server + Immich: per-frame album filter -->
                             <v-select
-                              v-if="useThisServer && selectedSource === 'immich'"
+                              v-if="
+                                useThisServer && selectedSource === 'immich'
+                              "
                               v-model="immichAlbumIdsArray"
                               :items="deviceImmichAlbumOptions"
                               label="Immich albums (this frame)"
@@ -1848,8 +1912,8 @@
                                 "
                                 class="text-caption text-medium-emphasis mb-2 ml-8"
                               >
-                                Filters the rotation pool (ordered sources). Falls
-                                back to all photos when no photo matches.
+                                Filters the rotation pool (ordered sources).
+                                Falls back to all photos when no photo matches.
                               </div>
                             </template>
 
@@ -1865,7 +1929,9 @@
                                   variant="tonal"
                                   icon="mdi-chevron-double-left"
                                   :loading="skipping"
-                                  :disabled="skipping || !deviceConfig.auto_rotate"
+                                  :disabled="
+                                    skipping || !deviceConfig.auto_rotate
+                                  "
                                   title="Jump back"
                                   @click="doSkip(-Math.abs(skipSteps || 1))"
                                 ></v-btn>
@@ -1883,7 +1949,9 @@
                                   variant="tonal"
                                   icon="mdi-chevron-double-right"
                                   :loading="skipping"
-                                  :disabled="skipping || !deviceConfig.auto_rotate"
+                                  :disabled="
+                                    skipping || !deviceConfig.auto_rotate
+                                  "
                                   title="Jump forward"
                                   @click="doSkip(Math.abs(skipSteps || 1))"
                                 ></v-btn>
@@ -1917,12 +1985,13 @@
                               class="mb-2 ml-8"
                             >
                               This board has no PSRAM, so it can't fetch over
-                              <strong>HTTPS</strong> (the TLS handshake runs out of
-                              memory). The image URL resolves to an https:// address —
-                              point it at an <strong>http://</strong> endpoint on the
-                              local network instead (e.g. set a plain-http "Device-facing
-                              server URL" in Settings → General, or use a custom http
-                              URL).
+                              <strong>HTTPS</strong> (the TLS handshake runs out
+                              of memory). The image URL resolves to an https://
+                              address — point it at an
+                              <strong>http://</strong> endpoint on the local
+                              network instead (e.g. set a plain-http
+                              "Device-facing server URL" in Settings → General,
+                              or use a custom http URL).
                             </v-alert>
 
                             <v-checkbox
@@ -2089,7 +2158,11 @@
                                   hide-details
                                 ></v-select>
                               </v-col>
-                              <v-col cols="12" sm="6" class="d-flex align-center">
+                              <v-col
+                                cols="12"
+                                sm="6"
+                                class="d-flex align-center"
+                              >
                                 <v-checkbox
                                   v-model="editingDevice.names_show_age"
                                   label="Show age (in parentheses)"
@@ -2132,7 +2205,10 @@
                             class="mt-4 mr-2"
                           >
                             <template #append>
-                              <span class="text-caption" style="min-width: 56px">
+                              <span
+                                class="text-caption"
+                                style="min-width: 56px"
+                              >
                                 {{ editingDevice.location_max_len || 40 }} chars
                               </span>
                             </template>
@@ -2151,7 +2227,10 @@
                             class="mt-4 mr-2"
                           >
                             <template #append>
-                              <span class="text-caption" style="min-width: 56px">
+                              <span
+                                class="text-caption"
+                                style="min-width: 56px"
+                              >
                                 {{ editingDevice.description_max_len || 80 }}
                                 chars
                               </span>
@@ -2160,11 +2239,12 @@
                           <!-- Rotation-position chip options -->
                           <template v-if="editingDevice.show_rotation">
                             <div class="text-caption text-disabled mt-3 mb-1">
-                              A compact "where am I in the rotation" chip. Shuffle
-                              shows images left in the cycle, chronological/custom
-                              the current image number. Only ordered sources
-                              (Gallery / Immich / Synology / Google, collage off)
-                              have a rotation — it hides itself otherwise.
+                              A compact "where am I in the rotation" chip.
+                              Shuffle shows images left in the cycle,
+                              chronological/custom the current image number.
+                              Only ordered sources (Gallery / Immich / Synology
+                              / Google, collage off) have a rotation — it hides
+                              itself otherwise.
                             </div>
                             <v-checkbox
                               v-model="editingDevice.rotation_show_total"
@@ -2475,7 +2555,9 @@
                                 sm="6"
                               >
                                 <v-select
-                                  v-model.number="editingDevice.battery_rotation"
+                                  v-model.number="
+                                    editingDevice.battery_rotation
+                                  "
                                   :items="batteryRotationOptions"
                                   item-title="label"
                                   item-value="value"
@@ -2564,7 +2646,10 @@
                             >
                               Live preview
                             </div>
-                            <div class="overlay-preview" :style="previewBoxStyle">
+                            <div
+                              class="overlay-preview"
+                              :style="previewBoxStyle"
+                            >
                               <div
                                 v-for="region in previewRegions"
                                 :key="region.name"
@@ -2605,7 +2690,9 @@
                                         <span v-if="el.emoji">{{
                                           el.emoji
                                         }}</span>
-                                        <span v-if="el.text">{{ el.text }}</span>
+                                        <span v-if="el.text">{{
+                                          el.text
+                                        }}</span>
                                       </div>
                                     </div>
                                   </div>
@@ -2627,7 +2714,9 @@
                                           :style="{ width: el.pct + '%' }"
                                         ></span>
                                       </span>
-                                      <span v-if="el.emoji">{{ el.emoji }}</span>
+                                      <span v-if="el.emoji">{{
+                                        el.emoji
+                                      }}</span>
                                       <span v-if="el.text">{{ el.text }}</span>
                                     </div>
                                   </div>
@@ -2742,8 +2831,8 @@
                           v-if="!batteryEstimate || !batteryEstimate.has_data"
                           class="text-caption text-medium-emphasis mb-2"
                         >
-                          No battery readings yet. The frame reports its level on
-                          each image fetch; an estimate appears once a few
+                          No battery readings yet. The frame reports its level
+                          on each image fetch; an estimate appears once a few
                           samples have accumulated.
                         </div>
                         <template v-else>
@@ -2761,7 +2850,8 @@
                               >{{ batteryTrendLabel }}</v-chip
                             >
                             <div class="text-caption text-medium-emphasis">
-                              <span v-if="batteryEstimate.current_voltage_mv > 0"
+                              <span
+                                v-if="batteryEstimate.current_voltage_mv > 0"
                                 >{{
                                   (
                                     batteryEstimate.current_voltage_mv / 1000
@@ -2776,8 +2866,8 @@
                             v-if="batteryEstimate.trend === 'discharging'"
                             class="text-body-2 mb-2"
                           >
-                            ~{{ batteryEstimate.drain_per_day.toFixed(1) }} %/day
-                            · est.
+                            ~{{ batteryEstimate.drain_per_day.toFixed(1) }}
+                            %/day · est.
                             <strong>{{ batteryDaysLabel }}</strong> remaining
                             <span class="text-medium-emphasis">
                               ({{
@@ -3155,8 +3245,14 @@
                             { title: 'None', value: '' },
                             { title: 'OpenAI', value: 'openai' },
                             { title: 'Google Gemini', value: 'google' },
-                            { title: 'MiniMax (Global)', value: 'minimax_global' },
-                            { title: 'MiniMax (China)', value: 'minimax_china' },
+                            {
+                              title: 'MiniMax (Global)',
+                              value: 'minimax_global',
+                            },
+                            {
+                              title: 'MiniMax (China)',
+                              value: 'minimax_china',
+                            },
                             { title: 'ComfyUI (local)', value: 'comfyui' },
                           ]"
                           label="AI Provider"
@@ -3173,8 +3269,8 @@
                           class="mb-3"
                         >
                           Uses the local ComfyUI server and workflow configured
-                          under Settings → AI Generation. The model is defined by
-                          the workflow file, so no model selection is needed.
+                          under Settings → AI Generation. The model is defined
+                          by the workflow file, so no model selection is needed.
                         </v-alert>
                         <v-select
                           v-if="
@@ -3466,7 +3562,8 @@ const displayOrderOptions = [
 // server. Stored on the device as a comma-separated id list.
 const deviceImmichAlbumOptions = computed(() =>
   (immichStore.albums || []).map((a: any) => ({
-    title: a.assetCount != null ? `${a.albumName} (${a.assetCount})` : a.albumName,
+    title:
+      a.assetCount != null ? `${a.albumName} (${a.assetCount})` : a.albumName,
     value: a.id,
   }))
 );
@@ -4037,7 +4134,11 @@ const filteredLayoutOptions = computed(() => {
 // landscape/portrait mirror in deviceConfig in sync so the live overlay preview
 // and layout filtering react to a rotation change immediately.
 watch(
-  () => [deviceConfig.display_rotation_deg, editingDevice.width, editingDevice.height],
+  () => [
+    deviceConfig.display_rotation_deg,
+    editingDevice.width,
+    editingDevice.height,
+  ],
   () => {
     deviceConfig.display_orientation = derivedOrientation.value;
   }
@@ -4810,8 +4911,7 @@ const saveDevice = async () => {
         on_this_day: editingDevice.on_this_day || false,
         favorites_only: editingDevice.favorites_only || false,
         date_position: editingDevice.date_position || 'bottom-left',
-        photo_date_position:
-          editingDevice.photo_date_position || 'bottom-left',
+        photo_date_position: editingDevice.photo_date_position || 'bottom-left',
         weather_position: editingDevice.weather_position || 'bottom-right',
         battery_position: editingDevice.battery_position || 'top-right',
         battery_style: editingDevice.battery_style || 'both',
@@ -5012,7 +5112,10 @@ const refreshDevicesSilently = async () => {
 let deviceRefreshTimer: ReturnType<typeof setInterval> | null = null;
 onMounted(() => {
   deviceRefreshTimer = setInterval(() => {
-    if (activeMainTab.value === 'devices' && document.visibilityState === 'visible') {
+    if (
+      activeMainTab.value === 'devices' &&
+      document.visibilityState === 'visible'
+    ) {
       refreshDevicesSilently();
     }
   }, 30000);
@@ -5032,6 +5135,53 @@ const buildServedUrl = (path: string) => {
     return `${window.location.origin}/${path}`;
   }
   return `${protocol}//${hostname}:${addonPort}/${path}`;
+};
+
+// Maps a firmware board_name (BOARD_HAL_NAME) to a human label + the vendor
+// product page, so the Devices-list "Model" cell links to where you can buy the
+// board. Unknown boards fall back to the raw board_name with no link.
+const BOARD_INFO: Record<string, { label: string; url: string }> = {
+  dfrobot_firebeetle_esp32e: {
+    label: 'DFRobot FireBeetle 2 ESP32-E',
+    url: 'https://www.dfrobot.com/product-2195.html',
+  },
+  waveshare_photopainter_73: {
+    label: 'Waveshare PhotoPainter 7.3"',
+    url: 'https://www.waveshare.com/photopainter.htm',
+  },
+  seeedstudio_xiao_ee02: {
+    label: 'Seeed XIAO ePaper EE02 (13.3" Spectra 6)',
+    url: 'https://www.seeedstudio.com/XIAO-ePaper-DIY-Kit-EE02-for-13-3-Spectratm-6-E-Ink.html',
+  },
+  seeedstudio_xiao_ee04: {
+    label: 'Seeed XIAO ePaper EE04 (7.3" Spectra 6)',
+    url: 'https://www.seeedstudio.com/XIAO-ePaper-EE04-DIY-Bundle-Kit.html',
+  },
+  seeedstudio_reterminal_e1002: {
+    label: 'Seeed reTerminal E1002 (7.3" Spectra 6)',
+    url: 'https://www.seeedstudio.com/reTerminal-E1002-p-6533.html',
+  },
+};
+
+// Display label for the Model cell: vendor label when known, else the raw
+// board_name, else the panel dimensions.
+const boardLabel = (device: Device): string => {
+  if (device.board_name && BOARD_INFO[device.board_name])
+    return BOARD_INFO[device.board_name].label;
+  return device.board_name || `${device.width}x${device.height}`;
+};
+
+// Vendor purchase URL for the Model cell, or '' when the board is unknown.
+const boardUrl = (device: Device): string =>
+  (device.board_name && BOARD_INFO[device.board_name]?.url) || '';
+
+// http:// URL to the physical frame's own WebGUI, derived from its host. Accepts
+// a bare host/IP or an already-qualified URL; '' when no host is set.
+const frameWebUrl = (device: Device): string => {
+  const host = (device.host || '').trim();
+  if (!host) return '';
+  if (/^https?:\/\//i.test(host)) return host;
+  return `http://${host}/`;
 };
 
 const getServedThumbUrl = (thumbId: string) =>
@@ -5089,7 +5239,21 @@ const batteryIcon = (p: number) => {
   return `mdi-battery-${Math.round(p / 10) * 10}`; // mdi-battery-10 .. -90
 };
 
+// The frame is on USB power — either it reports charging/full, or the server
+// inferred it from a physically-implausible reading (EE02-on-USB ADC garbage).
+// While plugged in the measured level is unreliable, so the list shows a charging
+// indicator instead of a number — matching the on-photo overlay badge (a battery
+// with a bolt).
+const deviceCharging = (device: Device) =>
+  device.battery_status === 'charging' ||
+  device.battery_status === 'full' ||
+  device.battery_plugged === true;
+
 const batteryTitle = (device: Device) => {
+  if (deviceCharging(device)) {
+    const pct = device.battery_percent ?? -1;
+    return pct >= 0 ? `Plugged in (USB) · ~${pct}%` : 'Plugged in (USB)';
+  }
   const days = device.battery_days_remaining ?? -1;
   if (days > 0) {
     return `Battery ${device.battery_percent}% · ~${days.toFixed(1)} days remaining`;
@@ -5283,7 +5447,8 @@ onMounted(async () => {
     mqtt_port: parseInt(store.settings.mqtt_port || '1883'),
     mqtt_username: store.settings.mqtt_username || '',
     mqtt_password: store.settings.mqtt_password || '',
-    mqtt_discovery_prefix: store.settings.mqtt_discovery_prefix || 'homeassistant',
+    mqtt_discovery_prefix:
+      store.settings.mqtt_discovery_prefix || 'homeassistant',
     mqtt_base_topic: store.settings.mqtt_base_topic || 'esp32photoframe',
   });
 
@@ -5409,7 +5574,9 @@ const saveSettingsInternal = async () => {
     mqtt_port: String(form.mqtt_port || 1883),
     mqtt_username: form.mqtt_username || '',
     mqtt_password: form.mqtt_password || '',
-    mqtt_discovery_prefix: (form.mqtt_discovery_prefix || 'homeassistant').trim(),
+    mqtt_discovery_prefix: (
+      form.mqtt_discovery_prefix || 'homeassistant'
+    ).trim(),
     mqtt_base_topic: (form.mqtt_base_topic || 'esp32photoframe').trim(),
     public_art_config: JSON.stringify({
       provider: form.public_art_provider || 'cma',

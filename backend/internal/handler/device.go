@@ -59,6 +59,7 @@ func (h *DeviceHandler) ListDevices(c echo.Context) error {
 		BatteryPercent       int     `json:"battery_percent"`        // -1 = no data yet
 		BatteryDaysRemaining float64 `json:"battery_days_remaining"` // -1 = unknown
 		BatteryTrend         string  `json:"battery_trend"`
+		BatteryPlugged       bool    `json:"battery_plugged"` // implausible reading → on USB
 	}
 	items := make([]deviceListItem, 0, len(devices))
 	for _, d := range devices {
@@ -72,6 +73,7 @@ func (h *DeviceHandler) ListDevices(c echo.Context) error {
 			BatteryPercent:       pct,
 			BatteryDaysRemaining: est.DaysRemaining,
 			BatteryTrend:         est.Trend,
+			BatteryPlugged:       est.Plugged,
 		})
 	}
 	return c.JSON(http.StatusOK, items)
@@ -80,49 +82,49 @@ func (h *DeviceHandler) ListDevices(c echo.Context) error {
 // POST /api/devices
 func (h *DeviceHandler) AddDevice(c echo.Context) error {
 	var req struct {
-		Host          string  `json:"host"`
-		EnableCollage bool    `json:"enable_collage"`
-		ShowDate      bool    `json:"show_date"`
-		ShowPhotoDate bool    `json:"show_photo_date"`
-		ShowWeather   bool    `json:"show_weather"`
-		WeatherLat    float64 `json:"weather_lat"`
-		WeatherLon    float64 `json:"weather_lon"`
-		Layout        string  `json:"layout"`
-		DisplayMode   string  `json:"display_mode"`
-		ShowCalendar  bool    `json:"show_calendar"`
-		CalendarID    string  `json:"calendar_id"`
-		DateFormat    string  `json:"date_format"`
-		ShowBattery   bool    `json:"show_battery"`
-		DisplayOrder  string  `json:"display_order"`
-		ImmichAlbumIDs    string `json:"immich_album_ids"`
-		OnThisDay         bool   `json:"on_this_day"`
-		FavoritesOnly     bool   `json:"favorites_only"`
-		DatePosition      string `json:"date_position"`
-		PhotoDatePosition string `json:"photo_date_position"`
-		WeatherPosition   string `json:"weather_position"`
-		BatteryPosition   string `json:"battery_position"`
-		BatteryStyle      string `json:"battery_style"`
-		BatteryRotation   int     `json:"battery_rotation"`
-		BatteryTextSide   string  `json:"battery_text_side"`
-		BatteryIconScale  float64 `json:"battery_icon_scale"`
-		OverlayScale      float64 `json:"overlay_scale"`
-		OverlayFont       string  `json:"overlay_font"`
-		OverlayWeight     string  `json:"overlay_weight"`
-		ShowNames         bool    `json:"show_names"`
-		NamesPosition     string  `json:"names_position"`
-		NameFormat        string  `json:"name_format"`
-		NamesShowAge      bool    `json:"names_show_age"`
-		NamesMaxLen       int     `json:"names_max_len"`
-		ShowLocation      bool    `json:"show_location"`
-		LocationPosition  string  `json:"location_position"`
-		LocationMaxLen    int     `json:"location_max_len"`
-		ShowDescription     bool   `json:"show_description"`
-		DescriptionPosition string `json:"description_position"`
-		DescriptionMaxLen   int    `json:"description_max_len"`
-		ShowRotation        bool   `json:"show_rotation"`
-		RotationPosition    string `json:"rotation_position"`
-		RotationShowTotal   bool   `json:"rotation_show_total"`
-		OverlayHiddenIcons  string `json:"overlay_hidden_icons"`
+		Host                string  `json:"host"`
+		EnableCollage       bool    `json:"enable_collage"`
+		ShowDate            bool    `json:"show_date"`
+		ShowPhotoDate       bool    `json:"show_photo_date"`
+		ShowWeather         bool    `json:"show_weather"`
+		WeatherLat          float64 `json:"weather_lat"`
+		WeatherLon          float64 `json:"weather_lon"`
+		Layout              string  `json:"layout"`
+		DisplayMode         string  `json:"display_mode"`
+		ShowCalendar        bool    `json:"show_calendar"`
+		CalendarID          string  `json:"calendar_id"`
+		DateFormat          string  `json:"date_format"`
+		ShowBattery         bool    `json:"show_battery"`
+		DisplayOrder        string  `json:"display_order"`
+		ImmichAlbumIDs      string  `json:"immich_album_ids"`
+		OnThisDay           bool    `json:"on_this_day"`
+		FavoritesOnly       bool    `json:"favorites_only"`
+		DatePosition        string  `json:"date_position"`
+		PhotoDatePosition   string  `json:"photo_date_position"`
+		WeatherPosition     string  `json:"weather_position"`
+		BatteryPosition     string  `json:"battery_position"`
+		BatteryStyle        string  `json:"battery_style"`
+		BatteryRotation     int     `json:"battery_rotation"`
+		BatteryTextSide     string  `json:"battery_text_side"`
+		BatteryIconScale    float64 `json:"battery_icon_scale"`
+		OverlayScale        float64 `json:"overlay_scale"`
+		OverlayFont         string  `json:"overlay_font"`
+		OverlayWeight       string  `json:"overlay_weight"`
+		ShowNames           bool    `json:"show_names"`
+		NamesPosition       string  `json:"names_position"`
+		NameFormat          string  `json:"name_format"`
+		NamesShowAge        bool    `json:"names_show_age"`
+		NamesMaxLen         int     `json:"names_max_len"`
+		ShowLocation        bool    `json:"show_location"`
+		LocationPosition    string  `json:"location_position"`
+		LocationMaxLen      int     `json:"location_max_len"`
+		ShowDescription     bool    `json:"show_description"`
+		DescriptionPosition string  `json:"description_position"`
+		DescriptionMaxLen   int     `json:"description_max_len"`
+		ShowRotation        bool    `json:"show_rotation"`
+		RotationPosition    string  `json:"rotation_position"`
+		RotationShowTotal   bool    `json:"rotation_show_total"`
+		OverlayHiddenIcons  string  `json:"overlay_hidden_icons"`
 	}
 	if err := c.Bind(&req); err != nil {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid request"})
@@ -137,25 +139,25 @@ func (h *DeviceHandler) AddDevice(c echo.Context) error {
 	}
 
 	device, err := h.deviceService.AddDevice(req.Host, req.EnableCollage, req.ShowDate, req.ShowPhotoDate, req.ShowWeather, req.WeatherLat, req.WeatherLon, req.Layout, req.DisplayMode, req.ShowCalendar, req.CalendarID, req.DateFormat, req.ShowBattery, req.DisplayOrder, req.ImmichAlbumIDs, req.OnThisDay, req.FavoritesOnly, model.OverlaySettings{
-		DatePosition:      req.DatePosition,
-		PhotoDatePosition: req.PhotoDatePosition,
-		WeatherPosition:   req.WeatherPosition,
-		BatteryPosition:   req.BatteryPosition,
-		BatteryStyle:      req.BatteryStyle,
-		BatteryRotation:   req.BatteryRotation,
-		BatteryTextSide:   req.BatteryTextSide,
-		BatteryIconScale:  req.BatteryIconScale,
-		OverlayScale:      req.OverlayScale,
-		OverlayFont:       req.OverlayFont,
-		OverlayWeight:     req.OverlayWeight,
-		ShowNames:         req.ShowNames,
-		NamesPosition:     req.NamesPosition,
-		NameFormat:        req.NameFormat,
-		NamesShowAge:      req.NamesShowAge,
-		NamesMaxLen:       req.NamesMaxLen,
-		ShowLocation:      req.ShowLocation,
-		LocationPosition:  req.LocationPosition,
-		LocationMaxLen:    req.LocationMaxLen,
+		DatePosition:        req.DatePosition,
+		PhotoDatePosition:   req.PhotoDatePosition,
+		WeatherPosition:     req.WeatherPosition,
+		BatteryPosition:     req.BatteryPosition,
+		BatteryStyle:        req.BatteryStyle,
+		BatteryRotation:     req.BatteryRotation,
+		BatteryTextSide:     req.BatteryTextSide,
+		BatteryIconScale:    req.BatteryIconScale,
+		OverlayScale:        req.OverlayScale,
+		OverlayFont:         req.OverlayFont,
+		OverlayWeight:       req.OverlayWeight,
+		ShowNames:           req.ShowNames,
+		NamesPosition:       req.NamesPosition,
+		NameFormat:          req.NameFormat,
+		NamesShowAge:        req.NamesShowAge,
+		NamesMaxLen:         req.NamesMaxLen,
+		ShowLocation:        req.ShowLocation,
+		LocationPosition:    req.LocationPosition,
+		LocationMaxLen:      req.LocationMaxLen,
 		ShowDescription:     req.ShowDescription,
 		DescriptionPosition: req.DescriptionPosition,
 		DescriptionMaxLen:   req.DescriptionMaxLen,
@@ -184,54 +186,54 @@ func (h *DeviceHandler) AddDevice(c echo.Context) error {
 func (h *DeviceHandler) UpdateDevice(c echo.Context) error {
 	id, _ := strconv.Atoi(c.Param("id"))
 	var req struct {
-		Name          string  `json:"name"`
-		Host          string  `json:"host"`
-		Orientation   string  `json:"orientation"`
-		EnableCollage bool    `json:"enable_collage"`
-		ShowDate      bool    `json:"show_date"`
-		ShowPhotoDate bool    `json:"show_photo_date"`
-		ShowWeather   bool    `json:"show_weather"`
-		WeatherLat    float64 `json:"weather_lat"`
-		WeatherLon    float64 `json:"weather_lon"`
-		AIProvider    string  `json:"ai_provider"`
-		AIModel       string  `json:"ai_model"`
-		AIPrompt      string  `json:"ai_prompt"`
-		Layout        string  `json:"layout"`
-		DisplayMode   string  `json:"display_mode"`
-		ShowCalendar  bool    `json:"show_calendar"`
-		CalendarID    string  `json:"calendar_id"`
-		DateFormat    string  `json:"date_format"`
-		ShowBattery   bool    `json:"show_battery"`
-		DisplayOrder  string  `json:"display_order"`
-		ImmichAlbumIDs    string `json:"immich_album_ids"`
-		OnThisDay         bool   `json:"on_this_day"`
-		FavoritesOnly     bool   `json:"favorites_only"`
-		DatePosition      string `json:"date_position"`
-		PhotoDatePosition string `json:"photo_date_position"`
-		WeatherPosition   string `json:"weather_position"`
-		BatteryPosition   string `json:"battery_position"`
-		BatteryStyle      string `json:"battery_style"`
-		BatteryRotation   int     `json:"battery_rotation"`
-		BatteryTextSide   string  `json:"battery_text_side"`
-		BatteryIconScale  float64 `json:"battery_icon_scale"`
-		OverlayScale      float64 `json:"overlay_scale"`
-		OverlayFont       string  `json:"overlay_font"`
-		OverlayWeight     string  `json:"overlay_weight"`
-		ShowNames         bool    `json:"show_names"`
-		NamesPosition     string  `json:"names_position"`
-		NameFormat        string  `json:"name_format"`
-		NamesShowAge      bool    `json:"names_show_age"`
-		NamesMaxLen       int     `json:"names_max_len"`
-		ShowLocation      bool    `json:"show_location"`
-		LocationPosition  string  `json:"location_position"`
-		LocationMaxLen    int     `json:"location_max_len"`
-		ShowDescription     bool   `json:"show_description"`
-		DescriptionPosition string `json:"description_position"`
-		DescriptionMaxLen   int    `json:"description_max_len"`
-		ShowRotation        bool   `json:"show_rotation"`
-		RotationPosition    string `json:"rotation_position"`
-		RotationShowTotal   bool   `json:"rotation_show_total"`
-		OverlayHiddenIcons  string `json:"overlay_hidden_icons"`
+		Name                string  `json:"name"`
+		Host                string  `json:"host"`
+		Orientation         string  `json:"orientation"`
+		EnableCollage       bool    `json:"enable_collage"`
+		ShowDate            bool    `json:"show_date"`
+		ShowPhotoDate       bool    `json:"show_photo_date"`
+		ShowWeather         bool    `json:"show_weather"`
+		WeatherLat          float64 `json:"weather_lat"`
+		WeatherLon          float64 `json:"weather_lon"`
+		AIProvider          string  `json:"ai_provider"`
+		AIModel             string  `json:"ai_model"`
+		AIPrompt            string  `json:"ai_prompt"`
+		Layout              string  `json:"layout"`
+		DisplayMode         string  `json:"display_mode"`
+		ShowCalendar        bool    `json:"show_calendar"`
+		CalendarID          string  `json:"calendar_id"`
+		DateFormat          string  `json:"date_format"`
+		ShowBattery         bool    `json:"show_battery"`
+		DisplayOrder        string  `json:"display_order"`
+		ImmichAlbumIDs      string  `json:"immich_album_ids"`
+		OnThisDay           bool    `json:"on_this_day"`
+		FavoritesOnly       bool    `json:"favorites_only"`
+		DatePosition        string  `json:"date_position"`
+		PhotoDatePosition   string  `json:"photo_date_position"`
+		WeatherPosition     string  `json:"weather_position"`
+		BatteryPosition     string  `json:"battery_position"`
+		BatteryStyle        string  `json:"battery_style"`
+		BatteryRotation     int     `json:"battery_rotation"`
+		BatteryTextSide     string  `json:"battery_text_side"`
+		BatteryIconScale    float64 `json:"battery_icon_scale"`
+		OverlayScale        float64 `json:"overlay_scale"`
+		OverlayFont         string  `json:"overlay_font"`
+		OverlayWeight       string  `json:"overlay_weight"`
+		ShowNames           bool    `json:"show_names"`
+		NamesPosition       string  `json:"names_position"`
+		NameFormat          string  `json:"name_format"`
+		NamesShowAge        bool    `json:"names_show_age"`
+		NamesMaxLen         int     `json:"names_max_len"`
+		ShowLocation        bool    `json:"show_location"`
+		LocationPosition    string  `json:"location_position"`
+		LocationMaxLen      int     `json:"location_max_len"`
+		ShowDescription     bool    `json:"show_description"`
+		DescriptionPosition string  `json:"description_position"`
+		DescriptionMaxLen   int     `json:"description_max_len"`
+		ShowRotation        bool    `json:"show_rotation"`
+		RotationPosition    string  `json:"rotation_position"`
+		RotationShowTotal   bool    `json:"rotation_show_total"`
+		OverlayHiddenIcons  string  `json:"overlay_hidden_icons"`
 	}
 	if err := c.Bind(&req); err != nil {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid request"})
@@ -242,25 +244,25 @@ func (h *DeviceHandler) UpdateDevice(c echo.Context) error {
 	}
 
 	device, err := h.deviceService.UpdateDevice(uint(id), req.Name, req.Host, req.Orientation, req.EnableCollage, req.ShowDate, req.ShowPhotoDate, req.ShowWeather, req.WeatherLat, req.WeatherLon, req.AIProvider, req.AIModel, req.AIPrompt, req.Layout, req.DisplayMode, req.ShowCalendar, req.CalendarID, req.DateFormat, req.ShowBattery, req.DisplayOrder, req.ImmichAlbumIDs, req.OnThisDay, req.FavoritesOnly, model.OverlaySettings{
-		DatePosition:      req.DatePosition,
-		PhotoDatePosition: req.PhotoDatePosition,
-		WeatherPosition:   req.WeatherPosition,
-		BatteryPosition:   req.BatteryPosition,
-		BatteryStyle:      req.BatteryStyle,
-		BatteryRotation:   req.BatteryRotation,
-		BatteryTextSide:   req.BatteryTextSide,
-		BatteryIconScale:  req.BatteryIconScale,
-		OverlayScale:      req.OverlayScale,
-		OverlayFont:       req.OverlayFont,
-		OverlayWeight:     req.OverlayWeight,
-		ShowNames:         req.ShowNames,
-		NamesPosition:     req.NamesPosition,
-		NameFormat:        req.NameFormat,
-		NamesShowAge:      req.NamesShowAge,
-		NamesMaxLen:       req.NamesMaxLen,
-		ShowLocation:      req.ShowLocation,
-		LocationPosition:  req.LocationPosition,
-		LocationMaxLen:    req.LocationMaxLen,
+		DatePosition:        req.DatePosition,
+		PhotoDatePosition:   req.PhotoDatePosition,
+		WeatherPosition:     req.WeatherPosition,
+		BatteryPosition:     req.BatteryPosition,
+		BatteryStyle:        req.BatteryStyle,
+		BatteryRotation:     req.BatteryRotation,
+		BatteryTextSide:     req.BatteryTextSide,
+		BatteryIconScale:    req.BatteryIconScale,
+		OverlayScale:        req.OverlayScale,
+		OverlayFont:         req.OverlayFont,
+		OverlayWeight:       req.OverlayWeight,
+		ShowNames:           req.ShowNames,
+		NamesPosition:       req.NamesPosition,
+		NameFormat:          req.NameFormat,
+		NamesShowAge:        req.NamesShowAge,
+		NamesMaxLen:         req.NamesMaxLen,
+		ShowLocation:        req.ShowLocation,
+		LocationPosition:    req.LocationPosition,
+		LocationMaxLen:      req.LocationMaxLen,
 		ShowDescription:     req.ShowDescription,
 		DescriptionPosition: req.DescriptionPosition,
 		DescriptionMaxLen:   req.DescriptionMaxLen,
@@ -277,7 +279,11 @@ func (h *DeviceHandler) UpdateDevice(c echo.Context) error {
 		go h.immichService.ImportPhotos()
 	}
 	if h.mqtt != nil {
-		h.mqtt.NotifyDeviceUpdated(device.ID)
+		// Re-send HA discovery (not just state) so a changed device name reaches
+		// Home Assistant immediately — discovery carries the friendly name and is
+		// otherwise only sent once per broker connection. Entity history is kept
+		// (unique_id is keyed on the device ID, not the name).
+		h.mqtt.RepublishDiscovery(device.ID)
 	}
 	return c.JSON(http.StatusOK, device)
 }
@@ -361,8 +367,8 @@ func (h *DeviceHandler) PushToDevice(c echo.Context) error {
 	}
 
 	imagePath := req.URL
-	var tempFile string         // If we create a temp file, we must clean it up
-	var photoTakenAt *time.Time // Original capture date, for the photo-date overlay
+	var tempFile string                          // If we create a temp file, we must clean it up
+	var photoTakenAt *time.Time                  // Original capture date, for the photo-date overlay
 	var peopleJSON, location, description string // Metadata for the names/location/description overlays
 
 	if req.ImageID != 0 {

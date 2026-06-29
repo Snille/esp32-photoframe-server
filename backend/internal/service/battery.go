@@ -87,6 +87,39 @@ type BatteryEstimate struct {
 	// Basis reports what the drain regression ran on: "voltage" (finer, via the
 	// LiPo curve) when the frame reports mV, else "percent".
 	Basis string `json:"basis"`
+	// Plugged is true when the latest reading is physically implausible for a
+	// running frame (the EE02-on-USB signature: charging current corrupts the ADC
+	// so percent/voltage read garbage). The UI then shows a "plugged in" indicator
+	// instead of a bogus level — see BatteryReadingImplausible.
+	Plugged bool `json:"plugged"`
+}
+
+// BatteryReadingImplausible reports that a (percent, voltageMV) pair from a frame
+// that is actively checking in cannot be a real battery level — the signature of
+// an EE02 on USB, whose charging current corrupts the ADC so both signals read
+// garbage (a sub-3.1 V "pack" while the frame is plainly running, or a firmware
+// percent that disagrees wildly with the voltage curve). Used to show a "plugged
+// in" indicator instead of a bogus 0 %. Returns false when no voltage is given
+// (nothing to sanity-check the percent against — e.g. older FireBeetle firmware).
+func BatteryReadingImplausible(percent, voltageMV int) bool {
+	if voltageMV <= 0 {
+		return false
+	}
+	if voltageMV < 3100 {
+		// A frame that just completed a WiFi pull can't be at a near-dead voltage;
+		// this is the ADC collapsing under charge current, not a real level.
+		return true
+	}
+	if percent >= 0 {
+		d := percent - VoltageToSoC(voltageMV)
+		if d < 0 {
+			d = -d
+		}
+		if d > 35 {
+			return true // percent and voltage disagree far beyond LiPo sag
+		}
+	}
+	return false
 }
 
 // lipoCurve maps a single-cell LiPo resting voltage (mV) to an approximate
@@ -100,6 +133,18 @@ var lipoCurve = []struct{ mv, soc float64 }{
 	{3980, 75}, {3950, 70}, {3910, 65}, {3870, 60}, {3850, 55},
 	{3840, 50}, {3820, 45}, {3800, 40}, {3790, 35}, {3770, 30},
 	{3750, 25}, {3730, 20}, {3710, 15}, {3690, 10}, {3610, 5}, {3270, 0},
+}
+
+// VoltageToSoC converts a LiPo cell voltage (mV) to an integer state-of-charge
+// percentage (0-100) via the same curve the drain estimate uses, or -1 when no
+// voltage is given. Exported so the serve path can render a voltage-derived
+// battery badge — steadier than the firmware's coarse/erratic percent, which on
+// some boards (XIAO EE02 on USB) can read 0% at a healthy 4.1 V.
+func VoltageToSoC(mv int) int {
+	if mv <= 0 {
+		return -1
+	}
+	return int(voltageToSoC(mv) + 0.5)
 }
 
 // voltageToSoC converts a battery voltage (mV) to an estimated state-of-charge
@@ -143,6 +188,17 @@ func (s *BatteryService) Estimate(deviceID uint) BatteryEstimate {
 	last := samples[len(samples)-1]
 	est.CurrentPercent = last.Percent
 	est.CurrentVoltageMV = last.VoltageMV
+	// Prefer the voltage-derived level for the reported "current %" when the frame
+	// sends a voltage: the firmware percent is coarse and, on some boards (XIAO
+	// EE02 on USB), erratic — a healthy 4.1 V can read 0%. This feeds the Devices
+	// list and the HA battery sensor, so they stay truthful like the on-photo badge.
+	// Flag an implausible reading (EE02 on USB) BEFORE overwriting CurrentPercent
+	// with the voltage-derived value, so the raw firmware percent can be compared
+	// against the voltage.
+	est.Plugged = BatteryReadingImplausible(last.Percent, last.VoltageMV)
+	if last.VoltageMV > 0 {
+		est.CurrentPercent = VoltageToSoC(last.VoltageMV)
+	}
 	est.WindowStart = samples[0].SampledAt
 	est.LastSampledAt = last.SampledAt
 

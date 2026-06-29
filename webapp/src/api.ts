@@ -128,6 +128,13 @@ export interface Device {
   battery_percent?: number; // -1 = no data yet
   battery_days_remaining?: number; // -1 = unknown
   battery_trend?: string;
+  // Coarse charge state the frame reports each pull (charging | full |
+  // on_battery); only boards that can sense USB send it. Drives the "plugged in"
+  // indicator instead of a (possibly wrong) percentage while on USB.
+  battery_status?: string;
+  // Server-inferred "on USB": the latest reading is physically implausible for a
+  // running frame (EE02-on-USB ADC garbage), so we show a plugged-in indicator.
+  battery_plugged?: boolean;
   created_at: string;
   model?: any;
 }
@@ -282,7 +289,8 @@ export const updateDevice = async (
     location_position: overlayPositions?.location_position || 'bottom-center',
     location_max_len: overlayPositions?.location_max_len ?? 40,
     show_description: overlayPositions?.show_description || false,
-    description_position: overlayPositions?.description_position || 'wide-bottom',
+    description_position:
+      overlayPositions?.description_position || 'wide-bottom',
     description_max_len: overlayPositions?.description_max_len ?? 80,
     show_rotation: overlayPositions?.show_rotation || false,
     rotation_position: overlayPositions?.rotation_position || 'bottom-right',
@@ -318,7 +326,9 @@ export interface BatteryEstimate {
   basis: 'voltage' | 'percent';
 }
 
-export const getBatteryEstimate = async (id: number): Promise<BatteryEstimate> => {
+export const getBatteryEstimate = async (
+  id: number
+): Promise<BatteryEstimate> => {
   const response = await api.get(`/devices/${id}/battery`);
   return response.data;
 };
@@ -402,7 +412,8 @@ export const publicArtThumbnailSrc = (candidate: {
   thumbnail_url?: string;
 }) => {
   const params = new URLSearchParams();
-  if (candidate.image_url) params.set('candidate_image_url', candidate.image_url);
+  if (candidate.image_url)
+    params.set('candidate_image_url', candidate.image_url);
   if (candidate.thumbnail_url)
     params.set('candidate_thumbnail_url', candidate.thumbnail_url);
   return `${apiBase()}/public-art/thumbnail?${params.toString()}`;

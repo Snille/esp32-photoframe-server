@@ -292,6 +292,27 @@ func (s *MQTTService) NotifyDeviceUpdated(deviceID uint) {
 	}()
 }
 
+// RepublishDiscovery forces HA discovery configs to be re-sent for one device,
+// then republishes its state/image. Called when a device's identity-adjacent
+// fields change in the web UI (notably its name): the discovery config carries
+// the HA friendly name + object_id, but it is otherwise sent only ONCE per broker
+// connection (gated by discoverySent), so without this a rename wouldn't reach HA
+// until the next MQTT reconnect. Existing HA entities keep their history because
+// their unique_id / identifiers are keyed on the device ID, not the name.
+func (s *MQTTService) RepublishDiscovery(deviceID uint) {
+	if _, ok := s.isReady(); !ok {
+		return
+	}
+	s.mu.Lock()
+	delete(s.discoverySent, deviceID)
+	s.mu.Unlock()
+	var device model.Device
+	if err := s.db.First(&device, deviceID).Error; err != nil {
+		return
+	}
+	s.publishDevice(&device)
+}
+
 // RemoveDevice clears a device's retained topics + discovery (on delete).
 func (s *MQTTService) RemoveDevice(deviceID uint) {
 	client, ok := s.isReady()

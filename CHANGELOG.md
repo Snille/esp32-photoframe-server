@@ -1,5 +1,17 @@
 # Changelog
 
+## v1.32.0
+
+### Added
+- **Device name changes reach Home Assistant instantly.** Renaming a frame in the Web UI now re-publishes its MQTT discovery config immediately, so the new name shows up in Home Assistant without waiting for a broker reconnect. Entity history is preserved — HA entities are keyed on the device ID, not the name (only the entity_id slug, fixed at first creation, stays). A hint on the name field explains this.
+- **Devices list "Model" and "Host" are now clickable.** Model links to the board's vendor product page (where to buy it — DFRobot FireBeetle, Seeed XIAO EE02/EE04, Seeed reTerminal E1002, Waveshare PhotoPainter), and Host opens the frame's own web interface. Unknown board / no host falls back to plain text.
+
+### Fixed
+- **Battery badge + Devices-list level no longer show a bogus 0 % while a frame is on USB.** The XIAO EE02's battery telemetry is unreliable on USB power — charging current corrupts its ADC, so the reported percent, voltage *and* charge-status can all read garbage (e.g. "93 %" at 3068 mV, or a sub-3 V "pack" on a frame that is plainly running). Three changes make the level truthful:
+  - The on-photo battery badge and the Devices-list / Home-Assistant level now derive from the reported **voltage** (steadier LiPo curve) rather than the coarse firmware percent, when a voltage is reported.
+  - When the frame says it is **charging/full**, the badge shows a charging bolt instead of a percentage.
+  - A server-side plausibility guard infers "on USB" from physically-impossible readings (sub-3.1 V on a running frame, or a percent that disagrees with the voltage by a wide margin) and shows a "plugged in" indicator instead of a misleading 0 % — even when the frame itself wrongly reports *on_battery*. The Devices list shows a charging icon; the threshold is set so a genuinely low battery is never hidden.
+
 ## v1.31.0
 
 ### Fixed

@@ -38,24 +38,28 @@ var displayProfiles = map[string]DisplayProfile{
 
 // RenderOptions contains all data needed to render a layout.
 type RenderOptions struct {
-	Layout        string // "photo_info", "photo_overlay", "side_panel"
-	DisplayMode   string // "cover" or "fit"
-	Width         int    // Logical pixel width
-	Height        int    // Logical pixel height
-	NativeWidth   int    // Physical panel width (for DPI calc)
-	NativeHeight  int    // Physical panel height (for DPI calc)
-	Photo         image.Image
-	ShowDate      bool
-	ShowPhotoDate bool
-	PhotoDate     *time.Time // Original photo creation date
-	ShowWeather   bool
-	Weather       *weather.CurrentWeather
-	ShowCalendar  bool
-	Events        []gcalendar.Event
-	Timezone      string // IANA timezone e.g. "Asia/Taipei" for date formatting
-	DateFormat    string // Go time format string, empty = default "Mon, Jan 02"
-	ShowBattery    bool  // Draw a battery badge on the photo
-	BatteryPercent int   // 0-100 battery level reported by the device
+	Layout         string // "photo_info", "photo_overlay", "side_panel"
+	DisplayMode    string // "cover" or "fit"
+	Width          int    // Logical pixel width
+	Height         int    // Logical pixel height
+	NativeWidth    int    // Physical panel width (for DPI calc)
+	NativeHeight   int    // Physical panel height (for DPI calc)
+	Photo          image.Image
+	ShowDate       bool
+	ShowPhotoDate  bool
+	PhotoDate      *time.Time // Original photo creation date
+	ShowWeather    bool
+	Weather        *weather.CurrentWeather
+	ShowCalendar   bool
+	Events         []gcalendar.Event
+	Timezone       string // IANA timezone e.g. "Asia/Taipei" for date formatting
+	DateFormat     string // Go time format string, empty = default "Mon, Jan 02"
+	ShowBattery    bool   // Draw a battery badge on the photo
+	BatteryPercent int    // 0-100 battery level reported by the device
+	// BatteryCharging draws a "plugged in / charging" badge (a bolt) instead of a
+	// percentage — used when the frame reports it is on USB power (X-Battery-Status
+	// charging/full), where the measured percent is unreliable anyway.
+	BatteryCharging bool
 	// Per-element placement (top/bottom × left/center/right). Date/photo-date/
 	// weather only take effect on the photo_overlay layout; battery applies on
 	// the photo in every layout.
@@ -73,12 +77,12 @@ type RenderOptions struct {
 	// People names + photo location overlays (Immich metadata). The caller
 	// formats Names (per device name-format/age/length) and Location into final
 	// strings; the renderer just places them. Both only show on photo_overlay.
-	ShowNames        bool
-	Names            string
-	NamesPosition    string
-	ShowLocation     bool
-	Location         string
-	LocationPosition string
+	ShowNames           bool
+	Names               string
+	NamesPosition       string
+	ShowLocation        bool
+	Location            string
+	LocationPosition    string
 	ShowDescription     bool
 	Description         string
 	DescriptionPosition string
@@ -327,31 +331,32 @@ func (s *RendererService) Render(opts RenderOptions) (image.Image, error) {
 	}
 
 	data := templateData{
-		Layout:        opts.Layout,
-		DisplayMode:   displayMode,
-		Width:         opts.Width,
-		Height:        opts.Height,
-		PhotoBase64:   photoBase64,
-		FontBase64:    s.fontBase64,
-		DPMM:          dpmm,
-		BaseUnit:      baseUnit,
-		ShowDate:      opts.ShowDate,
-		DateStr:       now.Format(dateFormat(opts.DateFormat)),
-		DateStrLong:   now.Format("Monday, January 02, 2006"),
-		TimeStr:       now.Format("15:04"),
-		ShowPhotoDate: showPhotoDate,
-		PhotoDateStr:  photoDateStr,
-		ShowWeather:   opts.ShowWeather,
-		Weather:       opts.Weather,
-		ShowCalendar:  opts.ShowCalendar,
-		Events:        filterEventsForLayout(opts.Layout, opts.Events, maxEvents),
-		NextEvent:     nextEvent,
-		IsPortrait:    opts.Height > opts.Width,
-		IsSmall:       (opts.Width * opts.Height) < 500000,
-		PhotoRatio:    photoRatio,
-		ShowBattery:    opts.ShowBattery,
-		BatteryPercent: opts.BatteryPercent,
-		IsOverlayLayout: opts.Layout != model.LayoutPhotoInfo && opts.Layout != model.LayoutSidePanel,
+		Layout:            opts.Layout,
+		DisplayMode:       displayMode,
+		Width:             opts.Width,
+		Height:            opts.Height,
+		PhotoBase64:       photoBase64,
+		FontBase64:        s.fontBase64,
+		DPMM:              dpmm,
+		BaseUnit:          baseUnit,
+		ShowDate:          opts.ShowDate,
+		DateStr:           now.Format(dateFormat(opts.DateFormat)),
+		DateStrLong:       now.Format("Monday, January 02, 2006"),
+		TimeStr:           now.Format("15:04"),
+		ShowPhotoDate:     showPhotoDate,
+		PhotoDateStr:      photoDateStr,
+		ShowWeather:       opts.ShowWeather,
+		Weather:           opts.Weather,
+		ShowCalendar:      opts.ShowCalendar,
+		Events:            filterEventsForLayout(opts.Layout, opts.Events, maxEvents),
+		NextEvent:         nextEvent,
+		IsPortrait:        opts.Height > opts.Width,
+		IsSmall:           (opts.Width * opts.Height) < 500000,
+		PhotoRatio:        photoRatio,
+		ShowBattery:       opts.ShowBattery,
+		BatteryPercent:    opts.BatteryPercent,
+		BatteryCharging:   opts.BatteryCharging,
+		IsOverlayLayout:   opts.Layout != model.LayoutPhotoInfo && opts.Layout != model.LayoutSidePanel,
 		DatePosition:      model.NormalizeOverlayPosition(opts.DatePosition, "bottom-left"),
 		PhotoDatePosition: model.NormalizeOverlayPosition(opts.PhotoDatePosition, "bottom-left"),
 		WeatherPosition:   model.NormalizeOverlayPosition(opts.WeatherPosition, "bottom-right"),
@@ -366,14 +371,14 @@ func (s *RendererService) Render(opts RenderOptions) (image.Image, error) {
 		// whitelist, not user input). Without it, html/template's CSS sanitizer
 		// rewrites the quoted, comma-separated font list to "ZgotmplZ", so the
 		// chips silently fall back to the body font and the choice never applies.
-		OverlayFontFamily: template.CSS(overlayFontFamily(model.NormalizeOverlayFont(opts.OverlayFont))),
-		OverlayFontWeight: overlayFontWeight(model.NormalizeOverlayWeight(opts.OverlayWeight)),
-		ShowNames:         opts.ShowNames && opts.Names != "",
-		Names:             opts.Names,
-		NamesPosition:     model.NormalizeOverlayPosition(opts.NamesPosition, "top-left"),
-		ShowLocation:      opts.ShowLocation && opts.Location != "",
-		Location:          opts.Location,
-		LocationPosition:  model.NormalizeOverlayPosition(opts.LocationPosition, "bottom-center"),
+		OverlayFontFamily:   template.CSS(overlayFontFamily(model.NormalizeOverlayFont(opts.OverlayFont))),
+		OverlayFontWeight:   overlayFontWeight(model.NormalizeOverlayWeight(opts.OverlayWeight)),
+		ShowNames:           opts.ShowNames && opts.Names != "",
+		Names:               opts.Names,
+		NamesPosition:       model.NormalizeOverlayPosition(opts.NamesPosition, "top-left"),
+		ShowLocation:        opts.ShowLocation && opts.Location != "",
+		Location:            opts.Location,
+		LocationPosition:    model.NormalizeOverlayPosition(opts.LocationPosition, "bottom-center"),
 		ShowDescription:     opts.ShowDescription && opts.Description != "",
 		Description:         opts.Description,
 		DescriptionPosition: model.NormalizeOverlayPosition(opts.DescriptionPosition, "wide-bottom"),
@@ -465,49 +470,50 @@ func (s *RendererService) Render(opts RenderOptions) (image.Image, error) {
 }
 
 type templateData struct {
-	Layout        string
-	DisplayMode   string // "cover" or "fit"
-	Width         int
-	Height        int
-	PhotoBase64   string
-	FontBase64    string
-	DPMM          float64 // dots per mm (kept for compatibility)
-	BaseUnit      float64 // min(width,height)/100, for viewport-relative sizing
-	ShowDate      bool
-	DateStr       string // short: "Mon, Jan 02"
-	DateStrLong   string // long: "Monday, January 02, 2006"
-	TimeStr       string
-	ShowPhotoDate bool
-	PhotoDateStr  string // photo creation date, short format
-	ShowWeather   bool
-	Weather       *weather.CurrentWeather
-	ShowCalendar  bool
-	Events        []gcalendar.Event
-	NextEvent     *gcalendar.Event
-	IsPortrait    bool
-	IsSmall       bool
-	PhotoRatio    float64 // fraction of screen for photo (0.0-1.0)
-	ShowBattery    bool
-	BatteryPercent int
-	IsOverlayLayout   bool // full-photo layout: date/photo-date/weather float on the photo
-	DatePosition      string
-	PhotoDatePosition string
-	WeatherPosition   string
-	BatteryPosition   string
-	ShowBatteryIcon   bool
-	ShowBatteryText   bool
-	BatteryRotation   int
-	BatteryTextSide   string
-	BatteryIconScale  float64
-	OverlayScale      float64
-	OverlayFontFamily template.CSS
-	OverlayFontWeight int
-	ShowNames         bool
-	Names             string
-	NamesPosition     string
-	ShowLocation      bool
-	Location          string
-	LocationPosition  string
+	Layout              string
+	DisplayMode         string // "cover" or "fit"
+	Width               int
+	Height              int
+	PhotoBase64         string
+	FontBase64          string
+	DPMM                float64 // dots per mm (kept for compatibility)
+	BaseUnit            float64 // min(width,height)/100, for viewport-relative sizing
+	ShowDate            bool
+	DateStr             string // short: "Mon, Jan 02"
+	DateStrLong         string // long: "Monday, January 02, 2006"
+	TimeStr             string
+	ShowPhotoDate       bool
+	PhotoDateStr        string // photo creation date, short format
+	ShowWeather         bool
+	Weather             *weather.CurrentWeather
+	ShowCalendar        bool
+	Events              []gcalendar.Event
+	NextEvent           *gcalendar.Event
+	IsPortrait          bool
+	IsSmall             bool
+	PhotoRatio          float64 // fraction of screen for photo (0.0-1.0)
+	ShowBattery         bool
+	BatteryPercent      int
+	BatteryCharging     bool
+	IsOverlayLayout     bool // full-photo layout: date/photo-date/weather float on the photo
+	DatePosition        string
+	PhotoDatePosition   string
+	WeatherPosition     string
+	BatteryPosition     string
+	ShowBatteryIcon     bool
+	ShowBatteryText     bool
+	BatteryRotation     int
+	BatteryTextSide     string
+	BatteryIconScale    float64
+	OverlayScale        float64
+	OverlayFontFamily   template.CSS
+	OverlayFontWeight   int
+	ShowNames           bool
+	Names               string
+	NamesPosition       string
+	ShowLocation        bool
+	Location            string
+	LocationPosition    string
 	ShowDescription     bool
 	Description         string
 	DescriptionPosition string
@@ -661,7 +667,7 @@ const layoutTemplate = `
 {{- define "el_photodate"}}<div class="ov-chip photo-date">{{if .ShowPhotoDateIcon}}<span class="material-symbols-outlined">photo_camera</span> {{end}}{{.PhotoDateStr}}</div>{{end}}
 {{- define "el_weather"}}{{if .Weather}}<div class="ov-chip weather">{{if .ShowWeatherIcon}}<span class="material-symbols-outlined">{{.Weather.IconName}}</span> {{end}}{{printf "%.1f" .Weather.Temperature}}&deg;C &nbsp; {{.Weather.Humidity}}%</div>{{end}}{{end}}
 {{- define "el_calendar"}}{{if .NextEvent}}<div class="ov-chip event">{{formatEventTime .NextEvent}} &mdash; {{.NextEvent.Summary}}</div>{{end}}{{end}}
-{{- define "el_battery"}}<div class="ov-chip battery bat-rot-{{.BatteryRotation}} bat-text-{{.BatteryTextSide}}{{if le .BatteryPercent 15}} low{{end}}">{{if .ShowBatteryIcon}}<div class="battery-icon"><div class="battery-fill" style="width: {{.BatteryPercent}}%"></div></div>{{end}}{{if .ShowBatteryText}}<span class="battery-text">{{.BatteryPercent}}%</span>{{end}}</div>{{end}}
+{{- define "el_battery"}}<div class="ov-chip battery bat-rot-{{.BatteryRotation}} bat-text-{{.BatteryTextSide}}{{if .BatteryCharging}} charging{{else if le .BatteryPercent 15}} low{{end}}">{{if .ShowBatteryIcon}}<div class="battery-icon">{{if .BatteryCharging}}<div class="battery-fill" style="width: 100%"></div><span class="material-symbols-outlined battery-bolt">bolt</span>{{else}}<div class="battery-fill" style="width: {{.BatteryPercent}}%"></div>{{end}}</div>{{end}}{{if .ShowBatteryText}}<span class="battery-text">{{if .BatteryCharging}}{{if not .ShowBatteryIcon}}<span class="material-symbols-outlined">power</span>{{end}}{{else}}{{.BatteryPercent}}%{{end}}</span>{{end}}</div>{{end}}
 {{- define "el_names"}}<div class="ov-chip names">{{if .ShowNamesIcon}}<span class="material-symbols-outlined">group</span> {{end}}{{.Names}}</div>{{end}}
 {{- define "el_location"}}<div class="ov-chip location">{{if .ShowLocationIcon}}<span class="material-symbols-outlined">place</span> {{end}}{{.Location}}</div>{{end}}
 {{- define "el_description"}}<div class="ov-chip description">{{if .ShowDescriptionIcon}}<span class="material-symbols-outlined">notes</span> {{end}}{{.Description}}</div>{{end}}
@@ -905,6 +911,18 @@ const layoutTemplate = `
   .battery-fill { height: 100%; background: #fff; border-radius: 0.04em; }
   .ov-chip.battery.low { color: #ffd6d6; }
   .ov-chip.battery.low .battery-fill { background: #e03b3b; }
+  /* Charging: a bolt centred over a full (white) icon. Dark glyph so it reads
+     against the white fill. The icon rotates with bat-rot-*, the bolt with it. */
+  .battery-bolt {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    font-size: 0.85em;
+    line-height: 1;
+    color: #000;
+  }
+  .ov-chip.battery.charging .battery-text .material-symbols-outlined { font-size: 1.2em; }
 
   .info-panel {
     background: #ffffff;

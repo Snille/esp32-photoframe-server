@@ -154,41 +154,58 @@ func (h *ImageHandler) ServeImage(c echo.Context) error {
 	}
 
 	// Battery level reported by the device on every image fetch
-	// (X-Battery-Percentage). -1 means no battery / not readable, in which
-	// case the badge is suppressed even if showBattery is enabled.
+	// (X-Battery-Percentage). -1 means no battery / not readable.
 	batteryPercent := -1
 	if bStr := c.Request().Header.Get("X-Battery-Percentage"); bStr != "" {
 		if b, err := strconv.Atoi(bStr); err == nil {
 			batteryPercent = b
 		}
 	}
-	showBattery = showBattery && batteryPercent >= 0 && batteryPercent <= 100
+	// Optional finer signal: pack voltage in millivolts (firmware >= 2.9.2).
+	voltageMV := 0
+	if vStr := c.Request().Header.Get("X-Battery-Voltage"); vStr != "" {
+		if v, err := strconv.Atoi(vStr); err == nil {
+			voltageMV = v
+		}
+	}
+	// Charge status the frame reports (X-Battery-Status: charging | full |
+	// on_battery). Only boards that can sense USB send it; charging/full mean the
+	// frame is plugged in. The EE02's USB heuristic is itself unreliable (it can
+	// report on_battery while plugged), so we ALSO infer "plugged" when the reading
+	// is physically implausible for a running frame — then the badge shows a bolt
+	// instead of a bogus level.
+	batteryStatus := c.Request().Header.Get("X-Battery-Status")
+	batteryCharging := batteryStatus == "charging" || batteryStatus == "full" ||
+		service.BatteryReadingImplausible(batteryPercent, voltageMV)
+
+	// The on-photo badge prefers the voltage-derived state-of-charge over the
+	// firmware's raw percent: the raw percent is coarse and, on some boards (the
+	// XIAO EE02 on USB), erratic — a steady 4.1 V can be reported as 0%. The LiPo
+	// curve is monotonic and far steadier. Fall back to the raw percent only when
+	// no voltage is reported (e.g. older firmware on the FireBeetle).
+	overlayBatteryPercent := batteryPercent
+	if soc := service.VoltageToSoC(voltageMV); soc >= 0 {
+		overlayBatteryPercent = soc
+	}
+	validBattery := overlayBatteryPercent >= 0 && overlayBatteryPercent <= 100
+	// Show the badge when we have a usable level OR the frame is plugged in (then
+	// we draw a charging bolt instead of a maybe-wrong number).
+	showBattery = showBattery && (validBattery || batteryCharging)
 
 	// Log a battery sample for the drain estimate whenever a real device fetch
-	// carries a reading (independent of the show-battery overlay toggle). The
-	// optional X-Battery-Voltage header (millivolts) gives a finer signal than
-	// the coarse percentage when present. Throttled + async so it never delays
-	// or fails the image response.
+	// carries a reading (independent of the show-battery overlay toggle).
+	// Throttled + async so it never delays or fails the image response.
 	if deviceFound && !preview && batteryPercent >= 0 && batteryPercent <= 100 {
-		voltageMV := 0
-		if vStr := c.Request().Header.Get("X-Battery-Voltage"); vStr != "" {
-			if v, err := strconv.Atoi(vStr); err == nil {
-				voltageMV = v
-			}
-		}
 		go h.battery.RecordSample(device.ID, batteryPercent, voltageMV)
 	}
 
-	// Coarse charge status the frame reports (X-Battery-Status: charging | full |
-	// on_battery). Only boards that can sense it send the header; persist on
-	// change so the HA "Battery Status" sensor reflects the latest pull.
-	if deviceFound && !preview {
-		if bs := c.Request().Header.Get("X-Battery-Status"); bs != "" && bs != device.BatteryStatus {
-			switch bs {
-			case "charging", "full", "on_battery":
-				device.BatteryStatus = bs
-				go h.db.Model(&model.Device{}).Where("id = ?", device.ID).Update("battery_status", bs)
-			}
+	// Persist the charge status on change so the HA "Battery Status" sensor
+	// reflects the latest pull.
+	if deviceFound && !preview && batteryStatus != "" && batteryStatus != device.BatteryStatus {
+		switch batteryStatus {
+		case "charging", "full", "on_battery":
+			device.BatteryStatus = batteryStatus
+			go h.db.Model(&model.Device{}).Where("id = ?", device.ID).Update("battery_status", batteryStatus)
 		}
 	}
 
@@ -517,7 +534,8 @@ func (h *ImageHandler) ServeImage(c echo.Context) error {
 			Timezone:            deviceTimezone,
 			DateFormat:          device.DateFormat,
 			ShowBattery:         showBattery,
-			BatteryPercent:      batteryPercent,
+			BatteryPercent:      overlayBatteryPercent,
+			BatteryCharging:     batteryCharging,
 			DatePosition:        device.DatePosition,
 			PhotoDatePosition:   device.PhotoDatePosition,
 			WeatherPosition:     device.WeatherPosition,
