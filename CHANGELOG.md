@@ -1,5 +1,13 @@
 # Changelog
 
+## v1.31.0
+
+### Fixed
+- **Immich "Memories" (on-this-day) mode now actually scopes to today.** When a frame's Immich source mode was set to **Memories**, the server fetched `/api/memories` with no date filter, so Immich returned *every* persisted memory lane the account had rather than the ones for today — the frame showed a random grab-bag instead of "on this day, past years". The request is now scoped with today's date (`for`) plus `type=on_this_day`, so the pool is the correct on-this-day set. (Picked up from upstream; verified against a live Immich.)
+
+### Changed
+- **CI: bumped GitHub Actions to current majors** (checkout@v4, setup-go@v5, setup-node@v4, docker/\* @v3, build-push-action@v6) to silence the Node 20 deprecation warnings.
+
 ## v1.30.0
 
 ### Added
