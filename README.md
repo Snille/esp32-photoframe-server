@@ -28,6 +28,49 @@ A image server for the [ESP32 PhotoFrame](https://github.com/Snille/esp32-photof
     - Revocable API tokens for device access.
     - Session management.
 
+## Screenshots
+
+### Web interface
+
+The main view: the photo gallery plus the devices list, where every frame shows a
+live miniature of its current image alongside battery percentage and estimated
+days remaining.
+
+<p><img src="docs/img/main01-gallery-devices.png" width="850" alt="Main view — gallery and devices list with live battery status"/></p>
+
+<table>
+<tr>
+<td><img src="docs/img/main02-gallery-gallery.png" width="420" alt="Gallery"/><br/><sub><b>Gallery</b> — uploaded and synced photos in one place</sub></td>
+<td><img src="docs/img/main03-gallery-datasources-immich.png" width="420" alt="Immich data source"/><br/><sub><b>Data sources · Immich</b> — albums, sync modes, per-frame filtering</sub></td>
+</tr>
+<tr>
+<td><img src="docs/img/main04-gallery-datasources-AI.png" width="420" alt="AI generation data source"/><br/><sub><b>Data sources · AI</b> — generation providers (ComfyUI, OpenAI, Gemini, MiniMax)</sub></td>
+<td><img src="docs/img/main05-immich-devices.png" width="420" alt="Per-device Immich albums"/><br/><sub><b>Per-device albums</b> — pick which Immich albums each frame pulls from</sub></td>
+</tr>
+<tr>
+<td><img src="docs/img/main06-immich-reorder-devices.png" width="420" alt="Reorder a device's rotation"/><br/><sub><b>Display order</b> — drag-and-drop to set a frame's photo order</sub></td>
+<td></td>
+</tr>
+</table>
+
+### Per-frame configuration
+
+Every frame is configured server-side from a tabbed dialog — all rich processing
+runs on the server, so it works even while the frame is deep-asleep.
+
+<table>
+<tr>
+<td><img src="docs/img/frame01-general.png" width="280" alt="General tab"/><br/><sub><b>General</b> — name, host, display rotation, timezone</sub></td>
+<td><img src="docs/img/frame02-autorotate.png" width="280" alt="Auto Rotate tab"/><br/><sub><b>Auto Rotate</b> — image source, interval, sleep schedule, filters</sub></td>
+<td><img src="docs/img/frame03-overlay.png" width="280" alt="Overlay tab"/><br/><sub><b>Overlay</b> — date / weather / people / location / battery badges + placement</sub></td>
+</tr>
+<tr>
+<td><img src="docs/img/frame04-power.png" width="280" alt="Power tab"/><br/><sub><b>Power</b> — battery trend, days-remaining estimate, deep sleep</sub></td>
+<td><img src="docs/img/frame05-processing.png" width="280" alt="Processing tab"/><br/><sub><b>Processing</b> — dithering, measured palette, tone presets</sub></td>
+<td><img src="docs/img/frame06-AI.png" width="280" alt="AI Generation tab"/><br/><sub><b>AI Generation</b> — per-frame provider and prompt</sub></td>
+</tr>
+</table>
+
 ## Deployment
 
 ### Home Assistant Add-on (Recommended)
