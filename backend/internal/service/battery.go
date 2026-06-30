@@ -122,6 +122,54 @@ func BatteryReadingImplausible(percent, voltageMV int) bool {
 	return false
 }
 
+// PlausibleVoltage reports whether a reported cell voltage (mV) is in a
+// believable resting / light-load band for a running single-cell LiPo frame.
+// Below ~3.3 V on a frame that just completed a WiFi pull is almost always a
+// momentary rail collapse under TX current, not the real level; above ~4.3 V is
+// out of range for a single cell.
+func PlausibleVoltage(mv int) bool {
+	return mv >= 3300 && mv <= 4300
+}
+
+// RobustBadgePercent returns the best battery percentage to draw on the photo
+// badge, smoothing over the EE02's occasional collapsed / erratic readings.
+// Preference order: voltage-derived SoC when the current voltage is plausible →
+// this device's most recent plausible sample → the frame's raw percent → -1
+// (no usable level, caller hides the badge). deviceID 0 skips the DB fallback
+// (e.g. preview / unknown device).
+func (s *BatteryService) RobustBadgePercent(deviceID uint, percent, voltageMV int) int {
+	if PlausibleVoltage(voltageMV) {
+		return VoltageToSoC(voltageMV)
+	}
+	if deviceID != 0 {
+		if p := s.lastPlausiblePercent(deviceID); p >= 0 {
+			return p
+		}
+	}
+	if percent >= 0 && percent <= 100 {
+		return percent
+	}
+	return -1
+}
+
+// lastPlausiblePercent returns the voltage-derived SoC of this device's most
+// recent battery sample that carried a plausible voltage, or -1 if none of the
+// recent samples qualify. Used to ride out a single collapsed reading without
+// flashing a bogus near-empty badge.
+func (s *BatteryService) lastPlausiblePercent(deviceID uint) int {
+	var samples []model.BatterySample
+	if err := s.db.Where("device_id = ?", deviceID).
+		Order("sampled_at DESC").Limit(20).Find(&samples).Error; err != nil {
+		return -1
+	}
+	for _, sm := range samples {
+		if PlausibleVoltage(sm.VoltageMV) {
+			return VoltageToSoC(sm.VoltageMV)
+		}
+	}
+	return -1
+}
+
 // lipoCurve maps a single-cell LiPo resting voltage (mV) to an approximate
 // state-of-charge (%). The pack voltage sags under the WiFi/refresh load the
 // frame reports at, so absolute SoC isn't exact — but the curve is monotonic,

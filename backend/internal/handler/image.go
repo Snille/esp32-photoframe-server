@@ -169,24 +169,24 @@ func (h *ImageHandler) ServeImage(c echo.Context) error {
 		}
 	}
 	// Charge status the frame reports (X-Battery-Status: charging | full |
-	// on_battery). Only boards that can sense USB send it; charging/full mean the
-	// frame is plugged in. The EE02's USB heuristic is itself unreliable (it can
-	// report on_battery while plugged), so we ALSO infer "plugged" when the reading
-	// is physically implausible for a running frame — then the badge shows a bolt
-	// instead of a bogus level.
+	// on_battery). Draw the charging bolt ONLY when the frame explicitly says so.
+	// We deliberately do NOT infer "plugged" from an implausible/collapsed reading
+	// anymore: the battery rail sags under WiFi TX on battery too (the EE02 does
+	// this), so treating a collapse as charging produced a false bolt while the
+	// frame was running on battery.
 	batteryStatus := c.Request().Header.Get("X-Battery-Status")
-	batteryCharging := batteryStatus == "charging" || batteryStatus == "full" ||
-		service.BatteryReadingImplausible(batteryPercent, voltageMV)
+	batteryCharging := batteryStatus == "charging" || batteryStatus == "full"
 
-	// The on-photo badge prefers the voltage-derived state-of-charge over the
-	// firmware's raw percent: the raw percent is coarse and, on some boards (the
-	// XIAO EE02 on USB), erratic — a steady 4.1 V can be reported as 0%. The LiPo
-	// curve is monotonic and far steadier. Fall back to the raw percent only when
-	// no voltage is reported (e.g. older firmware on the FireBeetle).
-	overlayBatteryPercent := batteryPercent
-	if soc := service.VoltageToSoC(voltageMV); soc >= 0 {
-		overlayBatteryPercent = soc
+	// Robust on-photo badge level. Prefer the voltage-derived state-of-charge when
+	// the voltage is plausible (the LiPo curve is monotonic and far steadier than
+	// the firmware's coarse percent); a momentary collapse under WiFi load reads
+	// far too low, so fall back to this device's most recent plausible sample
+	// rather than rendering a bogus near-empty level.
+	var badgeDeviceID uint
+	if deviceFound {
+		badgeDeviceID = device.ID
 	}
+	overlayBatteryPercent := h.battery.RobustBadgePercent(badgeDeviceID, batteryPercent, voltageMV)
 	validBattery := overlayBatteryPercent >= 0 && overlayBatteryPercent <= 100
 	// Show the badge when we have a usable level OR the frame is plugged in (then
 	// we draw a charging bolt instead of a maybe-wrong number).
@@ -194,8 +194,11 @@ func (h *ImageHandler) ServeImage(c echo.Context) error {
 
 	// Log a battery sample for the drain estimate whenever a real device fetch
 	// carries a reading (independent of the show-battery overlay toggle).
-	// Throttled + async so it never delays or fails the image response.
-	if deviceFound && !preview && batteryPercent >= 0 && batteryPercent <= 100 {
+	// Throttled + async so it never delays or fails the image response. Skip
+	// implausible/collapsed reads so a momentary rail sag doesn't pollute the
+	// drain estimate or flip est.Plugged.
+	if deviceFound && !preview && batteryPercent >= 0 && batteryPercent <= 100 &&
+		(voltageMV == 0 || service.PlausibleVoltage(voltageMV)) {
 		go h.battery.RecordSample(device.ID, batteryPercent, voltageMV)
 	}
 

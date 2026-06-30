@@ -1,5 +1,11 @@
 # Changelog
 
+## v1.33.0
+
+### Fixed
+- **No more false "charging" bolt on the battery badge while a frame runs on battery.** v1.32.0 inferred "plugged in" from any physically-implausible reading and drew a charging bolt. But the XIAO EE02's battery rail also collapses momentarily under WiFi-TX current *on battery* (the read happens mid-pull), so a frame correctly reporting `on_battery` still got a bolt baked into its photo. Now the bolt is drawn **only when the frame explicitly reports `charging`/`full`** — which the EE02 (rev V1.0, no USB/charge sensing) never does, so it never shows a false bolt.
+- **Battery badge rides out a single collapsed reading instead of showing a bogus near-empty level.** The on-photo level now derives from the voltage-to-SoC curve only when the current voltage is plausible (≈3.3–4.3 V); a collapsed read (e.g. 2790 mV, or "0 % @ 4090 mV" from the frame reading percent and voltage separately) falls back to the device's most recent plausible sample. Implausible reads are also no longer recorded as drain samples, so a momentary sag can't pollute the drain estimate or flip the "plugged" flag. Pairs with firmware v2.10.5, which fixes the erratic readings at the source.
+
 ## v1.32.0
 
 ### Added
