@@ -1,5 +1,14 @@
 # Changelog
 
+## v1.34.0
+
+### Added
+- **Firmware version in the Devices list.** Each frame now shows the firmware version it's running (a small chip badge under the Model), refreshed automatically on every image pull (from the `X-Firmware-Version` header) and on a hardware refresh.
+- **One-click firmware update from the server.** OTA-capable frames get an update button in the Devices list: it asks the frame to check for a new firmware release and install it (the frame reboots when done). Shows a friendly "already on the latest version" when there's nothing to do, and only works while the frame is awake — like the rotate/skip controls. The button is hidden for the classic-ESP32 FireBeetle, which has no OTA partition.
+
+### Changed
+- **Default theme is now Forest (Dark).** A fresh browser (no saved theme) opens the WebGUI in the dark-green Forest theme, matching the frames' setup screens. Your saved theme choice still wins.
+
 ## v1.33.0
 
 ### Fixed

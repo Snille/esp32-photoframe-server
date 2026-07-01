@@ -316,6 +316,10 @@ func (h *DeviceHandler) TriggerOTAUpdate(c echo.Context) error {
 	}
 	updated, message, err := h.deviceService.TriggerOTAUpdate(uint(id))
 	if err != nil {
+		if strings.Contains(err.Error(), "device not found") {
+			return c.JSON(http.StatusNotFound, map[string]string{"error": err.Error()})
+		}
+		// Unreachable / asleep frame, or the frame refused the update.
 		return c.JSON(http.StatusBadGateway, map[string]string{"error": err.Error()})
 	}
 	return c.JSON(http.StatusOK, map[string]interface{}{"updated": updated, "message": message})
