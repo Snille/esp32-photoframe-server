@@ -65,6 +65,9 @@ export interface Device {
   height: number;
   orientation: string;
   board_name?: string;
+  // Firmware version the frame reports (X-Firmware-Version on each pull);
+  // empty until it first checks in. Shown in the Devices list.
+  firmware_version?: string;
   // false on no-PSRAM boards (FireBeetle) that can't do HTTPS; drives the
   // https:// image-URL warning in the device dialog.
   https_supported?: boolean;
@@ -348,6 +351,16 @@ export const deleteDevice = async (id: number) => {
 // ordered sources.
 export const skipQueue = async (id: number, steps: number) => {
   const response = await api.post(`/devices/${id}/skip`, { steps });
+  return response.data;
+};
+
+// Ask an awake, OTA-capable frame to check for and install a firmware update.
+// Resolves with { updated, message }: updated=false means it's already current.
+// Rejects (502) when the frame is unreachable/asleep. Only S3 boards have OTA.
+export const triggerOtaUpdate = async (
+  id: number,
+): Promise<{ updated: boolean; message: string }> => {
+  const response = await api.post(`/devices/${id}/ota-update`);
   return response.data;
 };
 

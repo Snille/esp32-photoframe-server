@@ -304,6 +304,23 @@ func (h *DeviceHandler) RefreshDevice(c echo.Context) error {
 	return c.JSON(http.StatusOK, device)
 }
 
+// POST /api/devices/:id/ota-update
+// Asks an awake, OTA-capable frame to check for and install a firmware update.
+// Returns 200 {updated:true} when an install was started, 200 {updated:false}
+// when the frame is already current, and 502 when it's unreachable/refuses. Only
+// effective while the frame is awake (like the rotate/skip controls).
+func (h *DeviceHandler) TriggerOTAUpdate(c echo.Context) error {
+	id, err := strconv.Atoi(c.Param("id"))
+	if err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid device id"})
+	}
+	updated, message, err := h.deviceService.TriggerOTAUpdate(uint(id))
+	if err != nil {
+		return c.JSON(http.StatusBadGateway, map[string]string{"error": err.Error()})
+	}
+	return c.JSON(http.StatusOK, map[string]interface{}{"updated": updated, "message": message})
+}
+
 // GET /api/devices/:id/battery
 // Returns the derived drain estimate (%/day, days remaining, trend) plus the
 // recent samples for a sparkline. Built from the X-Battery-Percentage readings

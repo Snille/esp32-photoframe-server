@@ -97,6 +97,10 @@ type Device struct {
 	// mirror. A landscape-mounted portrait-native panel is 90°.
 	DisplayRotationDeg int    `json:"display_rotation_deg" gorm:"default:0"`
 	BoardName          string `json:"board_name"`
+	// FirmwareVersion is the frame's reported firmware version. Refreshed on every
+	// pull (X-Firmware-Version header) and on a hardware refresh (SystemInfo.Version).
+	// Shown in the Devices list; empty until the frame first checks in.
+	FirmwareVersion string `json:"firmware_version" gorm:"default:''"`
 	// HTTPSSupported mirrors the device's system-info https_supported flag:
 	// false on no-PSRAM boards (e.g. FireBeetle) that can't fit a TLS handshake
 	// alongside the framebuffer, so the web UI warns against https:// image URLs.

@@ -212,6 +212,15 @@ func (h *ImageHandler) ServeImage(c echo.Context) error {
 		}
 	}
 
+	// Remember the firmware version the frame reports (X-Firmware-Version) so the
+	// Devices list can show what each frame is running. Only write on change.
+	if deviceFound && !preview {
+		if fw := c.Request().Header.Get("X-Firmware-Version"); fw != "" && fw != device.FirmwareVersion {
+			device.FirmwareVersion = fw
+			go h.db.Model(&model.Device{}).Where("id = ?", device.ID).Update("firmware_version", fw)
+		}
+	}
+
 	// Remember the IP the frame checked in from (for the HA IP-address sensor).
 	// RealIP honours X-Forwarded-For, so this is the frame's LAN IP even behind a
 	// reverse proxy that forwards it. Only write on change to avoid churn.

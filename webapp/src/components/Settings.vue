@@ -1516,6 +1516,15 @@
                         >{{ boardLabel(device) }}</a
                       >
                       <template v-else>{{ boardLabel(device) }}</template>
+                      <div
+                        v-if="device.firmware_version"
+                        class="text-caption text-medium-emphasis"
+                        title="Firmware version the frame last reported"
+                      >
+                        <v-icon size="x-small" class="mr-1"
+                          >mdi-chip</v-icon
+                        >{{ device.firmware_version }}
+                      </div>
                     </td>
                     <td>
                       <a
@@ -1577,6 +1586,16 @@
                       <span v-else class="text-grey">—</span>
                     </td>
                     <td class="text-right">
+                      <v-btn
+                        v-if="deviceSupportsOta(device)"
+                        color="info"
+                        variant="text"
+                        size="small"
+                        icon="mdi-cloud-download-outline"
+                        :loading="otaUpdating.has(device.id)"
+                        title="Check for and install a firmware update (the frame must be awake)"
+                        @click="otaUpdate(device)"
+                      ></v-btn>
                       <v-btn
                         color="primary"
                         variant="text"
@@ -3442,6 +3461,7 @@ import {
   updateDevice,
   refreshDevice,
   skipQueue,
+  triggerOtaUpdate,
   type Device,
   createURLSource,
   updateURLSource,
@@ -5175,6 +5195,14 @@ const boardLabel = (device: Device): string => {
 const boardUrl = (device: Device): string =>
   (device.board_name && BOARD_INFO[device.board_name]?.url) || '';
 
+// Boards with no OTA partition can't self-update over the air. The classic-ESP32
+// FireBeetle (single 4MB factory partition) is the only such board today; every
+// S3 board has OTA. Unknown/un-synced boards default to showing the button (the
+// server checks + no-ops safely if the frame reports no update).
+const NO_OTA_BOARDS = new Set(['dfrobot_firebeetle_esp32e']);
+const deviceSupportsOta = (device: Device): boolean =>
+  !device.board_name || !NO_OTA_BOARDS.has(device.board_name);
+
 // http:// URL to the physical frame's own WebGUI, derived from its host. Accepts
 // a bare host/IP or an already-qualified URL; '' when no host is set.
 const frameWebUrl = (device: Device): string => {
@@ -5281,6 +5309,32 @@ const removeDevice = async (id: number) => {
     showMessage('Device removed');
   } catch (e) {
     showMessage('Failed to remove device', true);
+  }
+};
+
+// Device ids with an OTA request in flight (drives the per-row button spinner).
+const otaUpdating = reactive(new Set<number>());
+
+// Server-driven firmware update: the server asks the (awake) frame to check for
+// an update and, if one exists, install it (the frame reboots when done). A
+// deep-sleeping/unreachable frame surfaces an error; an up-to-date frame no-ops
+// with a friendly message.
+const otaUpdate = async (device: Device) => {
+  const ok = await confirmDialog.value.open(
+    'Update firmware',
+    `Check ${device.name || device.host} for a firmware update and install it if one is available? The frame must be awake, and it will reboot if it updates.`
+  );
+  if (!ok) return;
+
+  otaUpdating.add(device.id);
+  try {
+    const res = await triggerOtaUpdate(device.id);
+    showMessage(res.message || (res.updated ? 'Firmware update started.' : 'Already up to date.'));
+  } catch (e: unknown) {
+    const err = e as { response?: { data?: { error?: string } } };
+    showMessage(err?.response?.data?.error || 'Failed to reach the frame (is it awake?)', true);
+  } finally {
+    otaUpdating.delete(device.id);
   }
 };
 

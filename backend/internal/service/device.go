@@ -301,6 +301,9 @@ func (s *DeviceService) RefreshDeviceFromHardware(id uint) (*model.Device, error
 	if sysInfo.BoardName != "" {
 		device.BoardName = sysInfo.BoardName
 	}
+	if sysInfo.Version != "" {
+		device.FirmwareVersion = sysInfo.Version
+	}
 	if sysInfo.HTTPSSupported != nil {
 		device.HTTPSSupported = *sysInfo.HTTPSSupported
 	}
@@ -337,6 +340,32 @@ func (s *DeviceService) RefreshDeviceFromHardware(id uint) (*model.Device, error
 		return nil, err
 	}
 	return &device, nil
+}
+
+// TriggerOTAUpdate asks an awake, OTA-capable frame to check for and install a
+// firmware update via its own /api/ota endpoints (check then install). Returns
+// (updated, message, error): updated=false with a friendly message when the
+// frame is already current; error when the frame is unreachable or refuses.
+// Board-agnostic — a board with no OTA partition (e.g. FireBeetle) reports "no
+// update available", so the caller can gate the UI but the server stays safe.
+func (s *DeviceService) TriggerOTAUpdate(id uint) (bool, string, error) {
+	var device model.Device
+	if err := s.db.First(&device, id).Error; err != nil {
+		return false, "", errors.New("device not found")
+	}
+
+	pf := photoframe.NewClient(device.Host)
+	available, err := pf.OTACheck()
+	if err != nil {
+		return false, "", fmt.Errorf("could not reach frame: %w", err)
+	}
+	if !available {
+		return false, "Frame is already on the latest version.", nil
+	}
+	if err := pf.OTAUpdate(); err != nil {
+		return false, "", fmt.Errorf("failed to start update: %w", err)
+	}
+	return true, "Firmware update started on the frame.", nil
 }
 
 func (s *DeviceService) DeleteDevice(id uint) error {

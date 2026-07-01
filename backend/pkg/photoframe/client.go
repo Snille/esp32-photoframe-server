@@ -576,3 +576,50 @@ func (c *Client) PushPalette(palette json.RawMessage) error {
 func (c *Client) Rotate() error {
 	return c.postJSON("/api/rotate", []byte("{}"))
 }
+
+// OTACheck asks the frame to check for a firmware update (POST /api/ota/check)
+// and reports whether one is available. Boards with no OTA partition (e.g. the
+// FireBeetle) always report false. Only effective on an awake/reachable frame.
+func (c *Client) OTACheck() (bool, error) {
+	ip, err := c.resolveHost(c.host)
+	if err != nil {
+		return false, fmt.Errorf("failed to resolve device %s: %w", c.host, err)
+	}
+
+	url := fmt.Sprintf("http://%s/api/ota/check", ip)
+	req, err := http.NewRequest("POST", url, bytes.NewBufferString("{}"))
+	if err != nil {
+		return false, err
+	}
+	req.Host = c.host
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return false, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return false, fmt.Errorf("device returned status: %d", resp.StatusCode)
+	}
+
+	var out struct {
+		UpdateAvailable bool   `json:"update_available"`
+		Status          string `json:"status"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		return false, fmt.Errorf("failed to decode ota check: %w", err)
+	}
+	if out.Status != "success" {
+		return false, fmt.Errorf("frame could not check for updates")
+	}
+	return out.UpdateAvailable, nil
+}
+
+// OTAUpdate tells the frame to download + install the update found on the last
+// OTACheck (POST /api/ota/update). Call OTACheck first — the frame refuses if
+// no update is pending or one is already in progress.
+func (c *Client) OTAUpdate() error {
+	return c.postJSON("/api/ota/update", []byte("{}"))
+}
