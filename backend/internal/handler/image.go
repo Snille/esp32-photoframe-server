@@ -229,6 +229,16 @@ func (h *ImageHandler) ServeImage(c echo.Context) error {
 		go h.db.Model(&model.Device{}).Where("id = ?", device.ID).Update("last_seen_at", now)
 	}
 
+	// Remember the frame's last reset cause (X-Reset-Reason) so the Devices list
+	// can flag a frame that's been crash-looping (watchdog/panic/brownout) after
+	// it recovers. Only write on change.
+	if deviceFound && !preview {
+		if rr := c.Request().Header.Get("X-Reset-Reason"); rr != "" && rr != device.LastResetReason {
+			device.LastResetReason = rr
+			go h.db.Model(&model.Device{}).Where("id = ?", device.ID).Update("last_reset_reason", rr)
+		}
+	}
+
 	// Remember the IP the frame checked in from (for the HA IP-address sensor).
 	// RealIP honours X-Forwarded-For, so this is the frame's LAN IP even behind a
 	// reverse proxy that forwards it. Only write on change to avoid churn.

@@ -71,6 +71,14 @@ export interface Device {
   // When the frame last checked in (pulled an image), RFC3339; null/absent if
   // never seen. Shown as "Last check-in" in the Devices list.
   last_seen_at?: string | null;
+  // Whether the frame checked in within ~2 rotation cycles (server-computed).
+  // false = stuck / offline / asleep — detected from absence, so it catches a
+  // hung frame that can't report anything itself.
+  online?: boolean;
+  // The frame's last reset cause (X-Reset-Reason): poweron / deepsleep / sw /
+  // task_wdt / int_wdt / wdt / panic / brownout. A crash cause is flagged in the
+  // Devices list so a crash loop is visible after the frame recovers.
+  last_reset_reason?: string;
   // false on no-PSRAM boards (FireBeetle) that can't do HTTPS; drives the
   // https:// image-URL warning in the device dialog.
   https_supported?: boolean;

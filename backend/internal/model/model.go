@@ -205,6 +205,10 @@ type Device struct {
 	// every real pull; surfaced as "Last check-in" in the Devices list. Nullable:
 	// null means the frame has never been seen since this column was added.
 	LastSeenAt *time.Time `json:"last_seen_at"`
+	// LastResetReason is the frame's most recent reset cause (X-Reset-Reason on
+	// pull): poweron / deepsleep / sw / task_wdt / int_wdt / wdt / panic /
+	// brownout. Lets the Devices list flag a crash-looping frame after recovery.
+	LastResetReason string `json:"last_reset_reason" gorm:"default:''"`
 	// BatteryStatus is the coarse charge state the frame reports each pull
 	// (X-Battery-Status): "charging", "full" or "on_battery". Empty when the
 	// board can't sense it; surfaced as the HA "Battery Status" sensor.

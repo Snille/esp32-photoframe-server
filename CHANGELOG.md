@@ -1,5 +1,11 @@
 # Changelog
 
+## v1.38.0
+
+### Added
+- **Online / overdue status dot in the Devices list.** Each frame's "Last check-in" now leads with a status dot: green when it checked in within ~2 rotation cycles, red when it's overdue (stuck, offline, or asleep), grey when never seen. Because it's derived purely from *absence* of a check-in, it flags a hung frame that can't report anything itself — the practical "something's wrong" signal. Uses the same threshold as the Home Assistant online sensor.
+- **Crash-reset flag.** The frame now reports its last reset cause (`X-Reset-Reason`); when it's a crash (task/interrupt watchdog, panic, brownout) the Devices list shows a warning under the firmware version. A truly hung frame can't report while hung, but the reset cause persists across the reboot, so a recurring crash becomes visible after the frame recovers. (Requires firmware that sends the header; older firmware simply shows nothing.)
+
 ## v1.37.0
 
 ### Added

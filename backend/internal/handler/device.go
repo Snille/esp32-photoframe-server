@@ -60,6 +60,7 @@ func (h *DeviceHandler) ListDevices(c echo.Context) error {
 		BatteryDaysRemaining float64 `json:"battery_days_remaining"` // -1 = unknown
 		BatteryTrend         string  `json:"battery_trend"`
 		BatteryPlugged       bool    `json:"battery_plugged"` // implausible reading → on USB
+		Online               bool    `json:"online"`          // checked in within ~2 rotation cycles
 	}
 	items := make([]deviceListItem, 0, len(devices))
 	for _, d := range devices {
@@ -74,6 +75,7 @@ func (h *DeviceHandler) ListDevices(c echo.Context) error {
 			BatteryDaysRemaining: est.DaysRemaining,
 			BatteryTrend:         est.Trend,
 			BatteryPlugged:       est.Plugged,
+			Online:               service.DeviceOnline(d.LastSeenAt, d.DeviceConfig),
 		})
 	}
 	return c.JSON(http.StatusOK, items)

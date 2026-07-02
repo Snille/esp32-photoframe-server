@@ -1525,6 +1525,15 @@
                         <v-icon size="x-small" class="mr-1">mdi-chip</v-icon
                         >{{ device.firmware_version }}
                       </div>
+                      <div
+                        v-if="isCrashReset(device)"
+                        class="text-caption text-warning"
+                        :title="`Last reset: ${resetReasonLabel(device.last_reset_reason)} — the frame recovered on its own, but repeated crashes here mean something's wrong`"
+                      >
+                        <v-icon size="x-small" color="warning" class="mr-1"
+                          >mdi-alert</v-icon
+                        >{{ resetReasonLabel(device.last_reset_reason) }}
+                      </div>
                     </td>
                     <td>
                       <a
@@ -1586,19 +1595,28 @@
                       <span v-else class="text-grey">—</span>
                     </td>
                     <td>
-                      <span
-                        :class="
-                          device.last_seen_at
-                            ? 'text-medium-emphasis'
-                            : 'text-grey'
-                        "
-                        :title="
-                          device.last_seen_at
-                            ? new Date(device.last_seen_at).toLocaleString()
-                            : 'Never seen'
-                        "
-                        >{{ formatLastSeen(device.last_seen_at) }}</span
-                      >
+                      <div class="d-flex align-center">
+                        <v-icon
+                          size="10"
+                          class="mr-2"
+                          :color="lastSeenDotColor(device)"
+                          :title="lastSeenStatusTitle(device)"
+                          >mdi-circle</v-icon
+                        >
+                        <span
+                          :class="
+                            device.last_seen_at
+                              ? 'text-medium-emphasis'
+                              : 'text-grey'
+                          "
+                          :title="
+                            device.last_seen_at
+                              ? new Date(device.last_seen_at).toLocaleString()
+                              : 'Never seen'
+                          "
+                          >{{ formatLastSeen(device.last_seen_at) }}</span
+                        >
+                      </div>
                     </td>
                     <td class="text-right">
                       <v-btn
@@ -5299,6 +5317,46 @@ const formatLastSeen = (iso?: string | null): string => {
   if (hrs < 24) return `${hrs} h ago`;
   const days = Math.floor(hrs / 24);
   return `${days} d ago`;
+};
+// Status dot for "Last check-in": green = online (server says it checked in
+// within ~2 rotation cycles), red = overdue (stuck/offline/asleep), grey = never
+// seen. Detected from absence, so it flags a hung frame that can't self-report.
+const lastSeenDotColor = (device: Device): string => {
+  if (!device.last_seen_at) return 'grey';
+  return device.online ? 'success' : 'error';
+};
+const lastSeenStatusTitle = (device: Device): string => {
+  if (!device.last_seen_at) return 'Never seen';
+  return device.online
+    ? 'Online — checked in recently'
+    : 'Overdue — no check-in within ~2 rotation cycles (stuck, offline, or asleep)';
+};
+// Reset causes that indicate a crash (vs a normal power-on / deep-sleep wake /
+// software reboot). Flagged in the Devices list so a crash loop is visible.
+const CRASH_RESETS = new Set([
+  'task_wdt',
+  'int_wdt',
+  'wdt',
+  'panic',
+  'brownout',
+]);
+const isCrashReset = (device: Device): boolean =>
+  !!device.last_reset_reason && CRASH_RESETS.has(device.last_reset_reason);
+const resetReasonLabel = (r?: string): string => {
+  switch (r) {
+    case 'task_wdt':
+      return 'Task watchdog reset';
+    case 'int_wdt':
+      return 'Interrupt watchdog reset';
+    case 'wdt':
+      return 'Watchdog reset';
+    case 'panic':
+      return 'Crash (panic)';
+    case 'brownout':
+      return 'Brownout (power) reset';
+    default:
+      return r || '';
+  }
 };
 
 // http:// URL to the physical frame's own WebGUI, derived from its host. Accepts

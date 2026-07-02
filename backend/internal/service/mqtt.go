@@ -759,6 +759,26 @@ func (s *MQTTService) nextImageStatus(device *model.Device) string {
 	return "Disabled — this image source has no deterministic next image"
 }
 
+// DeviceOnline reports whether a frame is currently considered online: it last
+// checked in (lastSeenAt) within ~2 rotation cycles (min 90 min). Mirrors the
+// HA per-device online sensor so the Devices list and Home Assistant agree.
+// A frame that hasn't been heard from within that window is stuck, offline, or
+// (legitimately) asleep — detected purely from absence, so it works even when
+// the frame is hung and can't report anything itself.
+func DeviceOnline(lastSeenAt *time.Time, deviceConfig string) bool {
+	if lastSeenAt == nil || lastSeenAt.IsZero() {
+		return false
+	}
+	pc := parsePollConfig(deviceConfig)
+	threshold := 90 * time.Minute
+	if pc.rotateInterval > 0 {
+		if t := 2*time.Duration(pc.rotateInterval)*time.Second + 15*time.Minute; t > threshold {
+			threshold = t
+		}
+	}
+	return time.Since(*lastSeenAt) < threshold
+}
+
 // pollConfig holds the frame's rotation / sleep settings parsed from the synced
 // device_config blob (the same JSON the config-sync pushes to the frame).
 type pollConfig struct {
