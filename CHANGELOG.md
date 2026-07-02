@@ -1,5 +1,11 @@
 # Changelog
 
+## v1.37.0
+
+### Added
+- **"Last check-in" in the Devices list.** Each frame now shows when it last pulled an image (relative time, exact timestamp on hover), stamped on every real pull. Migration `000051` adds `devices.last_seen_at`.
+- **USB-flash hint for the FireBeetle when a firmware update exists.** The classic-ESP32 FireBeetle can't update over the air, so instead of the OTA cloud it now shows a "plug in USB" icon (links to the web flasher) when its reported version is behind the latest release. OTA-capable boards keep the cloud button, still only shown when an update is actually available.
+
 ## v1.36.0
 
 ### Fixed

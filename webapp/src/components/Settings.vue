@@ -1466,6 +1466,7 @@
                     <th>Model</th>
                     <th>Host</th>
                     <th>Battery</th>
+                    <th>Last check-in</th>
                     <th class="text-right">Action</th>
                   </tr>
                 </thead>
@@ -1584,6 +1585,21 @@
                       </template>
                       <span v-else class="text-grey">—</span>
                     </td>
+                    <td>
+                      <span
+                        :class="
+                          device.last_seen_at
+                            ? 'text-medium-emphasis'
+                            : 'text-grey'
+                        "
+                        :title="
+                          device.last_seen_at
+                            ? new Date(device.last_seen_at).toLocaleString()
+                            : 'Never seen'
+                        "
+                        >{{ formatLastSeen(device.last_seen_at) }}</span
+                      >
+                    </td>
                     <td class="text-right">
                       <v-btn
                         v-if="updateAvailable(device)"
@@ -1598,6 +1614,17 @@
                             : 'Check for and install a firmware update (the frame must be awake)'
                         "
                         @click="otaUpdate(device)"
+                      ></v-btn>
+                      <v-btn
+                        v-if="flashUpdateAvailable(device)"
+                        color="warning"
+                        variant="text"
+                        size="small"
+                        icon="mdi-usb-port"
+                        href="https://snille.github.io/esp32-photoframe/#flash"
+                        target="_blank"
+                        rel="noopener"
+                        :title="`New firmware available (v${latestFwVersion}) — this board can't update over the air; plug it into USB and re-flash with the web flasher`"
                       ></v-btn>
                       <v-btn
                         color="primary"
@@ -1618,7 +1645,7 @@
                     </td>
                   </tr>
                   <tr v-if="availableDevices.length === 0">
-                    <td colspan="6" class="text-center text-grey py-4">
+                    <td colspan="7" class="text-center text-grey py-4">
                       No devices added.
                     </td>
                   </tr>
@@ -5238,6 +5265,12 @@ function fwNewer(a: string, b: string): boolean {
   }
   return false;
 }
+// Is the frame on an older firmware than the latest published release?
+const firmwareBehind = (device: Device): boolean => {
+  const cur = (device.firmware_version || '').trim().replace(/^v/, '');
+  if (!cur || !latestFwVersion.value) return false;
+  return fwNewer(latestFwVersion.value, cur);
+};
 // Show the OTA button only when an update is genuinely available (or the frame's
 // version is unknown, so a manual check is still reachable). A frame on the
 // latest firmware no longer shows a misleading "update" icon.
@@ -5245,8 +5278,27 @@ const updateAvailable = (device: Device): boolean => {
   if (!deviceSupportsOta(device)) return false;
   const cur = (device.firmware_version || '').trim().replace(/^v/, '');
   if (!cur) return true; // unknown version — keep the manual trigger reachable
-  if (!latestFwVersion.value) return false;
-  return fwNewer(latestFwVersion.value, cur);
+  return firmwareBehind(device);
+};
+// A board that can't OTA (FireBeetle) but is behind the latest firmware must be
+// re-flashed over USB via the web flasher, so we show a "plug in USB" hint
+// instead of the OTA cloud.
+const flashUpdateAvailable = (device: Device): boolean =>
+  !deviceSupportsOta(device) && firmwareBehind(device);
+
+// "Last check-in" relative-time formatter for the Devices list.
+const formatLastSeen = (iso?: string | null): string => {
+  if (!iso) return '—';
+  const t = new Date(iso).getTime();
+  if (isNaN(t)) return '—';
+  const secs = Math.max(0, Math.floor((Date.now() - t) / 1000));
+  if (secs < 60) return 'just now';
+  const mins = Math.floor(secs / 60);
+  if (mins < 60) return `${mins} min ago`;
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) return `${hrs} h ago`;
+  const days = Math.floor(hrs / 24);
+  return `${days} d ago`;
 };
 
 // http:// URL to the physical frame's own WebGUI, derived from its host. Accepts

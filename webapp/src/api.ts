@@ -68,6 +68,9 @@ export interface Device {
   // Firmware version the frame reports (X-Firmware-Version on each pull);
   // empty until it first checks in. Shown in the Devices list.
   firmware_version?: string;
+  // When the frame last checked in (pulled an image), RFC3339; null/absent if
+  // never seen. Shown as "Last check-in" in the Devices list.
+  last_seen_at?: string | null;
   // false on no-PSRAM boards (FireBeetle) that can't do HTTPS; drives the
   // https:// image-URL warning in the device dialog.
   https_supported?: boolean;
@@ -358,7 +361,7 @@ export const skipQueue = async (id: number, steps: number) => {
 // Resolves with { updated, message }: updated=false means it's already current.
 // Rejects (502) when the frame is unreachable/asleep. Only S3 boards have OTA.
 export const triggerOtaUpdate = async (
-  id: number,
+  id: number
 ): Promise<{ updated: boolean; message: string }> => {
   const response = await api.post(`/devices/${id}/ota-update`);
   return response.data;

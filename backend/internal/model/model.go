@@ -201,6 +201,10 @@ type Device struct {
 	// LastIP is the client IP the frame last checked in from (best-effort, via
 	// X-Forwarded-For when proxied), surfaced as an HA diagnostic sensor.
 	LastIP string `json:"last_ip" gorm:"default:''"`
+	// LastSeenAt is when the frame last checked in (pulled an image). Updated on
+	// every real pull; surfaced as "Last check-in" in the Devices list. Nullable:
+	// null means the frame has never been seen since this column was added.
+	LastSeenAt *time.Time `json:"last_seen_at"`
 	// BatteryStatus is the coarse charge state the frame reports each pull
 	// (X-Battery-Status): "charging", "full" or "on_battery". Empty when the
 	// board can't sense it; surfaced as the HA "Battery Status" sensor.

@@ -221,6 +221,14 @@ func (h *ImageHandler) ServeImage(c echo.Context) error {
 		}
 	}
 
+	// Stamp the last check-in time on every real pull, so the Devices list can
+	// show when each frame was last heard from ("Last check-in").
+	if deviceFound && !preview {
+		now := time.Now()
+		device.LastSeenAt = &now
+		go h.db.Model(&model.Device{}).Where("id = ?", device.ID).Update("last_seen_at", now)
+	}
+
 	// Remember the IP the frame checked in from (for the HA IP-address sensor).
 	// RealIP honours X-Forwarded-For, so this is the frame's LAN IP even behind a
 	// reverse proxy that forwards it. Only write on change to avoid churn.
