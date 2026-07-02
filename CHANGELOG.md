@@ -1,5 +1,11 @@
 # Changelog
 
+## v1.36.0
+
+### Fixed
+- **"Push to Device" no longer fails with a 500 on current frames.** The server picks the push format from the frame's reported firmware version, but a locally-built frame reports a git-describe `dev-<sha>` version — which the version comparison ranked *below every release*, so the server assumed the frame was pre-EPDGZ and downgraded the push to PNG, which the frame's push path then failed to process (`Failed to process PNG`). Dev builds are current and EPDGZ-capable, so `SupportsEPDGZ` now treats them as such; only genuinely old released firmware (< 2.6.1) still gets PNG.
+- **Push errors now name the actual cause.** A failed push previously surfaced only `device returned status: 500`. The server now includes the frame's own error message (e.g. `Failed to process PNG`) in the error shown in the Push dialog and the logs.
+
 ## v1.35.0
 
 ### Changed

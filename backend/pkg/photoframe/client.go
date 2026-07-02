@@ -22,7 +22,18 @@ import (
 const MinEPDGZVersion = "2.6.1"
 
 // SupportsEPDGZ returns true if the given firmware version supports the epdgz format.
+//
+// A locally-built firmware reports a git-describe "dev-<sha>" version in
+// /api/system-info. compareVersions() deliberately ranks "dev-" BELOW every
+// release (right for "is there a newer release?" OTA checks), but that's wrong
+// here: a dev build is by definition current and EPDGZ-capable (EPDGZ has
+// shipped since 2.6.1). Treating it as pre-EPDGZ made the server downgrade
+// pushes to PNG, which the frame then failed to process. So assume EPDGZ for
+// dev builds; only genuinely old *released* firmware (< 2.6.1) gets PNG.
 func SupportsEPDGZ(version string) bool {
+	if strings.HasPrefix(strings.TrimPrefix(version, "v"), "dev-") {
+		return true
+	}
 	return compareVersions(version, MinEPDGZVersion) > 0
 }
 
@@ -153,10 +164,22 @@ func (c *Client) PushImage(imageBytes []byte, thumbBytes []byte) error {
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
+		detail := strings.TrimSpace(readErrBody(resp.Body))
+		if detail != "" {
+			return fmt.Errorf("device returned status %d: %s", resp.StatusCode, detail)
+		}
 		return fmt.Errorf("device returned status: %d", resp.StatusCode)
 	}
 
 	return nil
+}
+
+// readErrBody reads a bounded snippet of an error response body so the device's
+// own error message (e.g. the frame's httpd_resp_send_err text) reaches the
+// server logs / UI instead of a bare status code.
+func readErrBody(r io.Reader) string {
+	b, _ := io.ReadAll(io.LimitReader(r, 512))
+	return string(b)
 }
 
 // PushRawEPD pushes uncompressed, display-ready 4bpp EPD bytes to the device as
@@ -192,6 +215,10 @@ func (c *Client) PushRawEPD(rawBytes []byte) error {
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
+		detail := strings.TrimSpace(readErrBody(resp.Body))
+		if detail != "" {
+			return fmt.Errorf("device returned status %d: %s", resp.StatusCode, detail)
+		}
 		return fmt.Errorf("device returned status: %d", resp.StatusCode)
 	}
 
