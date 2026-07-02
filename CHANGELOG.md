@@ -1,5 +1,10 @@
 # Changelog
 
+## v1.35.0
+
+### Changed
+- **The firmware-update button now only appears when an update is actually available.** Previously the OTA button showed for every OTA-capable frame, so a frame already on the latest firmware still looked like it had a pending update. The Devices list now compares each frame's reported version against the fork's latest published release and only shows the button when the frame is behind (or its version is unknown, so a manual check stays reachable). The tooltip names the available version.
+
 ## v1.34.0
 
 ### Added

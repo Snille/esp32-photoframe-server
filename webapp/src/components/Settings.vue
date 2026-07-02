@@ -1521,8 +1521,7 @@
                         class="text-caption text-medium-emphasis"
                         title="Firmware version the frame last reported"
                       >
-                        <v-icon size="x-small" class="mr-1"
-                          >mdi-chip</v-icon
+                        <v-icon size="x-small" class="mr-1">mdi-chip</v-icon
                         >{{ device.firmware_version }}
                       </div>
                     </td>
@@ -1587,13 +1586,17 @@
                     </td>
                     <td class="text-right">
                       <v-btn
-                        v-if="deviceSupportsOta(device)"
+                        v-if="updateAvailable(device)"
                         color="info"
                         variant="text"
                         size="small"
                         icon="mdi-cloud-download-outline"
                         :loading="otaUpdating.has(device.id)"
-                        title="Check for and install a firmware update (the frame must be awake)"
+                        :title="
+                          latestFwVersion
+                            ? `Firmware update available (v${latestFwVersion}) — click to install (the frame must be awake)`
+                            : 'Check for and install a firmware update (the frame must be awake)'
+                        "
                         @click="otaUpdate(device)"
                       ></v-btn>
                       <v-btn
@@ -5203,6 +5206,49 @@ const NO_OTA_BOARDS = new Set(['dfrobot_firebeetle_esp32e']);
 const deviceSupportsOta = (device: Device): boolean =>
   !device.board_name || !NO_OTA_BOARDS.has(device.board_name);
 
+// Latest published firmware version (from the fork's GitHub releases), used to
+// only surface the OTA button when the frame is actually behind — otherwise it
+// looked like an update was pending even on an up-to-date frame.
+const latestFwVersion = ref<string | null>(null);
+async function loadLatestFwVersion() {
+  try {
+    const r = await fetch(
+      'https://api.github.com/repos/Snille/esp32-photoframe/releases?per_page=30'
+    );
+    const rels = await r.json();
+    const stable = Array.isArray(rels)
+      ? rels.find(
+          (x: any) => !x.draft && !x.prerelease && /^v\d/.test(x.tag_name)
+        )
+      : null;
+    if (stable)
+      latestFwVersion.value = String(stable.tag_name).replace(/^v/, '');
+  } catch {
+    /* offline / rate-limited — leave null, button stays hidden for known-version frames */
+  }
+}
+// Compare dotted versions: is `a` newer than `b`?
+function fwNewer(a: string, b: string): boolean {
+  const pa = a.split('.').map((n) => parseInt(n, 10) || 0);
+  const pb = b.split('.').map((n) => parseInt(n, 10) || 0);
+  for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
+    const x = pa[i] || 0;
+    const y = pb[i] || 0;
+    if (x !== y) return x > y;
+  }
+  return false;
+}
+// Show the OTA button only when an update is genuinely available (or the frame's
+// version is unknown, so a manual check is still reachable). A frame on the
+// latest firmware no longer shows a misleading "update" icon.
+const updateAvailable = (device: Device): boolean => {
+  if (!deviceSupportsOta(device)) return false;
+  const cur = (device.firmware_version || '').trim().replace(/^v/, '');
+  if (!cur) return true; // unknown version — keep the manual trigger reachable
+  if (!latestFwVersion.value) return false;
+  return fwNewer(latestFwVersion.value, cur);
+};
+
 // http:// URL to the physical frame's own WebGUI, derived from its host. Accepts
 // a bare host/IP or an already-qualified URL; '' when no host is set.
 const frameWebUrl = (device: Device): string => {
@@ -5329,10 +5375,16 @@ const otaUpdate = async (device: Device) => {
   otaUpdating.add(device.id);
   try {
     const res = await triggerOtaUpdate(device.id);
-    showMessage(res.message || (res.updated ? 'Firmware update started.' : 'Already up to date.'));
+    showMessage(
+      res.message ||
+        (res.updated ? 'Firmware update started.' : 'Already up to date.')
+    );
   } catch (e: unknown) {
     const err = e as { response?: { data?: { error?: string } } };
-    showMessage(err?.response?.data?.error || 'Failed to reach the frame (is it awake?)', true);
+    showMessage(
+      err?.response?.data?.error || 'Failed to reach the frame (is it awake?)',
+      true
+    );
   } finally {
     otaUpdating.delete(device.id);
   }
@@ -5444,6 +5496,7 @@ const showMessage = (msg: string, isError = false) => {
 onMounted(async () => {
   loadSessions();
   loadSources();
+  loadLatestFwVersion();
   await store.fetchSettings();
   Object.assign(form, {
     Orientation: store.settings.orientation || 'landscape',
