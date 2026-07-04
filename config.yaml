@@ -2,8 +2,8 @@ name: "ESP32 PhotoFrame Server"
 version: "v1.39.0"
 slug: "esp32-photoframe-server"
 description: "Image server for ESP32 PhotoFrame"
-url: "https://github.com/aitjcize/esp32-photoframe-server"
-image: "aitjcize/esp32-photoframe-server"
+url: "https://github.com/Snille/esp32-photoframe-server"
+image: "mrsnille/photoframe-server"
 arch:
   - aarch64
   - amd64

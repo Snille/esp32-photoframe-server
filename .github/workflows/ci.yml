@@ -94,8 +94,8 @@ jobs:
           platforms: ${{ matrix.platform }}
           push: true
           tags: |
-            ${{ secrets.DOCKERHUB_USERNAME }}/esp32-photoframe-server:latest-${{ matrix.arch }}
-            ${{ secrets.DOCKERHUB_USERNAME }}/esp32-photoframe-server:${{ steps.version.outputs.VERSION }}-${{ matrix.arch }}
+            ${{ secrets.DOCKERHUB_USERNAME }}/photoframe-server:latest-${{ matrix.arch }}
+            ${{ secrets.DOCKERHUB_USERNAME }}/photoframe-server:${{ steps.version.outputs.VERSION }}-${{ matrix.arch }}
           cache-from: type=gha,scope=${{ matrix.arch }}
           cache-to: type=gha,mode=max,scope=${{ matrix.arch }}
 
@@ -116,15 +116,15 @@ jobs:
 
       - name: Create and push manifest (latest)
         run: |
-          docker buildx imagetools create -t ${{ secrets.DOCKERHUB_USERNAME }}/esp32-photoframe-server:latest \
-            ${{ secrets.DOCKERHUB_USERNAME }}/esp32-photoframe-server:latest-amd64 \
-            ${{ secrets.DOCKERHUB_USERNAME }}/esp32-photoframe-server:latest-arm64
+          docker buildx imagetools create -t ${{ secrets.DOCKERHUB_USERNAME }}/photoframe-server:latest \
+            ${{ secrets.DOCKERHUB_USERNAME }}/photoframe-server:latest-amd64 \
+            ${{ secrets.DOCKERHUB_USERNAME }}/photoframe-server:latest-arm64
 
       - name: Create and push manifest (${{ steps.version.outputs.VERSION }})
         run: |
-          docker buildx imagetools create -t ${{ secrets.DOCKERHUB_USERNAME }}/esp32-photoframe-server:${{ steps.version.outputs.VERSION }} \
-            ${{ secrets.DOCKERHUB_USERNAME }}/esp32-photoframe-server:${{ steps.version.outputs.VERSION }}-amd64 \
-            ${{ secrets.DOCKERHUB_USERNAME }}/esp32-photoframe-server:${{ steps.version.outputs.VERSION }}-arm64
+          docker buildx imagetools create -t ${{ secrets.DOCKERHUB_USERNAME }}/photoframe-server:${{ steps.version.outputs.VERSION }} \
+            ${{ secrets.DOCKERHUB_USERNAME }}/photoframe-server:${{ steps.version.outputs.VERSION }}-amd64 \
+            ${{ secrets.DOCKERHUB_USERNAME }}/photoframe-server:${{ steps.version.outputs.VERSION }}-arm64
 
   update-readme:
     name: Update Docker Hub README
@@ -138,5 +138,5 @@ jobs:
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
-          repository: ${{ secrets.DOCKERHUB_USERNAME }}/esp32-photoframe-server
+          repository: ${{ secrets.DOCKERHUB_USERNAME }}/photoframe-server
           short-description: "Image server for ESP32 PhotoFrame: Google Photos, Synology, Telegram & AI generation."
