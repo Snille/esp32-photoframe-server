@@ -39,10 +39,14 @@ func NewGalleryHandler(db *gorm.DB, synology *service.SynologyService, immich *s
 }
 
 // ListPhotos returns a paginated list of photos, optionally filtered by source
+// and, for Immich, by album membership (immich_album_ids, comma-separated —
+// OR semantics: a photo matches if it's in ANY of the given albums, since a
+// photo can legitimately belong to several albums at once).
 func (h *GalleryHandler) ListPhotos(c echo.Context) error {
 	limit := 50
 	offset := 0
 	source := c.QueryParam("source")
+	albumIDs := model.ParseImmichAlbumIDs(c.QueryParam("immich_album_ids"))
 
 	if limitStr := c.QueryParam("limit"); limitStr != "" {
 		if l, err := strconv.Atoi(limitStr); err == nil && l > 0 {
@@ -59,6 +63,11 @@ func (h *GalleryHandler) ListPhotos(c echo.Context) error {
 	query := h.db.Model(&model.Image{})
 	if source != "" {
 		query = query.Where("source = ?", source)
+	}
+	if len(albumIDs) > 0 {
+		query = query.Where("id IN (?)", h.db.Model(&model.ImmichImageAlbum{}).
+			Select("image_id").
+			Where("immich_album_id IN ?", albumIDs))
 	}
 
 	var total int64
@@ -79,15 +88,40 @@ func (h *GalleryHandler) ListPhotos(c echo.Context) error {
 	}
 
 	type PhotoResponse struct {
-		ID           uint      `json:"id"`
-		ThumbnailURL string    `json:"thumbnail_url"`
-		CreatedAt    time.Time `json:"created_at"`
-		Caption      string    `json:"caption"`
-		Width        int       `json:"width"`
-		Height       int       `json:"height"`
-		Orientation  string    `json:"orientation"`
-		Source       string    `json:"source"`
-		DisplayOrder int       `json:"display_order"`
+		ID            uint      `json:"id"`
+		ThumbnailURL  string    `json:"thumbnail_url"`
+		CreatedAt     time.Time `json:"created_at"`
+		Caption       string    `json:"caption"`
+		Width         int       `json:"width"`
+		Height        int       `json:"height"`
+		Orientation   string    `json:"orientation"`
+		Source        string    `json:"source"`
+		DisplayOrder  int       `json:"display_order"`
+		ImmichAlbums  []string  `json:"immich_albums,omitempty"`
+	}
+
+	// Photo -> album name(s), for the per-thumbnail "which album" badge. Empty
+	// for non-Immich sources (no rows in immich_image_albums for them).
+	imageIDs := make([]uint, 0, len(items))
+	for _, item := range items {
+		imageIDs = append(imageIDs, item.ID)
+	}
+	albumNamesByImage := map[uint][]string{}
+	if len(imageIDs) > 0 {
+		type membershipRow struct {
+			ImageID   uint
+			AlbumName string
+		}
+		var rows []membershipRow
+		h.db.Table("immich_image_albums iia").
+			Select("iia.image_id AS image_id, ia.album_name AS album_name").
+			Joins("JOIN immich_albums ia ON ia.immich_album_id = iia.immich_album_id").
+			Where("iia.image_id IN ?", imageIDs).
+			Order("ia.album_name COLLATE NOCASE").
+			Scan(&rows)
+		for _, r := range rows {
+			albumNamesByImage[r.ImageID] = append(albumNamesByImage[r.ImageID], r.AlbumName)
+		}
 	}
 
 	var photos []PhotoResponse
@@ -102,6 +136,7 @@ func (h *GalleryHandler) ListPhotos(c echo.Context) error {
 			Orientation:  item.Orientation,
 			Source:       item.Source,
 			DisplayOrder: item.DisplayOrder,
+			ImmichAlbums: albumNamesByImage[item.ID],
 		})
 	}
 

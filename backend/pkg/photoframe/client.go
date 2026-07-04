@@ -23,17 +23,9 @@ const MinEPDGZVersion = "2.6.1"
 
 // SupportsEPDGZ returns true if the given firmware version supports the epdgz format.
 //
-// A locally-built firmware reports a git-describe "dev-<sha>" version in
-// /api/system-info. compareVersions() deliberately ranks "dev-" BELOW every
-// release (right for "is there a newer release?" OTA checks), but that's wrong
-// here: a dev build is by definition current and EPDGZ-capable (EPDGZ has
-// shipped since 2.6.1). Treating it as pre-EPDGZ made the server downgrade
-// pushes to PNG, which the frame then failed to process. So assume EPDGZ for
-// dev builds; only genuinely old *released* firmware (< 2.6.1) gets PNG.
+// Dev builds ("dev-<sha>") are ranked below every release by compareVersions(),
+// so they're treated as not supporting EPDGZ here too.
 func SupportsEPDGZ(version string) bool {
-	if strings.HasPrefix(strings.TrimPrefix(version, "v"), "dev-") {
-		return true
-	}
 	return compareVersions(version, MinEPDGZVersion) > 0
 }
 

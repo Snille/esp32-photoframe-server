@@ -15,6 +15,7 @@ import (
 	"github.com/aitjcize/esp32-photoframe-server/backend/internal/model"
 	"github.com/aitjcize/esp32-photoframe-server/backend/internal/service"
 	"github.com/aitjcize/esp32-photoframe-server/backend/pkg/googlephotos"
+	"github.com/aitjcize/esp32-photoframe-server/backend/pkg/safego"
 	"github.com/labstack/echo/v4"
 	xdraw "golang.org/x/image/draw"
 	"gorm.io/gorm"
@@ -139,13 +140,13 @@ func (h *GoogleHandler) ProcessPickerSession(c echo.Context) error {
 	id := c.Param("id")
 
 	// Check if already processing? For now blindly start.
-	go func() {
+	safego.Go("google ProcessSessionItems", func() {
 		_, err := h.picker.ProcessSessionItems(id)
 		if err != nil {
 			// Error is recorded in progress state
 			// fmt.Printf("ProcessSessionItems background error: %v\n", err)
 		}
-	}()
+	})
 
 	return c.JSON(http.StatusAccepted, map[string]string{"status": "processing"})
 }

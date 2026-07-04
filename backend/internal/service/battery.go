@@ -1,6 +1,7 @@
 package service
 
 import (
+	"sort"
 	"time"
 
 	"github.com/aitjcize/esp32-photoframe-server/backend/internal/model"
@@ -43,6 +44,27 @@ const (
 	batteryDischargeHyst = 2.0
 	// Cap the points handed back for the sparkline.
 	batteryRecentLimit = 60
+	// batteryOutlierSoC: a swing bigger than this (%SoC, either direction)
+	// against a sample's surrounding readings is treated as a momentary
+	// WiFi-TX rail sag rather than a real level change — some boards (the
+	// EE02) briefly sag hundreds of mV under the radio's transmit current,
+	// which lands well within PlausibleVoltage's bounds (3.3-4.3 V) yet still
+	// implies a wildly wrong SoC on the steep part of the LiPo curve (e.g. a
+	// healthy ~4.03 V/80% reading briefly at 3.68 V/~9%, back to normal the
+	// very next wake). Left untreated this both flashes a bogus "2%"/"83%"/
+	// "20%" reading (Devices list, HA sensor, on-photo badge) and gets
+	// misread by the discharge-run segmentation below as a full recharge
+	// cycle, silently discarding real drain history. Chosen comfortably above
+	// the "per-wake voltage/percent noise (loaded voltage jitters a few %)"
+	// already documented above, and well below what a real recharge looks
+	// like once confirmed by a following reading.
+	batteryOutlierSoC = 15.0
+	// batteryMedianRadius: despikeSoC compares each reading against a
+	// 2*radius+1-wide window of its neighbors (median filter), so it can
+	// reject not just a single bad wake but up to `batteryMedianRadius`
+	// consecutive ones — observed in the field on one board reporting two
+	// sagged readings in a row before recovering.
+	batteryMedianRadius = 2
 )
 
 // RecordSample stores a reading, throttled per device. Best-effort; callers
@@ -133,17 +155,21 @@ func PlausibleVoltage(mv int) bool {
 
 // RobustBadgePercent returns the best battery percentage to draw on the photo
 // badge, smoothing over the EE02's occasional collapsed / erratic readings.
-// Preference order: voltage-derived SoC when the current voltage is plausible →
-// this device's most recent plausible sample → the frame's raw percent → -1
-// (no usable level, caller hides the badge). deviceID 0 skips the DB fallback
-// (e.g. preview / unknown device).
+// Preference order: voltage-derived SoC when the current voltage is plausible
+// AND consistent with this device's recent trend (not a rail-sag spike, see
+// despikeSoC) → this device's most recent trustworthy sample → the frame's
+// raw percent → -1 (no usable level, caller hides the badge). deviceID 0
+// skips the DB fallback (e.g. preview / unknown device).
 func (s *BatteryService) RobustBadgePercent(deviceID uint, percent, voltageMV int) int {
 	if PlausibleVoltage(voltageMV) {
-		return VoltageToSoC(voltageMV)
+		soc := voltageToSoC(voltageMV)
+		if deviceID == 0 || s.trustedAgainstRecent(deviceID, soc) {
+			return int(soc + 0.5)
+		}
 	}
 	if deviceID != 0 {
-		if p := s.lastPlausiblePercent(deviceID); p >= 0 {
-			return p
+		if soc, ok := s.trustedRecentSoC(deviceID); ok {
+			return int(soc + 0.5)
 		}
 	}
 	if percent >= 0 && percent <= 100 {
@@ -152,22 +178,48 @@ func (s *BatteryService) RobustBadgePercent(deviceID uint, percent, voltageMV in
 	return -1
 }
 
-// lastPlausiblePercent returns the voltage-derived SoC of this device's most
-// recent battery sample that carried a plausible voltage, or -1 if none of the
-// recent samples qualify. Used to ride out a single collapsed reading without
-// flashing a bogus near-empty badge.
-func (s *BatteryService) lastPlausiblePercent(deviceID uint) int {
+// trustedAgainstRecent reports whether soc — a just-reported LIVE reading,
+// not yet stored — is consistent with this device's recent stored history,
+// via the same despike window used for stored samples (see despikeSoC). Live
+// readings get the "no future context yet" edge of that window, same as the
+// most recent stored sample would.
+func (s *BatteryService) trustedAgainstRecent(deviceID uint, soc float64) bool {
+	var recent []model.BatterySample
+	if err := s.db.Where("device_id = ?", deviceID).
+		Order("sampled_at DESC").Limit(2 * batteryMedianRadius).Find(&recent).Error; err != nil || len(recent) == 0 {
+		return true // nothing to compare against yet — don't block the first reading
+	}
+	n := len(recent)
+	socs := make([]float64, n+1)
+	for i, sm := range recent { // recent is newest-first; reverse into oldest-first
+		socs[n-1-i] = socOf(sm)
+	}
+	socs[n] = soc
+	return despikeSoC(socs)[n]
+}
+
+// trustedRecentSoC returns this device's most recent stored sample that
+// survives despiking, or (0, false) if none qualify (no history yet, or every
+// recent sample is itself flagged). Used to ride out a collapsed live reading
+// without flashing a bogus badge value.
+func (s *BatteryService) trustedRecentSoC(deviceID uint) (float64, bool) {
 	var samples []model.BatterySample
 	if err := s.db.Where("device_id = ?", deviceID).
-		Order("sampled_at DESC").Limit(20).Find(&samples).Error; err != nil {
-		return -1
+		Order("sampled_at DESC").Limit(20).Find(&samples).Error; err != nil || len(samples) == 0 {
+		return 0, false
 	}
-	for _, sm := range samples {
-		if PlausibleVoltage(sm.VoltageMV) {
-			return VoltageToSoC(sm.VoltageMV)
+	n := len(samples)
+	socs := make([]float64, n)
+	for i, sm := range samples { // samples is newest-first; reverse into oldest-first
+		socs[n-1-i] = socOf(sm)
+	}
+	keep := despikeSoC(socs)
+	for i := n - 1; i >= 0; i-- {
+		if keep[i] {
+			return socs[i], true
 		}
 	}
-	return -1
+	return 0, false
 }
 
 // lipoCurve maps a single-cell LiPo resting voltage (mV) to an approximate
@@ -216,6 +268,67 @@ func voltageToSoC(mv int) float64 {
 	return 0
 }
 
+// socOf returns the best available SoC estimate for one sample: voltage-
+// derived (finer, steadier) when it carries a voltage, else the firmware's
+// raw percent.
+func socOf(sm model.BatterySample) float64 {
+	if sm.VoltageMV > 0 {
+		return voltageToSoC(sm.VoltageMV)
+	}
+	return float64(sm.Percent)
+}
+
+// median returns the middle value of vals (average of the two middle values
+// for an even-length slice). Returns 0 for an empty slice.
+func median(vals []float64) float64 {
+	if len(vals) == 0 {
+		return 0
+	}
+	s := append([]float64(nil), vals...)
+	sort.Float64s(s)
+	n := len(s)
+	if n%2 == 1 {
+		return s[n/2]
+	}
+	return (s[n/2-1] + s[n/2]) / 2
+}
+
+// despikeSoC flags which entries in a chronologically-ordered (oldest first)
+// SoC series are trustworthy, using a sliding-window median filter: entry i is
+// rejected when it differs from the median of its up-to-`batteryMedianRadius`
+// neighbors on EACH side by more than batteryOutlierSoC. This is the standard
+// technique for rejecting impulse ("salt and pepper") noise while preserving
+// real step changes — a genuine recharge is confirmed by the readings that
+// follow it (so it forms a majority within the window), whereas a momentary
+// rail sag is contradicted by the readings on both sides of it.
+//
+// The window naturally narrows at the edges of the slice (fewer neighbors
+// available), which is exactly what's wanted for the most recent entry: with
+// no "future" reading yet to confirm it, it's judged purely against recent
+// history — a real recharge only ever RISES, so this can suppress a spurious
+// low reading without ever hiding genuine (rising) charge-detection signal.
+func despikeSoC(socs []float64) []bool {
+	n := len(socs)
+	keep := make([]bool, n)
+	for i := 0; i < n; i++ {
+		lo := i - batteryMedianRadius
+		if lo < 0 {
+			lo = 0
+		}
+		hi := i + batteryMedianRadius
+		if hi > n-1 {
+			hi = n - 1
+		}
+		m := median(socs[lo : hi+1])
+		d := socs[i] - m
+		if d < 0 {
+			d = -d
+		}
+		keep[i] = d <= batteryOutlierSoC
+	}
+	return keep
+}
+
 // Estimate regresses state-of-charge over time across the trailing window. When
 // the samples carry battery voltage (newer firmware), it regresses a voltage-
 // derived SoC (finer, smoother) instead of the coarse firmware percentage.
@@ -234,8 +347,27 @@ func (s *BatteryService) Estimate(deviceID uint) BatteryEstimate {
 	est.HasData = true
 	est.SampleCount = len(samples)
 	last := samples[len(samples)-1]
-	est.CurrentPercent = last.Percent
-	est.CurrentVoltageMV = last.VoltageMV
+
+	// Despike: reject the (rare) momentary WiFi-TX rail sag that would
+	// otherwise flash a wildly wrong "current %" and get misread as a full
+	// recharge cycle by the discharge-run segmentation below — see
+	// despikeSoC / batteryOutlierSoC. effIdx is the most recent sample that
+	// survives despiking; "last" itself is kept for LastSampledAt (the true
+	// last check-in time is still worth showing even if its reading is
+	// momentarily suspect).
+	socs := make([]float64, len(samples))
+	for i, sm := range samples {
+		socs[i] = socOf(sm)
+	}
+	keep := despikeSoC(socs)
+	effIdx := len(samples) - 1
+	for effIdx > 0 && !keep[effIdx] {
+		effIdx--
+	}
+	effLast := samples[effIdx]
+
+	est.CurrentPercent = effLast.Percent
+	est.CurrentVoltageMV = effLast.VoltageMV
 	// Prefer the voltage-derived level for the reported "current %" when the frame
 	// sends a voltage: the firmware percent is coarse and, on some boards (XIAO
 	// EE02 on USB), erratic — a healthy 4.1 V can read 0%. This feeds the Devices
@@ -243,39 +375,46 @@ func (s *BatteryService) Estimate(deviceID uint) BatteryEstimate {
 	// Flag an implausible reading (EE02 on USB) BEFORE overwriting CurrentPercent
 	// with the voltage-derived value, so the raw firmware percent can be compared
 	// against the voltage.
-	est.Plugged = BatteryReadingImplausible(last.Percent, last.VoltageMV)
-	if last.VoltageMV > 0 {
-		est.CurrentPercent = VoltageToSoC(last.VoltageMV)
+	est.Plugged = BatteryReadingImplausible(effLast.Percent, effLast.VoltageMV)
+	if effLast.VoltageMV > 0 {
+		est.CurrentPercent = VoltageToSoC(effLast.VoltageMV)
 	}
 	est.WindowStart = samples[0].SampledAt
 	est.LastSampledAt = last.SampledAt
 
-	// Sparkline: cap to the most recent points.
+	// Sparkline: cap to the most recent points. Left as raw (non-despiked)
+	// samples — it's a background/context visual, not the headline number,
+	// and showing the true reported wobble is useful context in its own right.
 	if len(samples) > batteryRecentLimit {
 		est.Recent = samples[len(samples)-batteryRecentLimit:]
 	} else {
 		est.Recent = samples
 	}
 
-	// Prefer voltage when the latest reading has it and enough samples carry it.
+	// Prefer voltage when the latest trustworthy reading has it and enough
+	// samples carry it.
 	withV := 0
 	for _, sm := range samples {
 		if sm.VoltageMV > 0 {
 			withV++
 		}
 	}
-	useVoltage := last.VoltageMV > 0 && withV >= 2
+	useVoltage := effLast.VoltageMV > 0 && withV >= 2
 	if useVoltage {
 		est.Basis = "voltage"
 	}
 
 	// Build the (time, y) series. In voltage mode only points that carry a
 	// reading are used; y is the voltage-derived SoC. Otherwise y is the
-	// firmware percentage.
+	// firmware percentage. Despiked samples are excluded so a rail-sag
+	// doesn't corrupt the slope or get misread as a recharge below.
 	type pt struct{ x, y float64 }
 	var pts []pt
 	var t0 time.Time
-	for _, sm := range samples {
+	for i, sm := range samples {
+		if !keep[i] {
+			continue
+		}
 		if useVoltage && sm.VoltageMV <= 0 {
 			continue // skip pre-voltage samples so the slope isn't mixed
 		}
@@ -289,9 +428,9 @@ func (s *BatteryService) Estimate(deviceID uint) BatteryEstimate {
 		pts = append(pts, pt{x: sm.SampledAt.Sub(t0).Hours() / 24.0, y: y})
 	}
 
-	currentY := float64(last.Percent)
+	currentY := float64(effLast.Percent)
 	if useVoltage {
-		currentY = voltageToSoC(last.VoltageMV)
+		currentY = voltageToSoC(effLast.VoltageMV)
 	}
 
 	// Trim to the most recent discharge run. A mid-window recharge (the user

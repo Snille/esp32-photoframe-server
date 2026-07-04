@@ -15,6 +15,7 @@ import (
 	"github.com/aitjcize/esp32-photoframe-server/backend/pkg/gcalendar"
 	"github.com/aitjcize/esp32-photoframe-server/backend/pkg/imageops"
 	"github.com/aitjcize/esp32-photoframe-server/backend/pkg/photoframe"
+	"github.com/aitjcize/esp32-photoframe-server/backend/pkg/safego"
 	"github.com/aitjcize/esp32-photoframe-server/backend/pkg/weather"
 )
 
@@ -28,7 +29,7 @@ func (h *ImageHandler) supportsNextPreview(device *model.Device, source string) 
 // caller, so "Current Image" published here is exactly what the frame shows.
 // device is a value copy taken after the Previous←Current rotation.
 func (h *ImageHandler) afterServe(device model.Device, source string, servedImageIDs []uint) {
-	go func() {
+	safego.Go(fmt.Sprintf("afterServe(%d)", device.ID), func() {
 		if h.supportsNextPreview(&device, source) && len(servedImageIDs) > 0 {
 			justServed := servedImageIDs[len(servedImageIDs)-1]
 			if jpeg, err := h.renderNextThumbnail(device.ID, source, justServed); err != nil {
@@ -46,7 +47,7 @@ func (h *ImageHandler) afterServe(device model.Device, source string, servedImag
 		}
 		// Reloads the device + publishes fresh state/images to HA.
 		h.mqtt.NotifyDeviceUpdated(device.ID)
-	}()
+	})
 }
 
 // renderNextThumbnail renders a 400px JPEG thumbnail of the next image a device

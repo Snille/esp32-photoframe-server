@@ -113,21 +113,14 @@ func (c *Client) ListAlbums() ([]Album, error) {
 	return albums, nil
 }
 
-// GetAlbumAssets returns all image assets in the given album
+// GetAlbumAssets returns all image assets in the given album.
+//
+// Immich v3 removed the `assets` property from GET /api/albums/:id (the album
+// detail response no longer embeds its assets at all), so this goes through
+// POST /api/search/metadata with an albumIds filter instead, per Immich's own
+// v3 migration guide.
 func (c *Client) GetAlbumAssets(albumID string) ([]Asset, error) {
-	resp, err := c.do("GET", "/api/albums/"+albumID+"?withAssets=true")
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("api returned status: %d", resp.StatusCode)
-	}
-	var album AlbumDetail
-	if err := json.NewDecoder(resp.Body).Decode(&album); err != nil {
-		return nil, err
-	}
-	return album.Assets, nil
+	return c.SearchAssets(SearchMetadataRequest{AlbumIds: []string{albumID}})
 }
 
 // GetAsset fetches the full detail for one asset, including the recognized
@@ -191,11 +184,15 @@ func (c *Client) doJSON(method, path string, body interface{}) (*http.Response, 
 // SearchAssets pages through POST /api/search/metadata until the server runs
 // out of results, returning every IMAGE asset that matched. Use the
 // pre-filled SearchMetadataRequest to pick a filter mode (favorites,
-// date-bound, etc.); the function fills in Type, Page, and Size itself.
+// date-bound, etc.); the function fills in Type, Page, Size, WithExif, and
+// WithPeople itself — without the latter two Immich omits exifInfo/people
+// from every item even though the data exists.
 func (c *Client) SearchAssets(filter SearchMetadataRequest) ([]Asset, error) {
 	const pageSize = 250
 	filter.Type = "IMAGE"
 	filter.Size = pageSize
+	filter.WithExif = true
+	filter.WithPeople = true
 
 	var out []Asset
 	for page := 1; ; page++ {

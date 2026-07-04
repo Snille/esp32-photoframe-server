@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/aitjcize/esp32-photoframe-server/backend/internal/model"
+	"github.com/aitjcize/esp32-photoframe-server/backend/pkg/safego"
 	tele "gopkg.in/telebot.v3"
 	"gorm.io/gorm"
 )
@@ -57,7 +58,7 @@ func NewBot(token string, db *gorm.DB, dataDir string, settings SettingsProvider
 
 func (bot *Bot) Start() {
 	log.Println("Telegram bot started")
-	go bot.b.Start()
+	safego.Go("telegram bot poll loop", bot.b.Start)
 }
 
 func (bot *Bot) Stop() {

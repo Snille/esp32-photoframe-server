@@ -221,8 +221,13 @@ type Device struct {
 	// PendingNextImageID pins the exact image the next ordered pull should serve,
 	// set by the HA "Skip Queue" command to jump N steps in the rotation. The pull
 	// serves it and clears the pin (back to 0); rotation then continues from there.
-	PendingNextImageID uint      `json:"-" gorm:"default:0"`
-	CreatedAt          time.Time `json:"created_at"`
+	PendingNextImageID uint `json:"-" gorm:"default:0"`
+	// LogRetentionValue + LogRetentionUnit control how long this device's
+	// activity log (DeviceLog rows) is kept before the oldest entries are
+	// pruned. Unit is one of "days" | "months" | "years". Default 6 months.
+	LogRetentionValue int       `json:"log_retention_value" gorm:"default:6"`
+	LogRetentionUnit  string    `json:"log_retention_unit" gorm:"default:'months'"`
+	CreatedAt         time.Time `json:"created_at"`
 }
 
 const (
@@ -524,6 +529,24 @@ type DeviceHistory struct {
 	DeviceID uint      `gorm:"index" json:"device_id"` // Foreign key to Device
 	ImageID  uint      `json:"image_id"`
 	ServedAt time.Time `json:"served_at"`
+}
+
+// DeviceLog is one frame check-in attempt (success or failure), backing the
+// per-device "Activity Log". Unlike DeviceHistory (which only records a
+// successful image serve), this captures every pull the frame makes —
+// including ones that failed — so a stalled frame's actual behavior is
+// visible instead of just silence. Pruned to the owning device's configured
+// retention window (Device.LogRetentionValue/Unit) after every write.
+type DeviceLog struct {
+	ID             uint      `gorm:"primaryKey" json:"id"`
+	DeviceID       uint      `gorm:"index:idx_device_logs_device_time" json:"device_id"`
+	Timestamp      time.Time `gorm:"index:idx_device_logs_device_time" json:"timestamp"`
+	Success        bool      `json:"success"`
+	StatusCode     int       `json:"status_code"`
+	TriggerReason  string    `gorm:"column:trigger_reason" json:"trigger_reason"`
+	Source         string    `json:"source"`
+	ImageID        uint      `json:"image_id"`
+	BatteryPercent int       `json:"battery_percent"`
 }
 
 // BatterySample is one timestamped battery reading reported by a device on an

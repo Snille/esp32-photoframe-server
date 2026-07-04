@@ -13,6 +13,7 @@ import (
 
 	"github.com/aitjcize/esp32-photoframe-server/backend/internal/model"
 	"github.com/aitjcize/esp32-photoframe-server/backend/pkg/photoframe"
+	"github.com/aitjcize/esp32-photoframe-server/backend/pkg/safego"
 	mqtt "github.com/eclipse/paho.mqtt.golang"
 	"gorm.io/gorm"
 )
@@ -101,11 +102,16 @@ func (s *MQTTService) Start() {
 	// which must flip to offline once a frame stops reporting. A no-op while the
 	// broker is disconnected (isReady guards it). Discovery isn't re-sent (it's
 	// gated by discoverySent), only state.
+	//
+	// This ticker runs for the lifetime of the process, so a panic anywhere in
+	// publishAllDevices (already self-guarded, but defense in depth) would
+	// otherwise end the loop or, unrecovered, take the entire server down —
+	// silently stopping every frame from being served.
 	go func() {
 		ticker := time.NewTicker(5 * time.Minute)
 		for range ticker.C {
 			if _, ok := s.isReady(); ok {
-				s.publishAllDevices()
+				safego.Safe("mqtt publishAllDevices (ticker)", s.publishAllDevices)
 			}
 		}
 	}()
@@ -223,13 +229,13 @@ func (s *MQTTService) connect(cfg mqttConfig) {
 	s.mu.Unlock()
 	// Connect in the background; SetConnectRetry keeps trying if the broker is
 	// down so a wrong host never blocks startup.
-	go func() {
+	safego.Go("mqtt connect", func() {
 		token := client.Connect()
 		token.WaitTimeout(12 * time.Second)
 		if err := token.Error(); err != nil {
 			fmt.Printf("[mqtt] initial connect error: %v\n", err)
 		}
-	}()
+	})
 }
 
 func (s *MQTTService) disconnectLocked() {
@@ -269,7 +275,10 @@ func (s *MQTTService) publishAllDevices() {
 		return
 	}
 	for i := range devices {
-		s.publishDevice(&devices[i])
+		device := &devices[i]
+		safego.Safe(fmt.Sprintf("mqtt publishDevice(%d)", device.ID), func() {
+			s.publishDevice(device)
+		})
 	}
 }
 
@@ -279,7 +288,7 @@ func (s *MQTTService) NotifyDeviceUpdated(deviceID uint) {
 	if _, ok := s.isReady(); !ok {
 		return
 	}
-	go func() {
+	safego.Go(fmt.Sprintf("mqtt NotifyDeviceUpdated(%d)", deviceID), func() {
 		// The serve path records the battery sample + updates current_thumb_id
 		// asynchronously; a short delay lets those commit so we publish the
 		// fresh reading and image rather than the previous rotation's.
@@ -289,7 +298,7 @@ func (s *MQTTService) NotifyDeviceUpdated(deviceID uint) {
 			return
 		}
 		s.publishDevice(&device)
-	}()
+	})
 }
 
 // RepublishDiscovery forces HA discovery configs to be re-sent for one device,
@@ -415,18 +424,24 @@ func boardSupportsLiveControl(boardName string) bool {
 
 // onCommand routes an HA control command published to
 // <base>/device/<id>/cmd/<field>.
+// onCommand is invoked directly by the paho client's own internal goroutine
+// (once per incoming HA command message) — outside Echo's Recover()
+// middleware and outside our own goroutines, so it needs its own panic guard
+// too, same reasoning as safego elsewhere in this file.
 func (s *MQTTService) onCommand(_ mqtt.Client, msg mqtt.Message) {
-	parts := strings.Split(msg.Topic(), "/")
-	// Parse from the right so a base topic containing slashes still works.
-	if len(parts) < 4 || parts[len(parts)-2] != "cmd" {
-		return
-	}
-	field := parts[len(parts)-1]
-	id64, err := strconv.ParseUint(parts[len(parts)-3], 10, 64)
-	if err != nil {
-		return
-	}
-	s.handleCommand(uint(id64), field, strings.TrimSpace(string(msg.Payload())))
+	safego.Safe("mqtt onCommand", func() {
+		parts := strings.Split(msg.Topic(), "/")
+		// Parse from the right so a base topic containing slashes still works.
+		if len(parts) < 4 || parts[len(parts)-2] != "cmd" {
+			return
+		}
+		field := parts[len(parts)-1]
+		id64, err := strconv.ParseUint(parts[len(parts)-3], 10, 64)
+		if err != nil {
+			return
+		}
+		s.handleCommand(uint(id64), field, strings.TrimSpace(string(msg.Payload())))
+	})
 }
 
 func (s *MQTTService) handleCommand(deviceID uint, field, payload string) {
@@ -500,11 +515,11 @@ func (s *MQTTService) handleCommand(deviceID uint, field, payload string) {
 			return
 		}
 		host := device.Host
-		go func() {
+		safego.Go(fmt.Sprintf("mqtt rotate(%d)", deviceID), func() {
 			if err := photoframe.NewClient(host).Rotate(); err != nil {
 				fmt.Printf("[mqtt] rotate command failed for device %d: %v\n", deviceID, err)
 			}
-		}()
+		})
 		return
 	default:
 		return
@@ -552,11 +567,11 @@ func (s *MQTTService) applyConfigChange(device *model.Device, mutate func(map[st
 		// block this command handler (and thus the next queued command). An asleep
 		// frame picks the change up via config-sync on its next pull regardless.
 		host, id := device.Host, device.ID
-		go func() {
+		safego.Go(fmt.Sprintf("mqtt pushConfig(%d)", id), func() {
 			if err := photoframe.NewClient(host).PushConfig(cfg); err != nil {
 				fmt.Printf("[mqtt] config push to device %d failed (will sync on next pull): %v\n", id, err)
 			}
-		}()
+		})
 	}
 }
 

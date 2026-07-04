@@ -17,6 +17,9 @@ export const useGalleryStore = defineStore('gallery', {
       | 'immich'
       | 'gallery'
       | 'url_proxy',
+    // Immich-only: selected album ids to narrow the view to (OR semantics —
+    // union of the selected albums). Empty = show everything for the source.
+    immichAlbumIds: [] as string[],
   }),
   getters: {
     totalPages: (state) => Math.ceil(state.totalPhotos / state.limit),
@@ -34,6 +37,15 @@ export const useGalleryStore = defineStore('gallery', {
       this.page = 1;
       this.photos = [];
       this.totalPhotos = 0;
+      this.immichAlbumIds = [];
+      this.fetchPhotos();
+    },
+
+    // Sets the Immich album filter (chip multi-select) and refetches from
+    // page 1. Empty array clears the filter (shows every synced Immich photo).
+    setImmichAlbumFilter(ids: string[]) {
+      this.immichAlbumIds = ids;
+      this.page = 1;
       this.fetchPhotos();
     },
 
@@ -41,9 +53,15 @@ export const useGalleryStore = defineStore('gallery', {
       this.loading = true;
       try {
         const offset = (this.page - 1) * this.limit;
-        const res = await api.get(
-          `/gallery/photos?source=${this.source}&limit=${this.limit}&offset=${offset}`
-        );
+        const params: Record<string, string> = {
+          source: this.source,
+          limit: String(this.limit),
+          offset: String(offset),
+        };
+        if (this.source === 'immich' && this.immichAlbumIds.length > 0) {
+          params.immich_album_ids = this.immichAlbumIds.join(',');
+        }
+        const res = await api.get('/gallery/photos', { params });
         this.photos = res.data.photos || [];
         this.totalPhotos = res.data.total || 0;
       } catch (e) {

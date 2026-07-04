@@ -6,6 +6,7 @@ import (
 	"github.com/aitjcize/esp32-photoframe-server/backend/internal/service"
 	"github.com/aitjcize/esp32-photoframe-server/backend/internal/version"
 	"github.com/aitjcize/esp32-photoframe-server/backend/pkg/googlephotos"
+	"github.com/aitjcize/esp32-photoframe-server/backend/pkg/safego"
 	"github.com/labstack/echo/v4"
 )
 
@@ -64,7 +65,10 @@ func (h *Handler) UpdateSettings(c echo.Context) error {
 
 		// Dynamic Telegram Restart
 		if k == "telegram_bot_token" {
-			go h.telegram.Restart(v)
+			token := v
+			safego.Go("telegram restart", func() {
+				h.telegram.Restart(token)
+			})
 		}
 	}
 

@@ -132,6 +132,10 @@ export interface Device {
   favorites_only?: boolean;
   // Comma-separated overlay element keys whose icon is hidden (empty = all shown).
   overlay_hidden_icons?: string;
+  // How long this device's activity log is kept before the oldest entries are
+  // pruned. unit is one of "days" | "months" | "years". Default 6 months.
+  log_retention_value?: number;
+  log_retention_unit?: string;
   // How the frame is mounted relative to the panel's native orientation
   // (0/90/180/270). Drives the lightbox's viewing dimensions.
   display_rotation_deg?: number;
@@ -375,6 +379,63 @@ export const triggerOtaUpdate = async (
   return response.data;
 };
 
+// Activity log — every pull attempt the frame makes (success or failure),
+// unlike device history which only records a successful serve.
+export interface DeviceLogEntry {
+  id: number;
+  device_id: number;
+  timestamp: string;
+  success: boolean;
+  status_code: number;
+  trigger_reason: string;
+  source: string;
+  image_id: number;
+  battery_percent: number;
+}
+
+export const listDeviceLogs = async (
+  id: number,
+  limit = 50,
+  offset = 0
+): Promise<{ logs: DeviceLogEntry[]; total: number }> => {
+  const response = await api.get(`/devices/${id}/logs`, {
+    params: { limit, offset },
+  });
+  return response.data;
+};
+
+// How long a device's activity log is kept before the oldest entries are
+// pruned. unit is one of "days" | "months" | "years".
+export const updateDeviceLogRetention = async (
+  id: number,
+  value: number,
+  unit: string
+) => {
+  const response = await api.put(`/devices/${id}/log-retention`, {
+    value,
+    unit,
+  });
+  return response.data;
+};
+
+// Downloads the device's full retained activity log as a CSV file. Fetched
+// as a blob (not a plain <a href>) because the download endpoint requires the
+// same Bearer-token auth as the rest of the API — a bare link navigation
+// wouldn't carry it.
+export const downloadDeviceLogs = async (id: number, deviceName: string) => {
+  const response = await api.get(`/devices/${id}/logs/download`, {
+    responseType: 'blob',
+  });
+  const url = URL.createObjectURL(response.data);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `${deviceName.replace(/\s+/g, '-')}-activity-log.csv`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+};
+
 export const pushToDevice = async (deviceID: number, imageID: number) => {
   const response = await api.post(`/devices/${deviceID}/push`, {
     image_id: imageID,
@@ -504,14 +565,26 @@ export const listPhotos = async (
   source?: string,
   limit?: number,
   offset?: number,
-  sort?: string
+  sort?: string,
+  immichAlbumIds?: string[]
 ) => {
   const params: any = {};
   if (source) params.source = source;
   if (limit) params.limit = limit;
   if (offset) params.offset = offset;
   if (sort) params.sort = sort;
+  if (immichAlbumIds && immichAlbumIds.length > 0)
+    params.immich_album_ids = immichAlbumIds.join(',');
   const response = await api.get('gallery/photos', { params });
+  return response.data;
+};
+
+// Immich albums that currently have synced photos (not every album in the
+// whole Immich library) — backs the Gallery's per-album filter chips.
+export const listUsedImmichAlbums = async (): Promise<
+  { id: string; name: string; count: number }[]
+> => {
+  const response = await api.get('immich/albums/used');
   return response.data;
 };
 

@@ -1,7 +1,9 @@
 package service
 
 import (
+	"fmt"
 	"log"
+	"runtime/debug"
 	"sync"
 	"time"
 )
@@ -67,14 +69,30 @@ func (s *AutoSyncScheduler) TriggerReset() {
 	}
 }
 
-func (s *AutoSyncScheduler) SyncNow() error {
+// SyncNow runs the configured sync function. It recovers any panic from
+// runSync and treats it as a normal failure (logged + backed off), rather
+// than letting it propagate out of this goroutine: an unrecovered panic here
+// would crash the entire server process (this runs on a long-lived
+// background loop, not behind Echo's per-request Recover() middleware), not
+// just this one sync — which would silently stop every frame from being
+// served until someone noticed and restarted the container.
+func (s *AutoSyncScheduler) SyncNow() (err error) {
 	s.runMu.Lock()
 	defer s.runMu.Unlock()
 
-	if err := s.runSync(); err != nil {
-		s.stateMu.Lock()
-		s.retryAfter = time.Now().Add(s.retryInterval)
-		s.stateMu.Unlock()
+	defer func() {
+		if r := recover(); r != nil {
+			log.Printf("panic in %s sync: %v\n%s", s.name, r, debug.Stack())
+			err = fmt.Errorf("panic: %v", r)
+		}
+		if err != nil {
+			s.stateMu.Lock()
+			s.retryAfter = time.Now().Add(s.retryInterval)
+			s.stateMu.Unlock()
+		}
+	}()
+
+	if err = s.runSync(); err != nil {
 		return err
 	}
 

@@ -27,6 +27,7 @@ import (
 	"github.com/aitjcize/esp32-photoframe-server/backend/pkg/googlephotos"
 	"github.com/aitjcize/esp32-photoframe-server/backend/pkg/imageops"
 	"github.com/aitjcize/esp32-photoframe-server/backend/pkg/photoframe"
+	"github.com/aitjcize/esp32-photoframe-server/backend/pkg/safego"
 	"github.com/aitjcize/esp32-photoframe-server/backend/pkg/weather"
 	"github.com/labstack/echo/v4"
 	"gorm.io/gorm"
@@ -123,6 +124,28 @@ func (h *ImageHandler) ServeImage(c echo.Context) error {
 		}
 	}
 
+	// What triggered this pull, for the HA "Last Trigger" sensor AND the
+	// activity log below. The firmware reports its deep-sleep wake cause via
+	// X-Wake-Reason; firmware too old to send it is recorded as a generic
+	// "pull". Computed here (rather than down where it's applied to the
+	// device) so the deferred activity-log write below can see it regardless
+	// of which path through this handler is taken.
+	triggerReason := "pull"
+	switch strings.ToLower(c.Request().Header.Get("X-Wake-Reason")) {
+	case "timer":
+		triggerReason = "timer"
+	case "button":
+		triggerReason = "button"
+	case "boot":
+		triggerReason = "boot"
+	}
+
+	// servedImageIDs is filled in once the source picks photo(s) (may stay nil
+	// on an error path). Declared here, alongside triggerReason, so the
+	// deferred activity-log write below (added once batteryPercent is parsed)
+	// can see it however this handler returns.
+	var servedImageIDs []uint
+
 	// Native resolution of the device panel
 	nativeW, nativeH := 800, 480
 	// Logical resolution for image generation (respects orientation)
@@ -161,6 +184,27 @@ func (h *ImageHandler) ServeImage(c echo.Context) error {
 			batteryPercent = b
 		}
 	}
+
+	// Record this pull attempt to the device's activity log — success or
+	// failure alike, unlike DeviceHistory which only records a successful
+	// serve. Reads c.Response().Status, which Echo has already set by the time
+	// any `return c.JSON(...)` / `return c.Blob(...)` below this defer
+	// executes, so it reflects the real outcome regardless of which of this
+	// handler's many exit paths was taken. Skipped for preview renders (no
+	// mutation) and when the device couldn't be identified (nothing to file
+	// the entry under).
+	defer func() {
+		if !deviceFound || preview {
+			return
+		}
+		devID := device.ID
+		status := c.Response().Status
+		imgIDs := servedImageIDs
+		safego.Go("record device log", func() {
+			service.RecordDeviceLog(h.db, devID, status, triggerReason, source, imgIDs, batteryPercent)
+		})
+	}()
+
 	// Optional finer signal: pack voltage in millivolts (firmware >= 2.9.2).
 	voltageMV := 0
 	if vStr := c.Request().Header.Get("X-Battery-Voltage"); vStr != "" {
@@ -199,7 +243,9 @@ func (h *ImageHandler) ServeImage(c echo.Context) error {
 	// drain estimate or flip est.Plugged.
 	if deviceFound && !preview && batteryPercent >= 0 && batteryPercent <= 100 &&
 		(voltageMV == 0 || service.PlausibleVoltage(voltageMV)) {
-		go h.battery.RecordSample(device.ID, batteryPercent, voltageMV)
+		safego.Go("record battery sample", func() {
+			h.battery.RecordSample(device.ID, batteryPercent, voltageMV)
+		})
 	}
 
 	// Persist the charge status on change so the HA "Battery Status" sensor
@@ -208,7 +254,9 @@ func (h *ImageHandler) ServeImage(c echo.Context) error {
 		switch batteryStatus {
 		case "charging", "full", "on_battery":
 			device.BatteryStatus = batteryStatus
-			go h.db.Model(&model.Device{}).Where("id = ?", device.ID).Update("battery_status", batteryStatus)
+			safego.Go("update battery_status", func() {
+				h.db.Model(&model.Device{}).Where("id = ?", device.ID).Update("battery_status", batteryStatus)
+			})
 		}
 	}
 
@@ -217,7 +265,9 @@ func (h *ImageHandler) ServeImage(c echo.Context) error {
 	if deviceFound && !preview {
 		if fw := c.Request().Header.Get("X-Firmware-Version"); fw != "" && fw != device.FirmwareVersion {
 			device.FirmwareVersion = fw
-			go h.db.Model(&model.Device{}).Where("id = ?", device.ID).Update("firmware_version", fw)
+			safego.Go("update firmware_version", func() {
+				h.db.Model(&model.Device{}).Where("id = ?", device.ID).Update("firmware_version", fw)
+			})
 		}
 	}
 
@@ -226,7 +276,9 @@ func (h *ImageHandler) ServeImage(c echo.Context) error {
 	if deviceFound && !preview {
 		now := time.Now()
 		device.LastSeenAt = &now
-		go h.db.Model(&model.Device{}).Where("id = ?", device.ID).Update("last_seen_at", now)
+		safego.Go("update last_seen_at", func() {
+			h.db.Model(&model.Device{}).Where("id = ?", device.ID).Update("last_seen_at", now)
+		})
 	}
 
 	// Remember the frame's last reset cause (X-Reset-Reason) so the Devices list
@@ -235,7 +287,9 @@ func (h *ImageHandler) ServeImage(c echo.Context) error {
 	if deviceFound && !preview {
 		if rr := c.Request().Header.Get("X-Reset-Reason"); rr != "" && rr != device.LastResetReason {
 			device.LastResetReason = rr
-			go h.db.Model(&model.Device{}).Where("id = ?", device.ID).Update("last_reset_reason", rr)
+			safego.Go("update last_reset_reason", func() {
+				h.db.Model(&model.Device{}).Where("id = ?", device.ID).Update("last_reset_reason", rr)
+			})
 		}
 	}
 
@@ -245,23 +299,18 @@ func (h *ImageHandler) ServeImage(c echo.Context) error {
 	if deviceFound && !preview {
 		if ip := c.RealIP(); ip != "" && ip != device.LastIP {
 			device.LastIP = ip
-			go h.db.Model(&model.Device{}).Where("id = ?", device.ID).Update("last_ip", ip)
+			safego.Go("update last_ip", func() {
+				h.db.Model(&model.Device{}).Where("id = ?", device.ID).Update("last_ip", ip)
+			})
 		}
-		// Record what triggered this pull (for the HA "Last Trigger" sensor). The
-		// firmware reports its deep-sleep wake cause via X-Wake-Reason; firmware too
-		// old to send it is recorded as a generic "pull".
-		trigger := "pull"
-		switch strings.ToLower(c.Request().Header.Get("X-Wake-Reason")) {
-		case "timer":
-			trigger = "timer"
-		case "button":
-			trigger = "button"
-		case "boot":
-			trigger = "boot"
-		}
-		if trigger != device.LastTrigger {
-			device.LastTrigger = trigger
-			go h.db.Model(&model.Device{}).Where("id = ?", device.ID).Update("last_trigger", trigger)
+		// Record what triggered this pull (for the HA "Last Trigger" sensor).
+		// triggerReason was already derived from X-Wake-Reason above, for the
+		// activity-log defer.
+		if triggerReason != device.LastTrigger {
+			device.LastTrigger = triggerReason
+			safego.Go("update last_trigger", func() {
+				h.db.Model(&model.Device{}).Where("id = ?", device.ID).Update("last_trigger", triggerReason)
+			})
 		}
 
 		// A skip requested from the frame's own WebGUI arrives as X-Skip-Steps on an
@@ -404,7 +453,7 @@ func (h *ImageHandler) ServeImage(c echo.Context) error {
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to fetch photo: " + err.Error()})
 	}
 	img = sourceResp.Image
-	servedImageIDs := sourceResp.ImageIDs
+	servedImageIDs = sourceResp.ImageIDs
 	if sourceResp.PhotoTakenAt != nil {
 		photoTakenAt = sourceResp.PhotoTakenAt
 	}
@@ -438,7 +487,8 @@ func (h *ImageHandler) ServeImage(c echo.Context) error {
 
 	// 1.6. Record History (skipped for non-mutating preview renders)
 	if deviceFound && !preview && len(servedImageIDs) > 0 {
-		go func(devID uint, imgIDs []uint) {
+		devID, imgIDs := device.ID, servedImageIDs
+		safego.Go(fmt.Sprintf("record device history(%d)", devID), func() {
 			rows := make([]model.DeviceHistory, 0, len(imgIDs))
 			now := time.Now()
 			for _, imgID := range imgIDs {
@@ -477,7 +527,7 @@ func (h *ImageHandler) ServeImage(c echo.Context) error {
 				return tx.Where("device_id = ? AND served_at < ?", devID, cutoffs[0]).
 					Delete(&model.DeviceHistory{}).Error
 			})
-		}(device.ID, servedImageIDs)
+		})
 	}
 
 	// Rotation-position chip: where the just-served photo sits in this frame's
@@ -1023,10 +1073,10 @@ func (h *ImageHandler) GetServedImageThumbnail(c echo.Context) error {
 	}
 
 	// Delete after 5 minutes instead of immediately
-	go func() {
+	safego.Go("thumbnail cleanup", func() {
 		time.Sleep(5 * time.Minute)
 		os.Remove(thumbPath)
-	}()
+	})
 
 	// Set Content-Length header
 	c.Response().Header().Set("Content-Length", fmt.Sprintf("%d", len(data)))

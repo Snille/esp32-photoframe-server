@@ -92,6 +92,36 @@
         </div>
       </div>
 
+      <!-- Immich per-album filter: tag-style multi-select. A photo can belong
+           to several albums at once, so this is a union filter, not tabs. -->
+      <div
+        v-if="
+          !reorderMode &&
+          galleryStore.source === 'immich' &&
+          usedAlbums.length > 0
+        "
+        class="mb-4"
+      >
+        <div class="text-caption text-medium-emphasis mb-1">
+          Filter by album
+        </div>
+        <v-chip-group
+          v-model="selectedAlbumIds"
+          multiple
+          filter
+          @update:model-value="onAlbumFilterChange"
+        >
+          <v-chip
+            v-for="album in usedAlbums"
+            :key="album.id"
+            :value="album.id"
+            variant="tonal"
+            size="small"
+            >{{ album.name }} ({{ album.count }})</v-chip
+          >
+        </v-chip-group>
+      </div>
+
       <!-- Notification -->
       <v-alert
         v-if="galleryStore.importMessage"
@@ -191,6 +221,18 @@
                 class="delete-overlay"
                 @click.stop="requestDeletePhoto(photo)"
               />
+            </div>
+            <div
+              v-if="photo.immich_albums && photo.immich_albums.length > 0"
+              class="album-badge"
+              :title="photo.immich_albums.join(', ')"
+            >
+              <v-icon size="10" class="mr-1"
+                >mdi-folder-multiple-image</v-icon
+              >{{ photo.immich_albums[0]
+              }}<template v-if="photo.immich_albums.length > 1"
+                >&nbsp;+{{ photo.immich_albums.length - 1 }}</template
+              >
             </div>
           </v-card>
         </v-col>
@@ -421,6 +463,25 @@
   opacity: 1;
 }
 
+.album-badge {
+  position: absolute;
+  bottom: 4px;
+  left: 4px;
+  z-index: 1;
+  max-width: calc(100% - 8px);
+  padding: 1px 6px;
+  border-radius: 10px;
+  background: rgba(0, 0, 0, 0.6);
+  color: #fff;
+  font-size: 10px;
+  line-height: 16px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: flex;
+  align-items: center;
+}
+
 .confirm-thumb {
   max-width: 100%;
   max-height: 60vh;
@@ -466,13 +527,14 @@
 </style>
 
 <script setup lang="ts">
-import { onMounted, ref, reactive } from 'vue';
+import { onMounted, ref, reactive, watch } from 'vue';
 import draggable from 'vuedraggable';
 import { useAuthStore } from '../stores/auth';
 import { useGalleryStore } from '../stores/gallery';
 import {
   listDevices,
   listPhotos,
+  listUsedImmichAlbums,
   pushToDevice,
   reorderGalleryPhotos,
   type Device,
@@ -480,6 +542,38 @@ import {
 
 const authStore = useAuthStore();
 const galleryStore = useGalleryStore();
+
+// --- Immich per-album filter (tag-style, multi-select) ---
+// Only albums that actually have synced photos, not every album in the whole
+// Immich library — otherwise a large library would clutter this row with
+// albums no frame ever selected.
+const usedAlbums = ref<{ id: string; name: string; count: number }[]>([]);
+const selectedAlbumIds = ref<string[]>([]);
+
+const loadUsedAlbums = async () => {
+  try {
+    usedAlbums.value = await listUsedImmichAlbums();
+  } catch (e) {
+    console.error('Failed to load used Immich albums', e);
+    usedAlbums.value = [];
+  }
+};
+
+const onAlbumFilterChange = (ids: string[]) => {
+  galleryStore.setImmichAlbumFilter(ids);
+};
+
+watch(
+  () => galleryStore.source,
+  (src) => {
+    selectedAlbumIds.value = [];
+    if (src === 'immich') {
+      loadUsedAlbums();
+    } else {
+      usedAlbums.value = [];
+    }
+  }
+);
 
 // --- Custom-order drag-and-drop reordering ---
 const reorderMode = ref(false);
@@ -679,5 +773,8 @@ onMounted(async () => {
   // store.fetchSettings() is called by parent (Settings.vue) or app init.
   // Calling it here triggers a loading state loop if this component is mounted inside Settings.vue
   galleryStore.fetchPhotos();
+  if (galleryStore.source === 'immich') {
+    loadUsedAlbums();
+  }
 });
 </script>

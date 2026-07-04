@@ -372,6 +372,9 @@ func main() {
 	protectedApi.POST("/devices/:id/skip", deviceHandler.SkipQueue)
 	protectedApi.POST("/devices/:id/ota-update", deviceHandler.TriggerOTAUpdate)
 	protectedApi.GET("/devices/:id/battery", deviceHandler.BatteryEstimate)
+	protectedApi.GET("/devices/:id/logs", deviceHandler.GetDeviceLogs)
+	protectedApi.GET("/devices/:id/logs/download", deviceHandler.DownloadDeviceLogs)
+	protectedApi.PUT("/devices/:id/log-retention", deviceHandler.UpdateDeviceLogRetention)
 	protectedApi.GET("/devices/:id/config", ih.GetDeviceConfig)
 	protectedApi.PUT("/devices/:id/config", ih.UpdateDeviceConfig)
 	protectedApi.GET("/sources", ih.ListSources)
@@ -430,6 +433,7 @@ func main() {
 	protectedApi.POST("/immich/resync", imh.Resync)
 	protectedApi.POST("/immich/clear", imh.Clear)
 	protectedApi.GET("/immich/albums", imh.ListAlbums)
+	protectedApi.GET("/immich/albums/used", imh.UsedAlbums)
 	protectedApi.GET("/immich/count", imh.GetPhotoCount)
 
 	// Calendar (Protected)

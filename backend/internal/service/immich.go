@@ -202,6 +202,44 @@ func (s *ImmichService) ListAlbums() ([]immich.Album, error) {
 	return albums, nil
 }
 
+// AlbumUsage is one Immich album that currently has synced photos, for the
+// Gallery's per-album filter.
+type AlbumUsage struct {
+	ID    string `json:"id"`
+	Name  string `json:"name"`
+	Count int    `json:"count"`
+}
+
+// ListUsedAlbums returns the distinct Immich albums that currently have at
+// least one synced (non-deleted) photo, resolved to names via the cached
+// album-name table. Unlike ListAlbums (every album in the whole Immich
+// library, which can be dozens), this only surfaces albums actually relevant
+// to what's been synced — so the Gallery's filter row isn't cluttered with
+// albums no frame has ever selected.
+func (s *ImmichService) ListUsedAlbums() ([]AlbumUsage, error) {
+	type row struct {
+		ImmichAlbumID string
+		AlbumName     string
+		Count         int
+	}
+	var rows []row
+	err := s.db.Table("immich_image_albums iia").
+		Select("iia.immich_album_id AS immich_album_id, ia.album_name AS album_name, COUNT(DISTINCT iia.image_id) AS count").
+		Joins("JOIN immich_albums ia ON ia.immich_album_id = iia.immich_album_id").
+		Joins("JOIN images img ON img.id = iia.image_id AND img.deleted_at IS NULL").
+		Group("iia.immich_album_id, ia.album_name").
+		Order("ia.album_name COLLATE NOCASE").
+		Scan(&rows).Error
+	if err != nil {
+		return nil, err
+	}
+	out := make([]AlbumUsage, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, AlbumUsage{ID: r.ImmichAlbumID, Name: r.AlbumName, Count: r.Count})
+	}
+	return out, nil
+}
+
 // ImportPhotos syncs the global pool (per the configured mode) AND every Immich
 // album any frame has selected, recording album membership so a frame can be
 // filtered to its chosen albums. The global modes are unchanged; per-device
@@ -358,9 +396,14 @@ func (s *ImmichService) upsertAsset(client *immich.Client, asset immich.Asset) (
 	img.Location = location
 	img.Description = description
 
-	// People (faces) are NOT in album/search listings — fetch the asset detail.
-	// Best-effort: a failure just leaves names empty for this photo.
-	if detail, derr := client.GetAsset(asset.ID); derr == nil {
+	// Album/search listings include people directly since SearchAssets always
+	// asks for withPeople. The /api/memories endpoint has no such flag, so for
+	// that source (and as a safety net) fall back to the per-asset detail call,
+	// which always includes people. Best-effort: a failure just leaves names
+	// empty for this photo.
+	if len(asset.People) > 0 {
+		img.PeopleJSON = encodePeopleJSON(asset.People)
+	} else if detail, derr := client.GetAsset(asset.ID); derr == nil {
 		img.PeopleJSON = encodePeopleJSON(detail.People)
 	} else {
 		log.Printf("Immich: people fetch failed for asset %s: %v", asset.ID, derr)

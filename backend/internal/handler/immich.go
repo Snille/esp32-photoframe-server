@@ -63,3 +63,13 @@ func (h *ImmichHandler) GetPhotoCount(c echo.Context) error {
 	}
 	return c.JSON(http.StatusOK, map[string]interface{}{"count": count})
 }
+
+// UsedAlbums returns the Immich albums that currently have synced photos, for
+// the Gallery's per-album filter (see ListUsedAlbums).
+func (h *ImmichHandler) UsedAlbums(c echo.Context) error {
+	albums, err := h.immich.ListUsedAlbums()
+	if err != nil {
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": err.Error()})
+	}
+	return c.JSON(http.StatusOK, albums)
+}

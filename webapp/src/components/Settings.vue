@@ -1505,7 +1505,23 @@
                         >
                       </div>
                     </td>
-                    <td>{{ device.name }}</td>
+                    <td>
+                      {{ device.name }}
+                      <div
+                        v-if="deviceAlbumNames(device).length"
+                        class="d-flex flex-wrap ga-1 mt-1"
+                        :title="`This frame only shows photos from: ${deviceAlbumNames(device).join(', ')}`"
+                      >
+                        <v-chip
+                          v-for="name in deviceAlbumNames(device)"
+                          :key="name"
+                          size="x-small"
+                          variant="tonal"
+                          prepend-icon="mdi-folder-multiple-image"
+                          >{{ name }}</v-chip
+                        >
+                      </div>
+                    </td>
                     <td>
                       <a
                         v-if="boardUrl(device)"
@@ -1645,6 +1661,14 @@
                         :title="`New firmware available (v${latestFwVersion}) — this board can't update over the air; plug it into USB and re-flash with the web flasher`"
                       ></v-btn>
                       <v-btn
+                        color="default"
+                        variant="text"
+                        size="small"
+                        icon="mdi-text-box-outline"
+                        title="View Activity Log"
+                        @click="openDeviceLogDialog(device)"
+                      ></v-btn>
+                      <v-btn
                         color="primary"
                         variant="text"
                         size="small"
@@ -1704,6 +1728,134 @@
                       </div>
                     </template>
                   </v-img>
+                </v-card>
+              </v-dialog>
+
+              <!-- Device Activity Log (every pull attempt, success or failure —
+                   unlike the "Last check-in" column, which only reflects a real
+                   pull, this shows the full history within the retention window) -->
+              <v-dialog v-model="deviceLogDialog.show" width="900" max-width="96vw">
+                <v-card v-if="deviceLogDialog.device">
+                  <v-toolbar density="compact" color="surface">
+                    <v-toolbar-title class="text-body-1"
+                      >{{ deviceLogDialog.device.name }} — Activity Log</v-toolbar-title
+                    >
+                    <v-spacer></v-spacer>
+                    <v-btn
+                      icon="mdi-download"
+                      variant="text"
+                      title="Download full log as CSV"
+                      :loading="deviceLogDialog.downloading"
+                      @click="downloadDeviceLog"
+                    ></v-btn>
+                    <v-btn
+                      icon="mdi-close"
+                      variant="text"
+                      @click="deviceLogDialog.show = false"
+                    ></v-btn>
+                  </v-toolbar>
+                  <v-card-text>
+                    <div class="d-flex align-center flex-wrap ga-2 mb-4">
+                      <span class="text-body-2 text-medium-emphasis"
+                        >Keep logs for</span
+                      >
+                      <v-text-field
+                        v-model.number="deviceLogDialog.retentionValue"
+                        type="number"
+                        min="1"
+                        variant="outlined"
+                        density="compact"
+                        hide-details
+                        style="width: 90px"
+                      ></v-text-field>
+                      <v-select
+                        v-model="deviceLogDialog.retentionUnit"
+                        :items="[
+                          { title: 'Days', value: 'days' },
+                          { title: 'Months', value: 'months' },
+                          { title: 'Years', value: 'years' },
+                        ]"
+                        variant="outlined"
+                        density="compact"
+                        hide-details
+                        style="width: 130px"
+                      ></v-select>
+                      <v-btn
+                        color="primary"
+                        variant="tonal"
+                        size="small"
+                        :loading="deviceLogDialog.savingRetention"
+                        @click="saveDeviceLogRetention"
+                      >
+                        Save
+                      </v-btn>
+                      <span class="text-caption text-medium-emphasis"
+                        >— oldest entries are pruned automatically past this
+                        window. Default 6 months.</span
+                      >
+                    </div>
+
+                    <div
+                      v-if="deviceLogDialog.loading"
+                      class="d-flex justify-center pa-6"
+                    >
+                      <v-progress-circular indeterminate color="primary" />
+                    </div>
+                    <div
+                      v-else-if="deviceLogDialog.logs.length === 0"
+                      class="text-center text-grey py-6"
+                    >
+                      No activity recorded yet.
+                    </div>
+                    <v-table v-else density="compact" class="border rounded">
+                      <thead>
+                        <tr>
+                          <th>When</th>
+                          <th>Result</th>
+                          <th>Trigger</th>
+                          <th>Source</th>
+                          <th>Battery</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        <tr v-for="entry in deviceLogDialog.logs" :key="entry.id">
+                          <td>{{ new Date(entry.timestamp).toLocaleString() }}</td>
+                          <td>
+                            <v-chip
+                              size="x-small"
+                              :color="entry.success ? 'success' : 'error'"
+                              variant="tonal"
+                              >{{ entry.success ? 'OK' : 'Failed' }}
+                              {{ entry.status_code }}</v-chip
+                            >
+                          </td>
+                          <td>{{ entry.trigger_reason || '—' }}</td>
+                          <td>{{ entry.source || '—' }}</td>
+                          <td>
+                            {{
+                              entry.battery_percent >= 0
+                                ? entry.battery_percent + '%'
+                                : '—'
+                            }}
+                          </td>
+                        </tr>
+                      </tbody>
+                    </v-table>
+
+                    <div
+                      v-if="deviceLogTotalPages > 1"
+                      class="d-flex justify-center mt-4"
+                    >
+                      <v-pagination
+                        v-model="deviceLogDialog.page"
+                        :length="deviceLogTotalPages"
+                        :total-visible="5"
+                        rounded="circle"
+                        density="compact"
+                        @update:model-value="loadDeviceLogs"
+                      ></v-pagination>
+                    </div>
+                  </v-card-text>
                 </v-card>
               </v-dialog>
 
@@ -3527,6 +3679,10 @@ import {
   googleCalendarLogin,
   googleCalendarLogout,
   getMqttStatus,
+  listDeviceLogs,
+  type DeviceLogEntry,
+  updateDeviceLogRetention,
+  downloadDeviceLogs,
 } from '../api';
 import Gallery from './Gallery.vue';
 import ConfirmDialog from './ConfirmDialog.vue';
@@ -5359,6 +5515,22 @@ const resetReasonLabel = (r?: string): string => {
   }
 };
 
+// Resolves a device's selected Immich album ids (comma-separated) to names,
+// via the album list already loaded for the Immich settings tab (form.immich_albums /
+// immichStore.albums populated on mount). Falls back to the raw id when the
+// name cache hasn't loaded yet, so the chip is never blank.
+const deviceAlbumNames = (device: Device): string[] => {
+  const ids = (device.immich_album_ids || '')
+    .split(',')
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0);
+  if (ids.length === 0) return [];
+  const byId = new Map(
+    (form.immich_albums || []).map((a: any) => [a.id, a.albumName])
+  );
+  return ids.map((id) => byId.get(id) || id);
+};
+
 // http:// URL to the physical frame's own WebGUI, derived from its host. Accepts
 // a bare host/IP or an already-qualified URL; '' when no host is set.
 const frameWebUrl = (device: Device): string => {
@@ -5412,6 +5584,94 @@ const openFullImage = (device: Device) => {
     fullImageHeight.value = undefined;
   }
   fullImageDialog.value = true;
+};
+
+// Per-device activity log dialog: every pull attempt (success or failure),
+// plus the retention window that controls how much history is kept.
+const deviceLogDialog = reactive({
+  show: false,
+  device: null as Device | null,
+  logs: [] as DeviceLogEntry[],
+  total: 0,
+  page: 1,
+  limit: 50,
+  loading: false,
+  downloading: false,
+  retentionValue: 6,
+  retentionUnit: 'months',
+  savingRetention: false,
+});
+const deviceLogTotalPages = computed(() =>
+  Math.max(1, Math.ceil(deviceLogDialog.total / deviceLogDialog.limit))
+);
+
+const openDeviceLogDialog = (device: Device) => {
+  deviceLogDialog.device = device;
+  deviceLogDialog.retentionValue = device.log_retention_value || 6;
+  deviceLogDialog.retentionUnit = device.log_retention_unit || 'months';
+  deviceLogDialog.page = 1;
+  deviceLogDialog.show = true;
+  loadDeviceLogs();
+};
+
+const loadDeviceLogs = async () => {
+  if (!deviceLogDialog.device) return;
+  deviceLogDialog.loading = true;
+  try {
+    const offset = (deviceLogDialog.page - 1) * deviceLogDialog.limit;
+    const res = await listDeviceLogs(
+      deviceLogDialog.device.id,
+      deviceLogDialog.limit,
+      offset
+    );
+    deviceLogDialog.logs = res.logs || [];
+    deviceLogDialog.total = res.total || 0;
+  } catch (e) {
+    console.error('Failed to load device logs', e);
+  } finally {
+    deviceLogDialog.loading = false;
+  }
+};
+
+const saveDeviceLogRetention = async () => {
+  if (!deviceLogDialog.device) return;
+  deviceLogDialog.savingRetention = true;
+  try {
+    await updateDeviceLogRetention(
+      deviceLogDialog.device.id,
+      deviceLogDialog.retentionValue,
+      deviceLogDialog.retentionUnit
+    );
+    deviceLogDialog.device.log_retention_value = deviceLogDialog.retentionValue;
+    deviceLogDialog.device.log_retention_unit = deviceLogDialog.retentionUnit;
+    // A shorter window prunes immediately server-side; refresh to reflect it.
+    deviceLogDialog.page = 1;
+    await loadDeviceLogs();
+    showMessage('Log retention saved.');
+  } catch (e: any) {
+    showMessage(
+      e?.response?.data?.error || 'Failed to save log retention',
+      true
+    );
+  } finally {
+    deviceLogDialog.savingRetention = false;
+  }
+};
+
+const downloadDeviceLog = async () => {
+  if (!deviceLogDialog.device) return;
+  deviceLogDialog.downloading = true;
+  try {
+    await downloadDeviceLogs(
+      deviceLogDialog.device.id,
+      deviceLogDialog.device.name
+    );
+  } catch (e) {
+    console.error('Failed to download device log', e);
+    showMessage('Failed to download log', true);
+  } finally {
+    deviceLogDialog.downloading = false;
+  }
 };
 
 const batteryColor = (p: number) =>

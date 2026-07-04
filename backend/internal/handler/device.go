@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	"image"
+	"log"
 	"net/http"
 	"os"
 	"strconv"
@@ -15,6 +16,7 @@ import (
 	"github.com/aitjcize/esp32-photoframe-server/backend/internal/model"
 	"github.com/aitjcize/esp32-photoframe-server/backend/internal/publicart"
 	"github.com/aitjcize/esp32-photoframe-server/backend/internal/service"
+	"github.com/aitjcize/esp32-photoframe-server/backend/pkg/safego"
 	"github.com/labstack/echo/v4"
 	"gorm.io/gorm"
 )
@@ -174,7 +176,11 @@ func (h *DeviceHandler) AddDevice(c echo.Context) error {
 	// Pull in the newly-selected Immich albums (import + membership) in the
 	// background so the frame's chosen photos become available.
 	if device.ImmichAlbumIDs != "" && h.immichService != nil {
-		go h.immichService.ImportPhotos()
+		safego.Go("device ImportPhotos", func() {
+			if err := h.immichService.ImportPhotos(); err != nil {
+				log.Printf("Immich import after device save failed: %v", err)
+			}
+		})
 	}
 	if h.mqtt != nil {
 		h.mqtt.NotifyDeviceUpdated(device.ID)
@@ -278,7 +284,11 @@ func (h *DeviceHandler) UpdateDevice(c echo.Context) error {
 	}
 	// Import any newly-selected Immich albums (+ membership) in the background.
 	if device.ImmichAlbumIDs != "" && h.immichService != nil {
-		go h.immichService.ImportPhotos()
+		safego.Go("device ImportPhotos", func() {
+			if err := h.immichService.ImportPhotos(); err != nil {
+				log.Printf("Immich import after device save failed: %v", err)
+			}
+		})
 	}
 	if h.mqtt != nil {
 		// Re-send HA discovery (not just state) so a changed device name reaches
@@ -360,6 +370,77 @@ func (h *DeviceHandler) SkipQueue(c echo.Context) error {
 		h.mqtt.NotifyDeviceUpdated(device.ID)
 	}
 	return c.JSON(http.StatusOK, map[string]interface{}{"status": "ok", "pinned_image_id": pinned})
+}
+
+// GET /api/devices/:id/logs — paginated activity log (every pull attempt,
+// success or failure), newest first.
+func (h *DeviceHandler) GetDeviceLogs(c echo.Context) error {
+	id, _ := strconv.Atoi(c.Param("id"))
+	limit := 50
+	if v, err := strconv.Atoi(c.QueryParam("limit")); err == nil && v > 0 {
+		limit = v
+	}
+	offset := 0
+	if v, err := strconv.Atoi(c.QueryParam("offset")); err == nil && v >= 0 {
+		offset = v
+	}
+	logs, total, err := service.ListDeviceLogs(h.db, uint(id), limit, offset)
+	if err != nil {
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to list device logs"})
+	}
+	return c.JSON(http.StatusOK, map[string]interface{}{
+		"logs":   logs,
+		"total":  total,
+		"limit":  limit,
+		"offset": offset,
+	})
+}
+
+// GET /api/devices/:id/logs/download — the device's full retained activity
+// log as a CSV file.
+func (h *DeviceHandler) DownloadDeviceLogs(c echo.Context) error {
+	id, _ := strconv.Atoi(c.Param("id"))
+	var device model.Device
+	if err := h.db.First(&device, id).Error; err != nil {
+		return c.JSON(http.StatusNotFound, map[string]string{"error": "device not found"})
+	}
+	filename := fmt.Sprintf("%s-activity-log.csv", strings.ReplaceAll(device.Name, " ", "-"))
+	c.Response().Header().Set(echo.HeaderContentDisposition, fmt.Sprintf("attachment; filename=%q", filename))
+	c.Response().Header().Set(echo.HeaderContentType, "text/csv")
+	c.Response().WriteHeader(http.StatusOK)
+	if err := service.WriteDeviceLogsCSV(h.db, uint(id), c.Response()); err != nil {
+		log.Printf("Failed to write device log CSV for device %d: %v", id, err)
+	}
+	return nil
+}
+
+var validLogRetentionUnits = map[string]bool{"days": true, "months": true, "years": true}
+
+// PUT /api/devices/:id/log-retention — how long this device's activity log is
+// kept before the oldest entries are pruned. body: {"value": 6, "unit": "months"}.
+func (h *DeviceHandler) UpdateDeviceLogRetention(c echo.Context) error {
+	id, _ := strconv.Atoi(c.Param("id"))
+	var req struct {
+		Value int    `json:"value"`
+		Unit  string `json:"unit"`
+	}
+	if err := c.Bind(&req); err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid request"})
+	}
+	if req.Value <= 0 || !validLogRetentionUnits[req.Unit] {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "value must be > 0 and unit one of days/months/years"})
+	}
+	if err := h.db.Model(&model.Device{}).Where("id = ?", id).Updates(map[string]interface{}{
+		"log_retention_value": req.Value,
+		"log_retention_unit":  req.Unit,
+	}).Error; err != nil {
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to update retention"})
+	}
+	// Apply the new (possibly shorter) window immediately rather than waiting
+	// for the next pull to trigger a prune.
+	cutoff := service.RetentionCutoff(req.Value, req.Unit)
+	h.db.Where("device_id = ? AND timestamp < ?", id, cutoff).Delete(&model.DeviceLog{})
+	return c.JSON(http.StatusOK, map[string]interface{}{"log_retention_value": req.Value, "log_retention_unit": req.Unit})
 }
 
 // DELETE /api/devices/:id
