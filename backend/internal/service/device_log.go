@@ -11,35 +11,63 @@ import (
 	"gorm.io/gorm"
 )
 
+// DeviceLogParams is everything ServeImage can observe about one pull attempt.
+// A struct rather than a long positional argument list since this has grown
+// to capture every signal a frame can report (see ServeImage) — both for
+// troubleshooting (cross-check a bad reading against voltage/status/reset
+// cause) and so there's enough history to chart over time later.
+type DeviceLogParams struct {
+	DeviceID        uint
+	StatusCode      int
+	TriggerReason   string
+	Source          string
+	ImageIDs        []uint
+	BatteryPercent  int
+	VoltageMV       int
+	BatteryStatus   string
+	FirmwareVersion string
+	ResetReason     string
+	IP              string
+	DisplayWidth    int
+	DisplayHeight   int
+}
+
 // RecordDeviceLog persists one frame check-in attempt (success or failure)
 // and prunes entries older than the device's configured retention window.
 // Meant to run off the request path (see safego.Go in ServeImage) so it never
 // delays or fails the image response.
-func RecordDeviceLog(db *gorm.DB, deviceID uint, statusCode int, triggerReason, source string, imageIDs []uint, batteryPercent int) {
+func RecordDeviceLog(db *gorm.DB, p DeviceLogParams) {
 	entry := model.DeviceLog{
-		DeviceID:       deviceID,
-		Timestamp:      time.Now(),
-		Success:        statusCode >= 200 && statusCode < 300,
-		StatusCode:     statusCode,
-		TriggerReason:  triggerReason,
-		Source:         source,
-		BatteryPercent: batteryPercent,
+		DeviceID:        p.DeviceID,
+		Timestamp:       time.Now(),
+		Success:         p.StatusCode >= 200 && p.StatusCode < 300,
+		StatusCode:      p.StatusCode,
+		TriggerReason:   p.TriggerReason,
+		Source:          p.Source,
+		BatteryPercent:  p.BatteryPercent,
+		VoltageMV:       p.VoltageMV,
+		BatteryStatus:   p.BatteryStatus,
+		FirmwareVersion: p.FirmwareVersion,
+		ResetReason:     p.ResetReason,
+		IP:              p.IP,
+		DisplayWidth:    p.DisplayWidth,
+		DisplayHeight:   p.DisplayHeight,
 	}
-	if len(imageIDs) > 0 {
-		entry.ImageID = imageIDs[len(imageIDs)-1]
+	if len(p.ImageIDs) > 0 {
+		entry.ImageID = p.ImageIDs[len(p.ImageIDs)-1]
 	}
 	if err := db.Create(&entry).Error; err != nil {
-		log.Printf("Failed to write device log for device %d: %v", deviceID, err)
+		log.Printf("Failed to write device log for device %d: %v", p.DeviceID, err)
 		return
 	}
 
 	var device model.Device
-	if err := db.Select("log_retention_value", "log_retention_unit").First(&device, deviceID).Error; err != nil {
+	if err := db.Select("log_retention_value", "log_retention_unit").First(&device, p.DeviceID).Error; err != nil {
 		return
 	}
 	cutoff := RetentionCutoff(device.LogRetentionValue, device.LogRetentionUnit)
-	if err := db.Where("device_id = ? AND timestamp < ?", deviceID, cutoff).Delete(&model.DeviceLog{}).Error; err != nil {
-		log.Printf("Failed to prune device log for device %d: %v", deviceID, err)
+	if err := db.Where("device_id = ? AND timestamp < ?", p.DeviceID, cutoff).Delete(&model.DeviceLog{}).Error; err != nil {
+		log.Printf("Failed to prune device log for device %d: %v", p.DeviceID, err)
 	}
 }
 
@@ -85,7 +113,11 @@ func WriteDeviceLogsCSV(db *gorm.DB, deviceID uint, w io.Writer) error {
 		return err
 	}
 	cw := csv.NewWriter(w)
-	if err := cw.Write([]string{"timestamp", "success", "status_code", "trigger", "source", "image_id", "battery_percent"}); err != nil {
+	if err := cw.Write([]string{
+		"timestamp", "success", "status_code", "trigger", "source", "image_id",
+		"battery_percent", "voltage_mv", "battery_status", "firmware_version",
+		"reset_reason", "ip", "display_width", "display_height",
+	}); err != nil {
 		return err
 	}
 	for _, l := range logs {
@@ -97,6 +129,13 @@ func WriteDeviceLogsCSV(db *gorm.DB, deviceID uint, w io.Writer) error {
 			l.Source,
 			strconv.FormatUint(uint64(l.ImageID), 10),
 			strconv.Itoa(l.BatteryPercent),
+			strconv.Itoa(l.VoltageMV),
+			l.BatteryStatus,
+			l.FirmwareVersion,
+			l.ResetReason,
+			l.IP,
+			strconv.Itoa(l.DisplayWidth),
+			strconv.Itoa(l.DisplayHeight),
 		}); err != nil {
 			return err
 		}

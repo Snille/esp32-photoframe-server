@@ -1734,11 +1734,16 @@
               <!-- Device Activity Log (every pull attempt, success or failure —
                    unlike the "Last check-in" column, which only reflects a real
                    pull, this shows the full history within the retention window) -->
-              <v-dialog v-model="deviceLogDialog.show" width="900" max-width="96vw">
+              <v-dialog
+                v-model="deviceLogDialog.show"
+                width="1400"
+                max-width="96vw"
+              >
                 <v-card v-if="deviceLogDialog.device">
                   <v-toolbar density="compact" color="surface">
                     <v-toolbar-title class="text-body-1"
-                      >{{ deviceLogDialog.device.name }} — Activity Log</v-toolbar-title
+                      >{{ deviceLogDialog.device.name }} — Activity
+                      Log</v-toolbar-title
                     >
                     <v-spacer></v-spacer>
                     <v-btn
@@ -1807,7 +1812,12 @@
                     >
                       No activity recorded yet.
                     </div>
-                    <v-table v-else density="compact" class="border rounded">
+                    <v-table
+                      v-else
+                      density="compact"
+                      class="border rounded text-caption"
+                      style="overflow-x: auto; display: block"
+                    >
                       <thead>
                         <tr>
                           <th>When</th>
@@ -1815,11 +1825,21 @@
                           <th>Trigger</th>
                           <th>Source</th>
                           <th>Battery</th>
+                          <th>Charge</th>
+                          <th>Firmware</th>
+                          <th>Reset</th>
+                          <th>IP</th>
+                          <th>Resolution</th>
                         </tr>
                       </thead>
                       <tbody>
-                        <tr v-for="entry in deviceLogDialog.logs" :key="entry.id">
-                          <td>{{ new Date(entry.timestamp).toLocaleString() }}</td>
+                        <tr
+                          v-for="entry in deviceLogDialog.logs"
+                          :key="entry.id"
+                        >
+                          <td>
+                            {{ new Date(entry.timestamp).toLocaleString() }}
+                          </td>
                           <td>
                             <v-chip
                               size="x-small"
@@ -1832,11 +1852,31 @@
                           <td>{{ entry.trigger_reason || '—' }}</td>
                           <td>{{ entry.source || '—' }}</td>
                           <td>
-                            {{
-                              entry.battery_percent >= 0
-                                ? entry.battery_percent + '%'
-                                : '—'
-                            }}
+                            <template v-if="entry.battery_percent >= 0">
+                              {{ entry.battery_percent }}%
+                              <span
+                                v-if="entry.voltage_mv > 0"
+                                class="text-medium-emphasis"
+                                >({{
+                                  (entry.voltage_mv / 1000).toFixed(2)
+                                }}
+                                V)</span
+                              >
+                            </template>
+                            <template v-else>—</template>
+                          </td>
+                          <td>{{ entry.battery_status || '—' }}</td>
+                          <td>{{ entry.firmware_version || '—' }}</td>
+                          <td>{{ entry.reset_reason || '—' }}</td>
+                          <td>{{ entry.ip || '—' }}</td>
+                          <td>
+                            <template
+                              v-if="entry.display_width && entry.display_height"
+                              >{{ entry.display_width }}×{{
+                                entry.display_height
+                              }}</template
+                            >
+                            <template v-else>—</template>
                           </td>
                         </tr>
                       </tbody>

@@ -391,6 +391,13 @@ export interface DeviceLogEntry {
   source: string;
   image_id: number;
   battery_percent: number;
+  voltage_mv: number;
+  battery_status: string;
+  firmware_version: string;
+  reset_reason: string;
+  ip: string;
+  display_width: number;
+  display_height: number;
 }
 
 export const listDeviceLogs = async (

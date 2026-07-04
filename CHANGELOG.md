@@ -1,5 +1,10 @@
 # Changelog
 
+## v1.39.1
+
+### Added
+- **The per-device activity log now captures everything a frame can report on a pull**, not just battery percent: voltage, charge status, firmware version, reset cause, client IP and reported resolution. Useful both for troubleshooting (cross-checking a bad battery reading against the raw voltage/status instead of just the coarse percent) and for building stats graphs over time. All fields are in the log dialog, the CSV download, and the API.
+
 ## v1.39.0
 
 ### Fixed

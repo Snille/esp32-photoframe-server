@@ -547,6 +547,17 @@ type DeviceLog struct {
 	Source         string    `json:"source"`
 	ImageID        uint      `json:"image_id"`
 	BatteryPercent int       `json:"battery_percent"`
+	// Everything else a frame can report on a pull (see ServeImage), captured
+	// alongside BatteryPercent so a bad reading can be cross-checked against
+	// the raw voltage/status/reset-cause instead of just the coarse percent —
+	// and so there's enough history here to chart over time later.
+	VoltageMV       int    `json:"voltage_mv"`
+	BatteryStatus   string `json:"battery_status"`
+	FirmwareVersion string `json:"firmware_version"`
+	ResetReason     string `json:"reset_reason"`
+	IP              string `json:"ip"`
+	DisplayWidth    int    `json:"display_width"`
+	DisplayHeight   int    `json:"display_height"`
 }
 
 // BatterySample is one timestamped battery reading reported by a device on an

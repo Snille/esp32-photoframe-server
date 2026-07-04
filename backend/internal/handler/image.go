@@ -185,26 +185,6 @@ func (h *ImageHandler) ServeImage(c echo.Context) error {
 		}
 	}
 
-	// Record this pull attempt to the device's activity log — success or
-	// failure alike, unlike DeviceHistory which only records a successful
-	// serve. Reads c.Response().Status, which Echo has already set by the time
-	// any `return c.JSON(...)` / `return c.Blob(...)` below this defer
-	// executes, so it reflects the real outcome regardless of which of this
-	// handler's many exit paths was taken. Skipped for preview renders (no
-	// mutation) and when the device couldn't be identified (nothing to file
-	// the entry under).
-	defer func() {
-		if !deviceFound || preview {
-			return
-		}
-		devID := device.ID
-		status := c.Response().Status
-		imgIDs := servedImageIDs
-		safego.Go("record device log", func() {
-			service.RecordDeviceLog(h.db, devID, status, triggerReason, source, imgIDs, batteryPercent)
-		})
-	}()
-
 	// Optional finer signal: pack voltage in millivolts (firmware >= 2.9.2).
 	voltageMV := 0
 	if vStr := c.Request().Header.Get("X-Battery-Voltage"); vStr != "" {
@@ -220,6 +200,50 @@ func (h *ImageHandler) ServeImage(c echo.Context) error {
 	// frame was running on battery.
 	batteryStatus := c.Request().Header.Get("X-Battery-Status")
 	batteryCharging := batteryStatus == "charging" || batteryStatus == "full"
+
+	// Record this pull attempt to the device's activity log — success or
+	// failure alike, unlike DeviceHistory which only records a successful
+	// serve. Reads c.Response().Status, which Echo has already set by the time
+	// any `return c.JSON(...)` / `return c.Blob(...)` below this defer
+	// executes, so it reflects the real outcome regardless of which of this
+	// handler's many exit paths was taken. Skipped for preview renders (no
+	// mutation) and when the device couldn't be identified (nothing to file
+	// the entry under). Firmware version / reset reason / IP / resolution are
+	// re-read from the request here (rather than reusing a variable) since
+	// they're only otherwise extracted deep inside `if deviceFound &&
+	// !preview` blocks further down, on-change only — the log wants the raw
+	// reported value on every pull regardless of whether it changed.
+	//
+	// Everything is read into the params struct HERE, synchronously, before
+	// handing off to safego.Go: c (and its Request/Response) is only valid
+	// for the lifetime of this handler call — Echo returns it to a pool for
+	// reuse as soon as the handler returns, so reading from c inside the
+	// async goroutine itself could race a subsequent, unrelated request.
+	defer func() {
+		if !deviceFound || preview {
+			return
+		}
+		dispW, _ := strconv.Atoi(c.Request().Header.Get("X-Display-Width"))
+		dispH, _ := strconv.Atoi(c.Request().Header.Get("X-Display-Height"))
+		params := service.DeviceLogParams{
+			DeviceID:        device.ID,
+			StatusCode:      c.Response().Status,
+			TriggerReason:   triggerReason,
+			Source:          source,
+			ImageIDs:        servedImageIDs,
+			BatteryPercent:  batteryPercent,
+			VoltageMV:       voltageMV,
+			BatteryStatus:   batteryStatus,
+			FirmwareVersion: c.Request().Header.Get("X-Firmware-Version"),
+			ResetReason:     c.Request().Header.Get("X-Reset-Reason"),
+			IP:              c.RealIP(),
+			DisplayWidth:    dispW,
+			DisplayHeight:   dispH,
+		}
+		safego.Go("record device log", func() {
+			service.RecordDeviceLog(h.db, params)
+		})
+	}()
 
 	// Robust on-photo badge level. Prefer the voltage-derived state-of-charge when
 	// the voltage is plausible (the LiPo curve is monotonic and far steadier than
