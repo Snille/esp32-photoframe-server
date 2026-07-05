@@ -313,7 +313,16 @@ func main() {
 	e := echo.New()
 
 	// Middleware
-	e.Use(echoMiddleware.Logger())
+	// Custom format (not middleware.Logger()'s default): logs ${path} instead
+	// of ${uri}, which excludes the query string. Devices authenticate some
+	// requests via a ?token=... query param, so the default format would
+	// otherwise write bearer tokens straight into the server log.
+	e.Use(echoMiddleware.LoggerWithConfig(echoMiddleware.LoggerConfig{
+		Format: `time=${time_rfc3339_nano}, remote_ip=${remote_ip}, host=${host}, method=${method}, ` +
+			`path=${path}, user_agent=${user_agent}, status=${status}, error="${error}", ` +
+			`latency=${latency}, latency_human=${latency_human}, bytes_in=${bytes_in}, ` +
+			`bytes_out=${bytes_out}` + "\n",
+	}))
 	e.Use(echoMiddleware.Recover())
 	e.Use(echoMiddleware.CORSWithConfig(echoMiddleware.CORSConfig{
 		AllowOrigins: []string{"http://localhost:5173", "http://homeassistant.local:8123"},

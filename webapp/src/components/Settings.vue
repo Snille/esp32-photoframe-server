@@ -5464,6 +5464,10 @@ const BOARD_INFO: Record<string, { label: string; url: string }> = {
     label: 'DFRobot FireBeetle 2 ESP32-E',
     url: 'https://www.dfrobot.com/product-2195.html',
   },
+  dfrobot_firebeetle_esp32s3: {
+    label: 'DFRobot FireBeetle 2 ESP32-S3',
+    url: 'https://www.dfrobot.com/product-2676.html',
+  },
   waveshare_photopainter_73: {
     label: 'Waveshare PhotoPainter 7.3"',
     url: 'https://www.waveshare.com/photopainter.htm',

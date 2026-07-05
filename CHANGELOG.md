@@ -1,5 +1,18 @@
 # Changelog
 
+## v1.41.0
+
+### Fixed
+- **Device identification on `/image/:source` no longer trusts a spoofable `X-Hostname` header or client IP as a fallback.** The route already requires a valid login token, but a request whose token didn't carry a device ID used to fall back to matching the request's hostname header or source IP against a device's configured host — either of which anyone sending an HTTP request could set/claim, letting an unrelated request get identified (and served) as a specific device. Now identification is token-only; verified every currently-issued device token already carries its own device ID, so this doesn't affect any real device.
+- **Login tokens no longer end up in the server log.** Devices can authenticate via a `?token=...` query parameter, and the default request-logging format wrote the full URL — query string included — to the log on every request. Logging now uses the request path only.
+- **JWT parsing now only accepts the algorithm we actually sign with (HS256).** Closes a class of token-forgery attack (algorithm confusion) that a generic JWT parser is otherwise open to.
+- **Fixed a data race in the Google Photos import that could crash the whole server**, plus a file-handle leak in the same code path. Import progress is polled from the browser while a background job downloads photos — both were touching the same in-memory progress data with no synchronization, which could hit Go's "concurrent map read and map write" fatal error under real use; each downloaded photo's HTTP response was also never closed until the entire import finished, holding file handles open for the whole run instead of releasing them as they were used.
+- **Capped the database connection pool to a single connection**, closing a rare "database is locked" collision between the several sync jobs (Immich/Synology/etc.) that can start concurrent writes right after startup.
+- **FireBeetle 2 ESP32-S3 now has a vendor product-page link in the Devices list**, matching every other board's Model cell (was missing since the board was added).
+
+### Changed
+- Added two database indexes matching the actual rotation queries (`images(source, orientation)` and `images(source, created_at)`) alongside the existing per-source index — purely additive, speeds up photo selection on libraries with a lot of photos.
+
 ## v1.40.0
 
 ### Added

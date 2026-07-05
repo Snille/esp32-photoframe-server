@@ -180,7 +180,7 @@ func (s *AuthService) GetOrGenerateDeviceToken(userID uint, username string, nam
 func (s *AuthService) ValidateToken(tokenString string) (*JWTClaims, error) {
 	token, err := jwt.ParseWithClaims(tokenString, &JWTClaims{}, func(token *jwt.Token) (interface{}, error) {
 		return s.jwtSecret, nil
-	})
+	}, jwt.WithValidMethods([]string{"HS256"}))
 
 	if err != nil {
 		return nil, err

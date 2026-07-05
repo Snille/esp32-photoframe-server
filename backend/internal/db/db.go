@@ -26,6 +26,22 @@ func Init(dbPath string) (*gorm.DB, error) {
 		return nil, err
 	}
 
+	// database/sql pools multiple real OS-level connections by default, but
+	// each is a separate SQLite connection to the same file — under our
+	// several concurrent per-source auto-sync schedulers, two pooled
+	// connections can collide on a writer-lock upgrade in a way _busy_timeout
+	// doesn't cover (an immediate "database is locked" rather than a retry).
+	// Capping to a single connection routes every query through Go's own
+	// connection-pool queue instead, which fully serializes access and
+	// removes that class of collision. SQLite gains nothing from multiple
+	// connections the way a client/server DB would, so this has no
+	// throughput downside here.
+	sqlDB, err := db.DB()
+	if err != nil {
+		return nil, err
+	}
+	sqlDB.SetMaxOpenConns(1)
+
 	log.Println("Database connection established")
 
 	return db, nil

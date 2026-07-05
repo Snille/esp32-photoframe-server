@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"sync"
 	"time"
 
 	"github.com/aitjcize/esp32-photoframe-server/backend/internal/model"
@@ -47,9 +48,18 @@ type PickerProgress struct {
 }
 
 type PickerService struct {
-	client   *googlephotos.Client
-	db       *gorm.DB
-	dataDir  string
+	client  *googlephotos.Client
+	db      *gorm.DB
+	dataDir string
+
+	// mu guards progress. ProcessSessionItems runs in its own background
+	// goroutine (see handler/google.go's safego.Go call) while GetProgress is
+	// polled concurrently from an HTTP handler, so both the map itself and
+	// each PickerProgress entry's fields need protecting -- a plain map is
+	// not safe for concurrent read+write, and this used to panic the whole
+	// server ("fatal error: concurrent map read and map write") under real
+	// polling load.
+	mu       sync.Mutex
 	progress map[string]*PickerProgress
 }
 
@@ -62,11 +72,31 @@ func NewPickerService(client *googlephotos.Client, db *gorm.DB, dataDir string) 
 	}
 }
 
+// GetProgress returns a snapshot copy, never the live pointer -- the caller
+// must not see partially-updated fields while withProgress is mutating the
+// same entry on another goroutine.
 func (s *PickerService) GetProgress(sessionID string) *PickerProgress {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	if p, ok := s.progress[sessionID]; ok {
-		return p
+		cp := *p
+		return &cp
 	}
 	return nil
+}
+
+// withProgress mutates (creating if absent) the progress entry for
+// sessionID under the lock. All progress updates in ProcessSessionItems go
+// through this instead of touching s.progress directly.
+func (s *PickerService) withProgress(sessionID string, mutate func(p *PickerProgress)) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	p, ok := s.progress[sessionID]
+	if !ok {
+		p = &PickerProgress{}
+		s.progress[sessionID] = p
+	}
+	mutate(p)
 }
 
 func (s *PickerService) CreateSession() (string, string, error) {
@@ -138,9 +168,9 @@ func (s *PickerService) ProcessSessionItems(sessionID string) (int, error) {
 	}
 
 	// Initialize Progress
-	s.progress[sessionID] = &PickerProgress{
-		Status: "listing",
-	}
+	s.withProgress(sessionID, func(p *PickerProgress) {
+		p.Status = "listing"
+	})
 
 	// Pagination loop
 	var allItems []PickedMediaItem
@@ -155,32 +185,42 @@ func (s *PickerService) ProcessSessionItems(sessionID string) (int, error) {
 
 		req, err := http.NewRequest("GET", url, nil)
 		if err != nil {
-			s.progress[sessionID].Status = "error"
-			s.progress[sessionID].Error = err.Error()
+			s.withProgress(sessionID, func(p *PickerProgress) {
+				p.Status = "error"
+				p.Error = err.Error()
+			})
 			return 0, err
 		}
 
 		resp, err := httpClient.Do(req)
 		if err != nil {
-			s.progress[sessionID].Status = "error"
-			s.progress[sessionID].Error = err.Error()
+			s.withProgress(sessionID, func(p *PickerProgress) {
+				p.Status = "error"
+				p.Error = err.Error()
+			})
 			return 0, err
 		}
-		defer resp.Body.Close()
 
 		if resp.StatusCode != 200 {
 			body, _ := io.ReadAll(resp.Body)
+			resp.Body.Close()
 			errStr := fmt.Sprintf("failed to list items: %s", string(body))
-			s.progress[sessionID].Status = "error"
-			s.progress[sessionID].Error = errStr
+			s.withProgress(sessionID, func(p *PickerProgress) {
+				p.Status = "error"
+				p.Error = errStr
+			})
 			return 0, fmt.Errorf("%s", errStr)
 		}
 
 		var listResp MediaItemsResponse
-		if err := json.NewDecoder(resp.Body).Decode(&listResp); err != nil {
-			s.progress[sessionID].Status = "error"
-			s.progress[sessionID].Error = err.Error()
-			return 0, err
+		decodeErr := json.NewDecoder(resp.Body).Decode(&listResp)
+		resp.Body.Close()
+		if decodeErr != nil {
+			s.withProgress(sessionID, func(p *PickerProgress) {
+				p.Status = "error"
+				p.Error = decodeErr.Error()
+			})
+			return 0, decodeErr
 		}
 
 		allItems = append(allItems, listResp.MediaItems...)
@@ -191,29 +231,39 @@ func (s *PickerService) ProcessSessionItems(sessionID string) (int, error) {
 	}
 
 	// Update Total
-	s.progress[sessionID].Total = len(allItems)
-	s.progress[sessionID].Status = "downloading"
+	s.withProgress(sessionID, func(p *PickerProgress) {
+		p.Total = len(allItems)
+		p.Status = "downloading"
+	})
 
 	// Download items
 	count := 0
 	photosDir := filepath.Join(s.dataDir, "photos")
 	if err := os.MkdirAll(photosDir, 0755); err != nil {
-		s.progress[sessionID].Status = "error"
-		s.progress[sessionID].Error = err.Error()
+		s.withProgress(sessionID, func(p *PickerProgress) {
+			p.Status = "error"
+			p.Error = err.Error()
+		})
 		return 0, err
+	}
+
+	markProcessed := func() {
+		s.withProgress(sessionID, func(p *PickerProgress) {
+			p.Processed++
+		})
 	}
 
 	for _, item := range allItems {
 		// Download High Quality
 		if item.MediaFile.BaseUrl == "" {
-			s.progress[sessionID].Processed++ // Count skipped as processed? yes
+			markProcessed() // Count skipped as processed? yes
 			continue
 		}
 
 		// Skip videos
 		if len(item.MediaFile.MimeType) >= 5 && item.MediaFile.MimeType[:5] == "video" {
 			fmt.Printf("Skipping video: %s (%s)\n", item.MediaFile.Filename, item.MediaFile.MimeType)
-			s.progress[sessionID].Processed++
+			markProcessed()
 			continue
 		}
 
@@ -222,14 +272,19 @@ func (s *PickerService) ProcessSessionItems(sessionID string) (int, error) {
 		resp, err := httpClient.Get(downloadUrl)
 		if err != nil {
 			fmt.Printf("Failed to download %s: %v\n", item.MediaFile.Filename, err)
-			s.progress[sessionID].Processed++
+			markProcessed()
 			continue
 		}
-		defer resp.Body.Close()
 
+		// resp.Body is closed explicitly on every exit path below instead of
+		// via defer -- defer only runs when ProcessSessionItems itself
+		// returns, not per loop iteration, so a deferred close here would
+		// leak one open response body per downloaded photo until the entire
+		// import finished.
 		if resp.StatusCode != 200 {
 			fmt.Printf("Failed to download %s: status %d\n", item.MediaFile.Filename, resp.StatusCode)
-			s.progress[sessionID].Processed++
+			resp.Body.Close()
+			markProcessed()
 			continue
 		}
 
@@ -246,7 +301,8 @@ func (s *PickerService) ProcessSessionItems(sessionID string) (int, error) {
 			if _, err := os.Stat(localPath); err == nil {
 				// Both exist. Skip.
 				fmt.Printf("Skipping duplicate: %s\n", localFilename)
-				s.progress[sessionID].Processed++
+				resp.Body.Close()
+				markProcessed()
 				continue
 			}
 			// File missing, delete old record so we can re-download and strictly create new one
@@ -256,15 +312,17 @@ func (s *PickerService) ProcessSessionItems(sessionID string) (int, error) {
 		// Create file
 		out, err := os.Create(localPath)
 		if err != nil {
-			s.progress[sessionID].Processed++
+			resp.Body.Close()
+			markProcessed()
 			continue
 		}
 
 		// Write to file
 		_, err = io.Copy(out, resp.Body)
 		out.Close() // Close before opening for decode
+		resp.Body.Close()
 		if err != nil {
-			s.progress[sessionID].Processed++
+			markProcessed()
 			continue
 		}
 
@@ -278,7 +336,7 @@ func (s *PickerService) ProcessSessionItems(sessionID string) (int, error) {
 		// Decode image config to get dimensions
 		f, err := os.Open(localPath)
 		if err != nil {
-			s.progress[sessionID].Processed++
+			markProcessed()
 			continue
 		}
 		imgConfig, _, err := image.DecodeConfig(f)
@@ -312,9 +370,11 @@ func (s *PickerService) ProcessSessionItems(sessionID string) (int, error) {
 		count++
 
 		// Update Progress
-		s.progress[sessionID].Processed++
+		markProcessed()
 	}
 
-	s.progress[sessionID].Status = "done"
+	s.withProgress(sessionID, func(p *PickerProgress) {
+		p.Status = "done"
+	})
 	return count, nil
 }

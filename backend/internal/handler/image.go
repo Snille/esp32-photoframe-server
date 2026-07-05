@@ -96,30 +96,28 @@ func (h *ImageHandler) ServeImage(c echo.Context) error {
 	preview := c.QueryParam("preview") == "1"
 
 	// 1. Identify Device and Determine Settings
-	// Three-tier identification: token DeviceID → X-Hostname → client IP
+	// Token-based identification only. This route already sits behind
+	// authMiddleware (main.go), which rejects any request with no valid JWT
+	// before it ever reaches here — so by this point some token was
+	// presented, but that token's claims may not carry a DeviceID (e.g. a
+	// user-session token rather than a per-device one). This used to also
+	// fall back to matching the request's X-Hostname header or client IP
+	// against a device's configured Host, but both of those are trivially
+	// spoofable by anything that can send an HTTP request with an arbitrary
+	// header or that shares/claims another device's IP — either lets an
+	// unrelated caller impersonate a specific device and receive whatever
+	// that device is configured to see. Every real device token issued by
+	// this server already carries (or is DB-enriched with, see
+	// AuthService.ValidateToken) its own DeviceID, so the fallback had no
+	// legitimate use left; if a request's token genuinely has no DeviceID,
+	// deviceFound simply stays false, which the rest of this handler already
+	// handles (every device-specific write below is already guarded by
+	// `if deviceFound { ... }`).
 	var device model.Device
 	deviceFound := false
 
-	// Tier 1: Token-based identification (works over internet)
 	if devID, ok := c.Get("device_id").(uint); ok && devID > 0 {
 		if err := h.db.First(&device, devID).Error; err == nil {
-			deviceFound = true
-		}
-	}
-
-	// Tier 2: X-Hostname header (backward compat, LAN setups)
-	if !deviceFound {
-		if hostname := c.Request().Header.Get("X-Hostname"); hostname != "" {
-			if err := h.db.Where("host = ?", hostname).First(&device).Error; err == nil {
-				deviceFound = true
-			}
-		}
-	}
-
-	// Tier 3: Client IP (backward compat, LAN setups)
-	if !deviceFound {
-		clientIP := c.RealIP()
-		if err := h.db.Where("host = ?", clientIP).First(&device).Error; err == nil {
 			deviceFound = true
 		}
 	}
