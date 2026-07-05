@@ -1,5 +1,11 @@
 # Changelog
 
+## v1.40.0
+
+### Added
+- **Optional battery capacity (mAh) per device.** Not required — the existing %/day drain estimate already works without it — but if you enter your battery pack's capacity in the Power tab, the estimate also shows an approximate average discharge current (mA) while the frame is running down. Saved through the device dialog's normal Save button, alongside everything else.
+- **Battery voltage sensing on boards with no built-in battery ADC** (currently the FireBeetle 2 ESP32-S3). The frame's own local WebGUI now offers a "Battery ADC pin" picker for boards that support wiring up an external voltage divider — select the GPIO you've wired it to, and battery percent/voltage start reporting like on any other board. The Devices list / Power tab shows a read-only mirror of which pin is configured (the choice itself is made on the frame, not here).
+
 ## v1.39.1
 
 ### Added

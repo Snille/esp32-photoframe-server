@@ -225,9 +225,25 @@ type Device struct {
 	// LogRetentionValue + LogRetentionUnit control how long this device's
 	// activity log (DeviceLog rows) is kept before the oldest entries are
 	// pruned. Unit is one of "days" | "months" | "years". Default 6 months.
-	LogRetentionValue int       `json:"log_retention_value" gorm:"default:6"`
-	LogRetentionUnit  string    `json:"log_retention_unit" gorm:"default:'months'"`
-	CreatedAt         time.Time `json:"created_at"`
+	LogRetentionValue int    `json:"log_retention_value" gorm:"default:6"`
+	LogRetentionUnit  string `json:"log_retention_unit" gorm:"default:'months'"`
+	// BatteryCapacityMAh is optional (0 = not set). The %/day drain estimate
+	// doesn't need it — it's already capacity-independent — but when set it
+	// lets the server also report an estimated average discharge current in
+	// mA, a number that can't be derived without knowing the pack size.
+	// Explicit column name: GORM's naming strategy would otherwise derive
+	// "battery_capacity_m_ah" from the Go field name (splitting "MAh"),
+	// which doesn't match the migration's "battery_capacity_mah" column.
+	BatteryCapacityMAh int `json:"battery_capacity_mah" gorm:"column:battery_capacity_mah;default:0"`
+	// BatteryADCGPIO mirrors which GPIO (if any) the frame is using for an
+	// external battery voltage divider, on boards with no built-in battery
+	// ADC (e.g. the FireBeetle 2 ESP32-S3). Read-only from the server's
+	// perspective -- the pin is selected on the frame's own local WebGUI and
+	// reported here via X-Battery-ADC-Pin on each check-in. -1 = not
+	// configured / not applicable. Explicit column name for the same reason
+	// as BatteryCapacityMAh above.
+	BatteryADCGPIO int       `json:"battery_adc_gpio" gorm:"column:battery_adc_gpio;default:-1"`
+	CreatedAt      time.Time `json:"created_at"`
 }
 
 const (

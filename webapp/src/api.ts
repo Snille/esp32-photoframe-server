@@ -153,6 +153,19 @@ export interface Device {
   // Server-inferred "on USB": the latest reading is physically implausible for a
   // running frame (EE02-on-USB ADC garbage), so we show a plugged-in indicator.
   battery_plugged?: boolean;
+  // Optional pack capacity in mAh (0/unset = not entered). Not required — the
+  // %/day drain estimate already works without it — but when set the server
+  // also reports an estimated average discharge current (see below).
+  battery_capacity_mah?: number;
+  // Estimated average discharge current in mA, derived from drain %/day and
+  // battery_capacity_mah. 0 when capacity isn't set or the device isn't
+  // currently discharging.
+  battery_estimated_current_ma?: number;
+  // GPIO the frame is using for an external battery voltage divider, on
+  // boards with no built-in battery ADC. Read-only here -- selected on the
+  // frame's own local WebGUI, mirrored via X-Battery-ADC-Pin. -1/unset =
+  // none configured.
+  battery_adc_gpio?: number;
   created_at: string;
   model?: any;
 }
@@ -342,12 +355,25 @@ export interface BatteryEstimate {
   last_sampled_at: string;
   recent: BatterySample[];
   basis: 'voltage' | 'percent';
+  // Estimated average discharge current in mA. Only computed when the
+  // device's battery_capacity_mah is set and trend === 'discharging'.
+  estimated_current_ma?: number;
 }
 
 export const getBatteryEstimate = async (
   id: number
 ): Promise<BatteryEstimate> => {
   const response = await api.get(`/devices/${id}/battery`);
+  return response.data;
+};
+
+export const updateDeviceBatteryCapacity = async (
+  id: number,
+  capacityMah: number
+) => {
+  const response = await api.put(`/devices/${id}/battery-capacity`, {
+    capacity_mah: capacityMah,
+  });
   return response.data;
 };
 

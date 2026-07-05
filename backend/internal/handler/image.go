@@ -317,6 +317,21 @@ func (h *ImageHandler) ServeImage(c echo.Context) error {
 		}
 	}
 
+	// Remember which GPIO (if any) the frame is using for an external battery
+	// voltage divider (boards with no built-in battery ADC only -- see
+	// X-Battery-ADC-Pin in the firmware). Read-only mirror of what the user
+	// picked on the frame's own local WebGUI. Only write on change.
+	if deviceFound && !preview {
+		if pinStr := c.Request().Header.Get("X-Battery-ADC-Pin"); pinStr != "" {
+			if pin, err := strconv.Atoi(pinStr); err == nil && pin != device.BatteryADCGPIO {
+				device.BatteryADCGPIO = pin
+				safego.Go("update battery_adc_gpio", func() {
+					h.db.Model(&model.Device{}).Where("id = ?", device.ID).Update("battery_adc_gpio", pin)
+				})
+			}
+		}
+	}
+
 	// Remember the IP the frame checked in from (for the HA IP-address sensor).
 	// RealIP honours X-Forwarded-For, so this is the frame's LAN IP even behind a
 	// reverse proxy that forwards it. Only write on change to avoid churn.

@@ -61,8 +61,9 @@ func (h *DeviceHandler) ListDevices(c echo.Context) error {
 		BatteryPercent       int     `json:"battery_percent"`        // -1 = no data yet
 		BatteryDaysRemaining float64 `json:"battery_days_remaining"` // -1 = unknown
 		BatteryTrend         string  `json:"battery_trend"`
-		BatteryPlugged       bool    `json:"battery_plugged"` // implausible reading → on USB
-		Online               bool    `json:"online"`          // checked in within ~2 rotation cycles
+		BatteryPlugged       bool    `json:"battery_plugged"`              // implausible reading → on USB
+		BatteryCurrentMA     float64 `json:"battery_estimated_current_ma"` // 0 = capacity not set
+		Online               bool    `json:"online"`                       // checked in within ~2 rotation cycles
 	}
 	items := make([]deviceListItem, 0, len(devices))
 	for _, d := range devices {
@@ -77,6 +78,7 @@ func (h *DeviceHandler) ListDevices(c echo.Context) error {
 			BatteryDaysRemaining: est.DaysRemaining,
 			BatteryTrend:         est.Trend,
 			BatteryPlugged:       est.Plugged,
+			BatteryCurrentMA:     est.EstimatedCurrentMA,
 			Online:               service.DeviceOnline(d.LastSeenAt, d.DeviceConfig),
 		})
 	}
@@ -441,6 +443,28 @@ func (h *DeviceHandler) UpdateDeviceLogRetention(c echo.Context) error {
 	cutoff := service.RetentionCutoff(req.Value, req.Unit)
 	h.db.Where("device_id = ? AND timestamp < ?", id, cutoff).Delete(&model.DeviceLog{})
 	return c.JSON(http.StatusOK, map[string]interface{}{"log_retention_value": req.Value, "log_retention_unit": req.Unit})
+}
+
+// PUT /api/devices/:id/battery-capacity — optional pack capacity (mAh) used
+// to additionally report an estimated average discharge current; the %/day
+// drain estimate itself doesn't need it. body: {"capacity_mah": 3000}.
+// capacity_mah <= 0 clears it (falls back to the existing %-only estimate).
+func (h *DeviceHandler) UpdateDeviceBatteryCapacity(c echo.Context) error {
+	id, _ := strconv.Atoi(c.Param("id"))
+	var req struct {
+		CapacityMAh int `json:"capacity_mah"`
+	}
+	if err := c.Bind(&req); err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid request"})
+	}
+	if req.CapacityMAh < 0 {
+		req.CapacityMAh = 0
+	}
+	if err := h.db.Model(&model.Device{}).Where("id = ?", id).
+		Update("battery_capacity_mah", req.CapacityMAh).Error; err != nil {
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to update battery capacity"})
+	}
+	return c.JSON(http.StatusOK, map[string]interface{}{"battery_capacity_mah": req.CapacityMAh})
 }
 
 // DELETE /api/devices/:id

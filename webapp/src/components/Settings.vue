@@ -3135,6 +3135,15 @@
                                   : 'from %'
                               }})</span
                             >
+                            <span
+                              v-if="batteryEstimate.estimated_current_ma"
+                              class="text-medium-emphasis"
+                            >
+                              · ~{{
+                                batteryEstimate.estimated_current_ma.toFixed(1)
+                              }}
+                              mA avg
+                            </span>
                           </div>
                           <div
                             v-else-if="batteryEstimate.trend === 'charging'"
@@ -3168,6 +3177,37 @@
                             />
                           </svg>
                         </template>
+
+                        <v-text-field
+                          v-model.number="batteryCapacityInput"
+                          label="Battery capacity"
+                          suffix="mAh"
+                          type="number"
+                          density="compact"
+                          variant="outlined"
+                          hide-details
+                          class="mt-3"
+                          style="max-width: 180px"
+                        ></v-text-field>
+                        <div class="text-caption text-medium-emphasis mt-1">
+                          Optional — not required for the %/day estimate above,
+                          but if you know the pack's capacity it also lets us
+                          show an estimated average current draw.
+                        </div>
+
+                        <div
+                          v-if="
+                            editingDevice.battery_adc_gpio !== undefined &&
+                            editingDevice.battery_adc_gpio >= 0
+                          "
+                          class="text-caption text-medium-emphasis mt-3"
+                        >
+                          <v-icon size="small" class="mr-1">mdi-chip</v-icon>
+                          External battery divider on GPIO{{
+                            editingDevice.battery_adc_gpio
+                          }}
+                          (configured on the frame's own WebGUI)
+                        </div>
 
                         <v-divider class="my-4" />
 
@@ -3710,6 +3750,7 @@ import {
   getDeviceConfig,
   updateDeviceConfig,
   getBatteryEstimate,
+  updateDeviceBatteryCapacity,
   type BatteryEstimate,
   listSources,
   updateAccount,
@@ -5063,6 +5104,7 @@ const editDevice = async (device: Device) => {
   showEditDeviceDialog.value = true;
   // Load device remote config + battery drain estimate
   loadBatteryEstimate(device.id);
+  batteryCapacityInput.value = device.battery_capacity_mah || null;
   // Populate the Immich album picker (best-effort; only matters for Immich frames).
   if (!immichStore.albums || immichStore.albums.length === 0) {
     immichStore.fetchAlbums().catch(() => {});
@@ -5072,6 +5114,9 @@ const editDevice = async (device: Device) => {
 
 const batteryEstimate = ref<BatteryEstimate | null>(null);
 const batteryLoading = ref(false);
+// Bound to the Power tab's capacity field; persisted by the main Save button
+// (see saveDevice) rather than its own save action.
+const batteryCapacityInput = ref<number | null>(null);
 
 const loadBatteryEstimate = async (deviceId?: number) => {
   batteryEstimate.value = null;
@@ -5203,6 +5248,12 @@ const saveDevice = async () => {
         immich_album_ids: editingDevice.immich_album_ids || '',
         overlay_hidden_icons: editingDevice.overlay_hidden_icons || '',
       });
+      if (batteryCapacityInput.value) {
+        await updateDeviceBatteryCapacity(
+          newDevice.id,
+          batteryCapacityInput.value
+        );
+      }
       await loadDevices();
       showMessage('Device added. Fetched settings from device.');
       // Re-open in edit mode with fetched config
@@ -5271,6 +5322,10 @@ const saveDevice = async () => {
           favorites_only: editingDevice.favorites_only || false,
           overlay_hidden_icons: editingDevice.overlay_hidden_icons || '',
         }
+      );
+      await updateDeviceBatteryCapacity(
+        editingDevice.id,
+        batteryCapacityInput.value || 0
       );
 
       // Save device remote config (config + processing + palette)

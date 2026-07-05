@@ -114,6 +114,12 @@ type BatteryEstimate struct {
 	// so percent/voltage read garbage). The UI then shows a "plugged in" indicator
 	// instead of a bogus level — see BatteryReadingImplausible.
 	Plugged bool `json:"plugged"`
+	// EstimatedCurrentMA is the average discharge current implied by
+	// DrainPerDay, given the device's optional BatteryCapacityMAh (0 when
+	// capacity isn't set, or the device isn't discharging). This is purely a
+	// diagnostic extra — DaysRemaining is already computed from the %/day
+	// trend alone and doesn't need or use capacity.
+	EstimatedCurrentMA float64 `json:"estimated_current_ma"`
 }
 
 // BatteryReadingImplausible reports that a (percent, voltageMV) pair from a frame
@@ -508,6 +514,16 @@ func (s *BatteryService) Estimate(deviceID uint) BatteryEstimate {
 		est.Trend = "charging"
 	default:
 		est.Trend = "stable"
+	}
+
+	// Optional: average discharge current, only computable when the device's
+	// pack capacity is known. Purely a diagnostic extra on top of the
+	// capacity-independent %/day trend above.
+	if est.Trend == "discharging" && est.DrainPerDay > 0 {
+		var device model.Device
+		if err := s.db.Select("battery_capacity_mah").First(&device, deviceID).Error; err == nil && device.BatteryCapacityMAh > 0 {
+			est.EstimatedCurrentMA = float64(device.BatteryCapacityMAh) * (est.DrainPerDay / 100.0) / 24.0
+		}
 	}
 	return est
 }
