@@ -207,7 +207,8 @@ type Device struct {
 	LastSeenAt *time.Time `json:"last_seen_at"`
 	// LastResetReason is the frame's most recent reset cause (X-Reset-Reason on
 	// pull): poweron / deepsleep / sw / task_wdt / int_wdt / wdt / panic /
-	// brownout. Lets the Devices list flag a crash-looping frame after recovery.
+	// brownout / efuse / pwr_glitch / cpu_lockup / usb / jtag / sdio / ext.
+	// Lets the Devices list flag a crash-looping frame after recovery.
 	LastResetReason string `json:"last_reset_reason" gorm:"default:''"`
 	// BatteryStatus is the coarse charge state the frame reports each pull
 	// (X-Battery-Status): "charging", "full" or "on_battery". Empty when the

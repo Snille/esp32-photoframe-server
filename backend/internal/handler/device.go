@@ -348,6 +348,30 @@ func (h *DeviceHandler) BatteryEstimate(c echo.Context) error {
 	return c.JSON(http.StatusOK, h.battery.Estimate(uint(id)))
 }
 
+// GET /api/devices/:id/battery/history?unit=days|months|years&value=N
+// Returns the battery level since now-N-units, for the Devices-list history
+// chart (day/month/year range picker). Raw samples for short ranges, one
+// point per calendar day for longer ones — see BatteryService.History.
+func (h *DeviceHandler) BatteryHistory(c echo.Context) error {
+	id, _ := strconv.Atoi(c.Param("id"))
+
+	value, err := strconv.Atoi(c.QueryParam("value"))
+	if err != nil || value <= 0 {
+		value = 7
+	}
+	var since time.Time
+	switch c.QueryParam("unit") {
+	case "months":
+		since = time.Now().AddDate(0, -value, 0)
+	case "years":
+		since = time.Now().AddDate(-value, 0, 0)
+	default: // "days" or unset
+		since = time.Now().AddDate(0, 0, -value)
+	}
+
+	return c.JSON(http.StatusOK, h.battery.History(uint(id), since))
+}
+
 // POST /api/devices/:id/skip
 // Jumps the device's rotation queue by req.Steps (positive = forward, negative =
 // back, 0 = re-show current). Pins the target image so the next ordered pull

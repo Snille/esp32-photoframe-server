@@ -1579,33 +1579,43 @@
                       </template>
                       <template v-else-if="(device.battery_percent ?? -1) >= 0">
                         <div
-                          class="d-flex align-center"
-                          :title="batteryTitle(device)"
+                          style="cursor: pointer"
+                          title="Click for battery history"
+                          @click="openBatteryHistoryDialog(device)"
                         >
-                          <v-icon
-                            size="small"
-                            :color="batteryColor(device.battery_percent!)"
-                            >{{ batteryIcon(device.battery_percent!) }}</v-icon
+                          <div
+                            class="d-flex align-center"
+                            :title="batteryTitle(device)"
                           >
-                          <span
-                            class="ml-1"
-                            :class="
-                              device.battery_percent! <= 15
-                                ? 'text-error'
-                                : 'text-medium-emphasis'
-                            "
-                            >{{ device.battery_percent }}%</span
+                            <v-icon
+                              size="small"
+                              :color="batteryColor(device.battery_percent!)"
+                              >{{
+                                batteryIcon(device.battery_percent!)
+                              }}</v-icon
+                            >
+                            <span
+                              class="ml-1"
+                              :class="
+                                device.battery_percent! <= 15
+                                  ? 'text-error'
+                                  : 'text-medium-emphasis'
+                              "
+                              >{{ device.battery_percent }}%</span
+                            >
+                          </div>
+                          <div
+                            v-if="(device.battery_days_remaining ?? -1) > 0"
+                            class="text-caption text-medium-emphasis"
+                            :title="batteryTitle(device)"
                           >
-                        </div>
-                        <div
-                          v-if="(device.battery_days_remaining ?? -1) > 0"
-                          class="text-caption text-medium-emphasis"
-                          :title="batteryTitle(device)"
-                        >
-                          ~{{
-                            formatDaysRemaining(device.battery_days_remaining!)
-                          }}
-                          left
+                            ~{{
+                              formatDaysRemaining(
+                                device.battery_days_remaining!
+                              )
+                            }}
+                            left
+                          </div>
                         </div>
                       </template>
                       <span v-else class="text-grey">—</span>
@@ -1728,6 +1738,132 @@
                       </div>
                     </template>
                   </v-img>
+                </v-card>
+              </v-dialog>
+
+              <!-- Battery history chart: bigger, range-pickable version of the
+                   Power tab's sparkline, opened by clicking a device's battery
+                   badge in the list. -->
+              <v-dialog
+                v-model="batteryHistoryDialog.show"
+                width="700"
+                max-width="96vw"
+              >
+                <v-card v-if="batteryHistoryDialog.device">
+                  <v-toolbar density="compact" color="surface">
+                    <v-toolbar-title class="text-body-1"
+                      >{{ batteryHistoryDialog.device.name }} — Battery
+                      History</v-toolbar-title
+                    >
+                    <v-spacer></v-spacer>
+                    <v-btn
+                      icon="mdi-close"
+                      variant="text"
+                      @click="batteryHistoryDialog.show = false"
+                    ></v-btn>
+                  </v-toolbar>
+                  <v-card-text>
+                    <div class="d-flex align-center flex-wrap ga-2 mb-4">
+                      <span class="text-body-2 text-medium-emphasis"
+                        >Show last</span
+                      >
+                      <v-text-field
+                        v-model.number="batteryHistoryDialog.value"
+                        type="number"
+                        min="1"
+                        variant="outlined"
+                        density="compact"
+                        hide-details
+                        style="width: 90px"
+                        @update:model-value="loadBatteryHistory"
+                      ></v-text-field>
+                      <v-select
+                        v-model="batteryHistoryDialog.unit"
+                        :items="[
+                          { title: 'Days', value: 'days' },
+                          { title: 'Months', value: 'months' },
+                          { title: 'Years', value: 'years' },
+                        ]"
+                        variant="outlined"
+                        density="compact"
+                        hide-details
+                        style="width: 130px"
+                        @update:model-value="loadBatteryHistory"
+                      ></v-select>
+                    </div>
+
+                    <div
+                      v-if="batteryHistoryDialog.loading"
+                      class="d-flex justify-center pa-6"
+                    >
+                      <v-progress-circular indeterminate color="primary" />
+                    </div>
+                    <div
+                      v-else-if="batteryHistoryDialog.points.length === 0"
+                      class="text-center text-grey py-6"
+                    >
+                      No battery data in this range.
+                    </div>
+                    <svg
+                      v-else
+                      :viewBox="`0 0 ${batteryHistoryChart.viewW} ${batteryHistoryChart.viewH}`"
+                      class="text-primary"
+                      style="width: 100%; height: 220px"
+                    >
+                      <g
+                        v-for="tick in batteryHistoryChart.yTicks"
+                        :key="tick.pct"
+                      >
+                        <line
+                          :x1="batteryHistoryChart.marginLeft"
+                          :x2="
+                            batteryHistoryChart.marginLeft +
+                            batteryHistoryChart.plotW
+                          "
+                          :y1="tick.y"
+                          :y2="tick.y"
+                          stroke="currentColor"
+                          stroke-width="0.5"
+                          opacity="0.15"
+                        />
+                        <text
+                          :x="batteryHistoryChart.marginLeft - 6"
+                          :y="tick.y + 3"
+                          text-anchor="end"
+                          font-size="10"
+                          fill="currentColor"
+                          opacity="0.7"
+                        >
+                          {{ tick.pct }}%
+                        </text>
+                      </g>
+                      <text
+                        v-for="(tick, i) in batteryHistoryChart.xTicks"
+                        :key="i"
+                        :x="tick.x"
+                        :y="batteryHistoryChart.viewH - 4"
+                        :text-anchor="
+                          i === 0
+                            ? 'start'
+                            : i === batteryHistoryChart.xTicks.length - 1
+                              ? 'end'
+                              : 'middle'
+                        "
+                        font-size="10"
+                        fill="currentColor"
+                        opacity="0.7"
+                      >
+                        {{ tick.label }}
+                      </text>
+                      <polyline
+                        :points="batteryHistoryChart.polyline"
+                        fill="none"
+                        stroke="currentColor"
+                        stroke-width="1.5"
+                        vector-effect="non-scaling-stroke"
+                      />
+                    </svg>
+                  </v-card-text>
                 </v-card>
               </v-dialog>
 
@@ -3750,8 +3886,10 @@ import {
   getDeviceConfig,
   updateDeviceConfig,
   getBatteryEstimate,
+  getBatteryHistory,
   updateDeviceBatteryCapacity,
   type BatteryEstimate,
+  type BatterySample,
   listSources,
   updateAccount,
   listSessions,
@@ -5165,21 +5303,32 @@ const batteryDaysLabel = computed(() => {
   return `~${Math.round(d)} days`;
 });
 
-// SVG polyline points for the percent sparkline (0..100 x, 0..28 y inverted).
-const batterySparkline = computed(() => {
-  const pts = batteryEstimate.value?.recent ?? [];
+// SVG polyline points for a percent-over-time sparkline, x normalized to
+// 0..viewW across the samples' time span and y to 0..viewH (inverted, so
+// 100% is at the top). Shared by the Power tab's small sparkline and the
+// Devices-list battery history dialog's bigger chart.
+const sparklinePoints = (
+  pts: BatterySample[],
+  viewW: number,
+  viewH: number
+) => {
   if (pts.length < 2) return '';
   const t0 = new Date(pts[0].sampled_at).getTime();
   const t1 = new Date(pts[pts.length - 1].sampled_at).getTime();
   const span = t1 - t0 || 1;
   return pts
     .map((p) => {
-      const x = ((new Date(p.sampled_at).getTime() - t0) / span) * 100;
-      const y = 28 - (Math.max(0, Math.min(100, p.percent)) / 100) * 28;
+      const x = ((new Date(p.sampled_at).getTime() - t0) / span) * viewW;
+      const y = viewH - (Math.max(0, Math.min(100, p.percent)) / 100) * viewH;
       return `${x.toFixed(2)},${y.toFixed(2)}`;
     })
     .join(' ');
-});
+};
+
+// SVG polyline points for the percent sparkline (0..100 x, 0..28 y inverted).
+const batterySparkline = computed(() =>
+  sparklinePoints(batteryEstimate.value?.recent ?? [], 100, 28)
+);
 
 const saveDevice = async () => {
   if (!editingDevice.host) {
@@ -5594,6 +5743,9 @@ const CRASH_RESETS = new Set([
   'wdt',
   'panic',
   'brownout',
+  'efuse',
+  'pwr_glitch',
+  'cpu_lockup',
 ]);
 const isCrashReset = (device: Device): boolean =>
   !!device.last_reset_reason && CRASH_RESETS.has(device.last_reset_reason);
@@ -5609,6 +5761,20 @@ const resetReasonLabel = (r?: string): string => {
       return 'Crash (panic)';
     case 'brownout':
       return 'Brownout (power) reset';
+    case 'efuse':
+      return 'eFuse error reset';
+    case 'pwr_glitch':
+      return 'Power glitch reset';
+    case 'cpu_lockup':
+      return 'CPU lockup (double exception)';
+    case 'usb':
+      return 'USB reset (cable attached — expected while flashing/debugging)';
+    case 'jtag':
+      return 'JTAG reset';
+    case 'sdio':
+      return 'SDIO reset';
+    case 'ext':
+      return 'External pin reset';
     default:
       return r || '';
   }
@@ -5684,6 +5850,104 @@ const openFullImage = (device: Device) => {
   }
   fullImageDialog.value = true;
 };
+
+// Per-device battery history dialog: a bigger chart than the Power tab's
+// sparkline, over a caller-chosen range (day/month/year), opened by clicking
+// the battery badge in the Devices list.
+const batteryHistoryDialog = reactive({
+  show: false,
+  device: null as Device | null,
+  loading: false,
+  value: 7,
+  unit: 'days' as 'days' | 'months' | 'years',
+  points: [] as BatterySample[],
+});
+
+const openBatteryHistoryDialog = (device: Device) => {
+  batteryHistoryDialog.device = device;
+  batteryHistoryDialog.value = 7;
+  batteryHistoryDialog.unit = 'days';
+  batteryHistoryDialog.show = true;
+  loadBatteryHistory();
+};
+
+const loadBatteryHistory = async () => {
+  if (!batteryHistoryDialog.device) return;
+  batteryHistoryDialog.loading = true;
+  try {
+    batteryHistoryDialog.points = await getBatteryHistory(
+      batteryHistoryDialog.device.id,
+      batteryHistoryDialog.value,
+      batteryHistoryDialog.unit
+    );
+  } catch (e: any) {
+    showMessage(
+      e?.response?.data?.error || 'Failed to load battery history',
+      true
+    );
+  } finally {
+    batteryHistoryDialog.loading = false;
+  }
+};
+
+// Chart geometry + axes for the battery history dialog: unlike the Power
+// tab's small glance sparkline (no labels, by design), this is a dedicated
+// view so it needs readable percent/date axes to answer "how charged was it
+// actually, and when".
+const batteryHistoryChart = computed(() => {
+  const pts = batteryHistoryDialog.points;
+  const viewW = 640;
+  const viewH = 200;
+  const marginLeft = 40;
+  const marginRight = 8;
+  const marginTop = 8;
+  const marginBottom = 24;
+  const plotW = viewW - marginLeft - marginRight;
+  const plotH = viewH - marginTop - marginBottom;
+
+  const yTicks = [0, 25, 50, 75, 100].map((pct) => ({
+    pct,
+    y: marginTop + plotH - (pct / 100) * plotH,
+  }));
+
+  const formatTick = (iso: string) => {
+    const d = new Date(iso);
+    return batteryHistoryDialog.unit === 'years'
+      ? d.toLocaleDateString(undefined, { year: 'numeric', month: 'short' })
+      : d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+  };
+
+  let xTicks: { x: number; label: string }[] = [];
+  let polyline = '';
+  if (pts.length >= 2) {
+    const t0 = new Date(pts[0].sampled_at).getTime();
+    const t1 = new Date(pts[pts.length - 1].sampled_at).getTime();
+    const span = t1 - t0 || 1;
+    const xOf = (iso: string) =>
+      marginLeft + ((new Date(iso).getTime() - t0) / span) * plotW;
+
+    const tickIdxs =
+      pts.length >= 3
+        ? [0, Math.floor((pts.length - 1) / 2), pts.length - 1]
+        : [0, pts.length - 1];
+    xTicks = tickIdxs.map((i) => ({
+      x: xOf(pts[i].sampled_at),
+      label: formatTick(pts[i].sampled_at),
+    }));
+
+    polyline = pts
+      .map((p) => {
+        const y =
+          marginTop +
+          plotH -
+          (Math.max(0, Math.min(100, p.percent)) / 100) * plotH;
+        return `${xOf(p.sampled_at).toFixed(2)},${y.toFixed(2)}`;
+      })
+      .join(' ');
+  }
+
+  return { viewW, viewH, marginLeft, plotW, yTicks, xTicks, polyline };
+});
 
 // Per-device activity log dialog: every pull attempt (success or failure),
 // plus the retention window that controls how much history is kept.

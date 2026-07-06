@@ -1,6 +1,7 @@
 package service
 
 import (
+	"math"
 	"sort"
 	"time"
 
@@ -28,8 +29,11 @@ const (
 	// Regression window: recent enough to reflect the current usage pattern,
 	// long enough to average out the LiPo voltage/percent noise per wake.
 	batteryWindow = 14 * 24 * time.Hour
-	// Drop ancient samples so the table stays small.
-	batteryRetention = 90 * 24 * time.Hour
+	// Drop ancient samples so the table stays small. Long enough to cover a
+	// 1-year history-chart range with margin; samples are throttled to at
+	// most one per batterySampleMinInterval per device, so even 400 days is
+	// a trivial row count (~57k/device worst case) for SQLite.
+	batteryRetention = 400 * 24 * time.Hour
 	// A slope smaller than this (in %/day, either sign) is treated as flat —
 	// below the noise floor of the firmware's coarse percent reading.
 	batteryFlatThreshold = 0.15
@@ -526,4 +530,52 @@ func (s *BatteryService) Estimate(deviceID uint) BatteryEstimate {
 		}
 	}
 	return est
+}
+
+// batteryHistoryAggregateThreshold: below this range, return raw samples
+// (already throttled to at most one per batterySampleMinInterval, so a few
+// hundred points at most). Above it, History() aggregates to one point per
+// calendar day so a multi-month/year request doesn't ship tens of thousands
+// of raw points to the browser for a history chart.
+const batteryHistoryAggregateThreshold = 3 * 24 * time.Hour
+
+// History returns the battery level since the given time, for the
+// Devices-list history-chart feature (day/month/year range picker). Unlike
+// Estimate() (a fixed 14-day drain regression), the range here is caller-
+// chosen and can span the full retention window.
+func (s *BatteryService) History(deviceID uint, since time.Time) []model.BatterySample {
+	if time.Since(since) <= batteryHistoryAggregateThreshold {
+		var samples []model.BatterySample
+		s.db.Where("device_id = ? AND sampled_at >= ?", deviceID, since).
+			Order("sampled_at ASC").Find(&samples)
+		return samples
+	}
+
+	type dayBucket struct {
+		Day       string
+		Percent   float64
+		VoltageMV float64
+	}
+	var buckets []dayBucket
+	s.db.Model(&model.BatterySample{}).
+		Select("date(sampled_at) as day, AVG(percent) as percent, AVG(voltage_mv) as voltage_mv").
+		Where("device_id = ? AND sampled_at >= ?", deviceID, since).
+		Group("date(sampled_at)").
+		Order("day ASC").
+		Scan(&buckets)
+
+	samples := make([]model.BatterySample, 0, len(buckets))
+	for _, b := range buckets {
+		day, err := time.Parse("2006-01-02", b.Day)
+		if err != nil {
+			continue
+		}
+		samples = append(samples, model.BatterySample{
+			DeviceID:  deviceID,
+			SampledAt: day,
+			Percent:   int(math.Round(b.Percent)),
+			VoltageMV: int(math.Round(b.VoltageMV)),
+		})
+	}
+	return samples
 }

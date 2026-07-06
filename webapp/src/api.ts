@@ -367,6 +367,20 @@ export const getBatteryEstimate = async (
   return response.data;
 };
 
+// Battery level since now-value-unit, for the Devices-list history chart
+// (day/month/year range picker). Raw samples for short ranges, one point per
+// calendar day for longer ones — see the backend's BatteryService.History.
+export const getBatteryHistory = async (
+  id: number,
+  value: number,
+  unit: 'days' | 'months' | 'years'
+): Promise<BatterySample[]> => {
+  const response = await api.get(`/devices/${id}/battery/history`, {
+    params: { value, unit },
+  });
+  return response.data;
+};
+
 export const updateDeviceBatteryCapacity = async (
   id: number,
   capacityMah: number

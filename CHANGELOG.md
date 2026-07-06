@@ -1,5 +1,11 @@
 # Changelog
 
+## v1.42.0
+
+### Added
+- **Battery history chart in the Devices list.** Click a device's battery badge to open a chart of its level over time, with a "show last N days/months/years" range picker — a bigger, longer-range companion to the Power tab's small sparkline. Backed by a new `GET /api/devices/:id/battery/history` endpoint: short ranges return raw samples, longer ones are aggregated to one point per calendar day so a 1-year request doesn't ship tens of thousands of points to the browser. The chart labels its axes (percent on the left, dates along the bottom).
+- Extended `battery_samples` retention from 90 to 400 days so a 1-year chart range actually has data to show (was previously pruned well before that).
+
 ## v1.41.0
 
 ### Fixed

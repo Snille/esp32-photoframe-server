@@ -381,6 +381,7 @@ func main() {
 	protectedApi.POST("/devices/:id/skip", deviceHandler.SkipQueue)
 	protectedApi.POST("/devices/:id/ota-update", deviceHandler.TriggerOTAUpdate)
 	protectedApi.GET("/devices/:id/battery", deviceHandler.BatteryEstimate)
+	protectedApi.GET("/devices/:id/battery/history", deviceHandler.BatteryHistory)
 	protectedApi.GET("/devices/:id/logs", deviceHandler.GetDeviceLogs)
 	protectedApi.GET("/devices/:id/logs/download", deviceHandler.DownloadDeviceLogs)
 	protectedApi.PUT("/devices/:id/log-retention", deviceHandler.UpdateDeviceLogRetention)
