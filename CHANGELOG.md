@@ -1,5 +1,10 @@
 # Changelog
 
+## v1.43.0
+
+### Fixed
+- **Battery "Charging" trend now actually shows up while a frame is on charge.** The drain-estimate regression trims itself to the current discharge/charge run so a mid-window recharge doesn't flatten the slope — but the "still charging, hasn't finished yet" case had two bugs: it kept re-anchoring the segment to the ever-advancing high point instead of the trough where the charge started (collapsing to a single sample), and even once fixed, a strict 6-hour minimum span (needed to avoid over-reacting to noise while discharging) meant most charge sessions finished before ever crossing it. Both were server-side only — the affected boards can't read real charge status from hardware at all (their charger ICs don't expose it to a GPIO), so "Charging"/"Discharging"/"Stable" has always been derived purely from the reported percent/voltage trend. Verified against real battery history from four frames stuck on "insufficient" despite hours of a clean, rising trend — three now correctly read "Charging" immediately.
+
 ## v1.42.0
 
 ### Added

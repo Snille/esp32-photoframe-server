@@ -339,6 +339,62 @@ func despikeSoC(socs []float64) []bool {
 	return keep
 }
 
+// pt is one (elapsed-days, SoC%) point in the regression series built by
+// Estimate, chronologically ordered (oldest first).
+type pt struct{ x, y float64 }
+
+// trimToCurrentSegment finds the slice of a chronologically-ordered (oldest
+// first) SoC series that reflects the CURRENT trend, discarding an earlier,
+// now-irrelevant run. A mid-window recharge (the user tops the battery up
+// over USB) otherwise poisons the least-squares slope: averaging the
+// pre-charge decline, the charge jump, and the post-charge decline yields a
+// near-flat or rising line, so a plainly-draining frame reads
+// "stable"/"charging". Only the rate since the last charge predicts the
+// runtime left. It finds the last charge by tracking the recent trough; once
+// SoC climbs batteryChargeRise above it, that's charging, and it follows the
+// rise to its peak (where charging ends, confirmed by a batteryDischargeHyst
+// drop) to start the next run there.
+//
+// Returns segStart (an index into pts) and activeCharge — true when the
+// window ends still mid-charge (still rising, no discharge-after-charge seen
+// yet). In that case segStart points at the trough where the current climb
+// began (not its peak: while still climbing, the peak keeps re-advancing to
+// the latest point on every sample, which would collapse the segment to a
+// single point and leave too few to regress — Estimate exempts an
+// activeCharge segment from its minimum-span gate for this reason, since
+// getting here already required a confirmed, well-above-noise SoC rise).
+func trimToCurrentSegment(pts []pt) (segStart int, activeCharge bool) {
+	if len(pts) < 2 {
+		return 0, false
+	}
+	minIdx := 0
+	peakIdx := 0
+	charging := false
+	for i := 1; i < len(pts); i++ {
+		if !charging {
+			if pts[i].y < pts[minIdx].y {
+				minIdx = i
+			}
+			if pts[i].y-pts[minIdx].y > batteryChargeRise {
+				charging = true
+				peakIdx = i
+			}
+		} else {
+			if pts[i].y >= pts[peakIdx].y {
+				peakIdx = i
+			} else if pts[peakIdx].y-pts[i].y > batteryDischargeHyst {
+				charging = false
+				segStart = peakIdx
+				minIdx = peakIdx
+			}
+		}
+	}
+	if charging {
+		return minIdx, true
+	}
+	return segStart, false
+}
+
 // Estimate regresses state-of-charge over time across the trailing window. When
 // the samples carry battery voltage (newer firmware), it regresses a voltage-
 // derived SoC (finer, smoother) instead of the coarse firmware percentage.
@@ -418,7 +474,6 @@ func (s *BatteryService) Estimate(deviceID uint) BatteryEstimate {
 	// reading are used; y is the voltage-derived SoC. Otherwise y is the
 	// firmware percentage. Despiked samples are excluded so a rail-sag
 	// doesn't corrupt the slope or get misread as a recharge below.
-	type pt struct{ x, y float64 }
 	var pts []pt
 	var t0 time.Time
 	for i, sm := range samples {
@@ -443,51 +498,23 @@ func (s *BatteryService) Estimate(deviceID uint) BatteryEstimate {
 		currentY = voltageToSoC(effLast.VoltageMV)
 	}
 
-	// Trim to the most recent discharge run. A mid-window recharge (the user
-	// tops the battery up over USB) otherwise poisons the least-squares slope:
-	// averaging the pre-charge decline, the charge jump, and the post-charge
-	// decline yields a near-flat or rising line, so a plainly-draining frame
-	// reads "stable"/"charging". Only the rate since the last charge predicts
-	// the runtime left. We find the last charge by tracking the recent trough;
-	// once SoC climbs chargeRise above it we're charging, then follow the rise
-	// to its peak (where charging ends) and start the run there.
-	if len(pts) >= 2 {
-		segStart := 0
-		minIdx := 0
-		peakIdx := 0
-		charging := false
-		for i := 1; i < len(pts); i++ {
-			if !charging {
-				if pts[i].y < pts[minIdx].y {
-					minIdx = i
-				}
-				if pts[i].y-pts[minIdx].y > batteryChargeRise {
-					charging = true
-					peakIdx = i
-				}
-			} else {
-				if pts[i].y >= pts[peakIdx].y {
-					peakIdx = i
-				} else if pts[peakIdx].y-pts[i].y > batteryDischargeHyst {
-					charging = false
-					segStart = peakIdx
-					minIdx = peakIdx
-				}
-			}
-		}
-		if charging {
-			// Window ends mid-charge; start the run at the latest peak so we
-			// don't regress over the still-rising tail.
-			segStart = peakIdx
-		}
-		pts = pts[segStart:]
-	}
+	// Trim to the most recent discharge run — see trimToCurrentSegment.
+	segStart, activeCharge := trimToCurrentSegment(pts)
+	pts = pts[segStart:]
 
 	span := time.Duration(0)
 	if len(pts) >= 2 {
 		span = time.Duration((pts[len(pts)-1].x - pts[0].x) * float64(24*time.Hour))
 	}
-	if len(pts) < 2 || span < batteryMinSpan {
+	// The minSpan gate exists to keep noisy discharging/stable readings from
+	// flip-flopping near the flat threshold — it doesn't apply to an active
+	// charge: getting here at all already required a confirmed chargeRise-or-
+	// more SoC climb (see above), a far stronger signal than the day-to-day
+	// percent/voltage jitter this gate guards against, and these charges often
+	// finish in well under batteryMinSpan. Without this, a device charging for
+	// (say) 2 hours would report "insufficient" for its entire charge instead
+	// of "charging".
+	if len(pts) < 2 || (!activeCharge && span < batteryMinSpan) {
 		return est // not enough to read a trend yet; current values still shown
 	}
 
