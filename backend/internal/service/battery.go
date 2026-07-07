@@ -69,6 +69,12 @@ const (
 	// consecutive ones — observed in the field on one board reporting two
 	// sagged readings in a row before recovering.
 	batteryMedianRadius = 2
+	// batteryRobustMaxPoints caps how many points theilSenSlope considers
+	// (subsampled evenly) before computing every pairwise slope — pairwise
+	// comparisons are O(n^2), and a run can hold thousands of points at this
+	// project's sampling cadence over a multi-day span. A few hundred evenly
+	// spread points already characterize a run's rate; more just adds cost.
+	batteryRobustMaxPoints = 300
 )
 
 // RecordSample stores a reading, throttled per device. Best-effort; callers
@@ -103,7 +109,13 @@ type BatteryEstimate struct {
 	HasData          bool                  `json:"has_data"`
 	CurrentPercent   int                   `json:"current_percent"`
 	CurrentVoltageMV int                   `json:"current_voltage_mv"`
-	DrainPerDay      float64               `json:"drain_per_day"`  // %/day, positive = discharging
+	// DrainPerDay (%/day, positive = discharging) is deliberately
+	// conservative when Trend is "discharging": it's the WORST
+	// robustly-confirmed rate seen across the trailing window, not just the
+	// current run's own average — an unusually calm recent stretch shouldn't
+	// make "days remaining" claim more runway than the device has actually
+	// proven capable of burning through. See Estimate / robustDrainAcrossWindow.
+	DrainPerDay float64 `json:"drain_per_day"`
 	DaysRemaining    float64               `json:"days_remaining"` // -1 = unknown/charging/stable
 	Trend            string                `json:"trend"`          // discharging | charging | stable | insufficient
 	SampleCount      int                   `json:"sample_count"`
@@ -395,6 +407,108 @@ func trimToCurrentSegment(pts []pt) (segStart int, activeCharge bool) {
 	return segStart, false
 }
 
+// subsamplePts returns pts unchanged if it already has maxN or fewer points,
+// else maxN evenly-spaced points (including the first and last) — used to
+// bound the O(n^2) cost of theilSenSlope on a long run without meaningfully
+// changing the rate it measures.
+func subsamplePts(pts []pt, maxN int) []pt {
+	if len(pts) <= maxN || maxN < 2 {
+		return pts
+	}
+	out := make([]pt, maxN)
+	for i := 0; i < maxN; i++ {
+		out[i] = pts[i*(len(pts)-1)/(maxN-1)]
+	}
+	return out
+}
+
+// theilSenSlope returns the median of the pairwise slopes (y_j-y_i)/(x_j-x_i)
+// over every pair i<j in pts — a robust regression slope. Unlike the
+// ordinary-least-squares slope this replaces, a single noisy point (a
+// WiFi-TX rail sag that slips past despiking, say) can only ever contribute
+// to a minority of the pairwise slopes, so it can't swing the median the way
+// it can swing an OLS fit — especially on the short runs this estimate often
+// has to work with.
+func theilSenSlope(pts []pt) float64 {
+	pts = subsamplePts(pts, batteryRobustMaxPoints)
+	var slopes []float64
+	for i := 0; i < len(pts); i++ {
+		for j := i + 1; j < len(pts); j++ {
+			dx := pts[j].x - pts[i].x
+			if dx <= 0 {
+				continue
+			}
+			slopes = append(slopes, (pts[j].y-pts[i].y)/dx)
+		}
+	}
+	return median(slopes)
+}
+
+// dischargeRuns splits a chronologically-ordered SoC series into every
+// discharge run it contains, using the same trough/rise/peak/hysteresis
+// state machine as trimToCurrentSegment — generalized to record each
+// completed run instead of stopping at the latest one. Used to look across
+// the WHOLE trailing window for the worst historically-confirmed drain rate,
+// not just whatever the most recent run happens to look like.
+func dischargeRuns(pts []pt) [][2]int {
+	if len(pts) < 2 {
+		return nil
+	}
+	var runs [][2]int
+	segStart := 0
+	minIdx := 0
+	peakIdx := 0
+	charging := false
+	for i := 1; i < len(pts); i++ {
+		if !charging {
+			if pts[i].y < pts[minIdx].y {
+				minIdx = i
+			}
+			if pts[i].y-pts[minIdx].y > batteryChargeRise {
+				if minIdx > segStart {
+					runs = append(runs, [2]int{segStart, minIdx})
+				}
+				charging = true
+				peakIdx = i
+			}
+		} else {
+			if pts[i].y >= pts[peakIdx].y {
+				peakIdx = i
+			} else if pts[peakIdx].y-pts[i].y > batteryDischargeHyst {
+				charging = false
+				segStart = peakIdx
+				minIdx = peakIdx
+			}
+		}
+	}
+	if !charging && len(pts)-1 > segStart {
+		runs = append(runs, [2]int{segStart, len(pts) - 1})
+	}
+	return runs
+}
+
+// robustDrainAcrossWindow scans every discharge run in the trailing window
+// (via dischargeRuns) and returns the FASTEST robustly-confirmed rate among
+// them — a deliberately conservative "worst case" for planning around
+// (e.g. "will this survive a 2-week trip unattended?"), rather than an
+// optimistic average of whatever the latest run happens to show. Only runs
+// spanning at least batteryMinSpan qualify as confirmed evidence — the same
+// bar Estimate already requires before trusting the current run's slope.
+func robustDrainAcrossWindow(pts []pt) (drain float64, ok bool) {
+	for _, r := range dischargeRuns(pts) {
+		run := pts[r[0] : r[1]+1]
+		span := time.Duration((run[len(run)-1].x - run[0].x) * float64(24*time.Hour))
+		if span < batteryMinSpan {
+			continue
+		}
+		d := -theilSenSlope(run)
+		if d > batteryFlatThreshold && (!ok || d > drain) {
+			drain, ok = d, true
+		}
+	}
+	return drain, ok
+}
+
 // Estimate regresses state-of-charge over time across the trailing window. When
 // the samples carry battery voltage (newer firmware), it regresses a voltage-
 // derived SoC (finer, smoother) instead of the coarse firmware percentage.
@@ -498,6 +612,12 @@ func (s *BatteryService) Estimate(deviceID uint) BatteryEstimate {
 		currentY = voltageToSoC(effLast.VoltageMV)
 	}
 
+	// Keep the full-window series before trimming: the current-run slope below
+	// decides Trend (what's happening right now), but a confirmed "discharging"
+	// verdict re-scans this full series for the worst historical run — see
+	// robustDrainAcrossWindow.
+	fullPts := pts
+
 	// Trim to the most recent discharge run — see trimToCurrentSegment.
 	segStart, activeCharge := trimToCurrentSegment(pts)
 	pts = pts[segStart:]
@@ -518,33 +638,27 @@ func (s *BatteryService) Estimate(deviceID uint) BatteryEstimate {
 		return est // not enough to read a trend yet; current values still shown
 	}
 
-	// Least-squares slope of SoC vs. elapsed days.
-	var n, sumX, sumY, sumXY, sumXX float64
-	for _, p := range pts {
-		n++
-		sumX += p.x
-		sumY += p.y
-		sumXY += p.x * p.y
-		sumXX += p.x * p.x
-	}
-	denom := n*sumXX - sumX*sumX
-	if denom == 0 {
-		return est
-	}
-	slope := (n*sumXY - sumX*sumY) / denom // SoC %/day, negative when discharging
-
-	drain := -slope
-	est.DrainPerDay = drain
+	// Robust (Theil-Sen, not least-squares) slope of the current run — decides
+	// Trend, i.e. what the device is doing right now.
+	drain := -theilSenSlope(pts)
 	switch {
 	case drain > batteryFlatThreshold:
 		est.Trend = "discharging"
-		if drain > 0 {
-			est.DaysRemaining = currentY / drain
+		// Conservative by design: don't report the current run's own (possibly
+		// unusually calm) rate — re-scan the whole trailing window for the
+		// worst robustly-confirmed run and use that instead if it's worse. See
+		// robustDrainAcrossWindow's doc comment for why.
+		if worst, ok := robustDrainAcrossWindow(fullPts); ok && worst > drain {
+			drain = worst
 		}
+		est.DrainPerDay = drain
+		est.DaysRemaining = currentY / drain
 	case drain < -batteryFlatThreshold:
 		est.Trend = "charging"
+		est.DrainPerDay = drain
 	default:
 		est.Trend = "stable"
+		est.DrainPerDay = drain
 	}
 
 	// Optional: average discharge current, only computable when the device's

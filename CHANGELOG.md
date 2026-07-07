@@ -1,5 +1,10 @@
 # Changelog
 
+## v1.44.0
+
+### Changed
+- **Battery "days remaining" is now a deliberately conservative, much steadier estimate**, built for the case that actually matters — knowing whether the battery will survive an unattended trip (e.g. 2 weeks away) without deep-discharging and damaging the cell. Previously it regressed a plain least-squares slope over just the latest discharge run, which could swing by tens of days between two readings taken hours apart (a real example: 45.5 → 5.0 → 15.8 days across one evening) since a short, noisy run gives an unstable slope and the reported number is very sensitive to it. Now: the slope itself is computed via a robust (Theil-Sen) estimator resistant to single noisy readings, and when discharging, the reported rate is the **fastest robustly-confirmed drain seen anywhere in the trailing 14-day window** — not just the current calm stretch — so a device that has proven capable of draining quickly won't get an optimistic "days remaining" just because its most recent hours happened to be gentle. Verified against real device history: the reported rate now holds steady across repeated readings instead of being recomputed from scratch (and re-swinging) every time.
+
 ## v1.43.0
 
 ### Fixed
