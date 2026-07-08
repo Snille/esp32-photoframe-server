@@ -132,6 +132,14 @@ export interface Device {
   favorites_only?: boolean;
   // Comma-separated overlay element keys whose icon is hidden (empty = all shown).
   overlay_hidden_icons?: string;
+  // Two-tier on-screen low-battery "charge me" warning, rendered into the image.
+  low_battery_warn_enabled?: boolean;
+  low_battery_warn_percent?: number;
+  low_battery_warn_text?: string;
+  low_battery_warn_position?: string;
+  critical_battery_warn_percent?: number;
+  critical_battery_warn_text?: string;
+  critical_battery_warn_position?: string;
   // How long this device's activity log is kept before the oldest entries are
   // pruned. unit is one of "days" | "months" | "years". Default 6 months.
   log_retention_value?: number;
@@ -220,6 +228,14 @@ export const addDevice = async (params: {
   on_this_day?: boolean;
   favorites_only?: boolean;
   overlay_hidden_icons?: string;
+  // Two-tier on-screen low-battery "charge me" warning, rendered into the image.
+  low_battery_warn_enabled?: boolean;
+  low_battery_warn_percent?: number;
+  low_battery_warn_text?: string;
+  low_battery_warn_position?: string;
+  critical_battery_warn_percent?: number;
+  critical_battery_warn_text?: string;
+  critical_battery_warn_position?: string;
 }) => {
   const response = await api.post('devices', params);
   return response.data;
@@ -279,6 +295,14 @@ export const updateDevice = async (
     on_this_day?: boolean;
     favorites_only?: boolean;
     overlay_hidden_icons?: string;
+    // Two-tier on-screen low-battery "charge me" warning, rendered into the image.
+    low_battery_warn_enabled?: boolean;
+    low_battery_warn_percent?: number;
+    low_battery_warn_text?: string;
+    low_battery_warn_position?: string;
+    critical_battery_warn_percent?: number;
+    critical_battery_warn_text?: string;
+    critical_battery_warn_position?: string;
   }
 ) => {
   const response = await api.put(`/devices/${id}`, {

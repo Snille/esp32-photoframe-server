@@ -3036,6 +3036,107 @@
                               </template>
                             </v-slider>
 
+                            <v-divider class="my-4"></v-divider>
+                            <div class="text-subtitle-2 mb-1">
+                              Low-battery warning
+                            </div>
+                            <div class="text-caption text-medium-emphasis mb-2">
+                              Show a "charge me" message on the frame when its
+                              battery gets low (rendered from the reported %,
+                              hidden while charging). Tier 2 takes over from
+                              tier 1 at the critical threshold.
+                            </div>
+                            <v-switch
+                              v-model="editingDevice.low_battery_warn_enabled"
+                              label="Enable low-battery warning"
+                              color="primary"
+                              density="compact"
+                              hide-details
+                              class="mb-1"
+                            ></v-switch>
+                            <v-row
+                              v-if="editingDevice.low_battery_warn_enabled"
+                              dense
+                              class="mt-1"
+                            >
+                              <v-col cols="12" sm="6">
+                                <v-text-field
+                                  v-model="editingDevice.low_battery_warn_text"
+                                  label="Low warning text"
+                                  variant="outlined"
+                                  density="compact"
+                                  hide-details
+                                ></v-text-field>
+                              </v-col>
+                              <v-col cols="6" sm="3">
+                                <v-text-field
+                                  v-model.number="
+                                    editingDevice.low_battery_warn_percent
+                                  "
+                                  type="number"
+                                  :min="1"
+                                  :max="100"
+                                  label="Warn at %"
+                                  variant="outlined"
+                                  density="compact"
+                                  hide-details
+                                ></v-text-field>
+                              </v-col>
+                              <v-col cols="6" sm="3">
+                                <v-select
+                                  v-model="
+                                    editingDevice.low_battery_warn_position
+                                  "
+                                  :items="positionOptions"
+                                  item-title="label"
+                                  item-value="value"
+                                  label="Position"
+                                  variant="outlined"
+                                  density="compact"
+                                  hide-details
+                                ></v-select>
+                              </v-col>
+                              <v-col cols="12" sm="6">
+                                <v-text-field
+                                  v-model="
+                                    editingDevice.critical_battery_warn_text
+                                  "
+                                  label="Critical text (large, centred)"
+                                  variant="outlined"
+                                  density="compact"
+                                  hide-details
+                                ></v-text-field>
+                              </v-col>
+                              <v-col cols="6" sm="3">
+                                <v-text-field
+                                  v-model.number="
+                                    editingDevice.critical_battery_warn_percent
+                                  "
+                                  type="number"
+                                  :min="1"
+                                  :max="100"
+                                  label="Critical at %"
+                                  variant="outlined"
+                                  density="compact"
+                                  hide-details
+                                ></v-text-field>
+                              </v-col>
+                              <v-col cols="6" sm="3">
+                                <v-select
+                                  v-model="
+                                    editingDevice.critical_battery_warn_position
+                                  "
+                                  :items="critBandOptions"
+                                  item-title="label"
+                                  item-value="value"
+                                  label="Band"
+                                  variant="outlined"
+                                  density="compact"
+                                  hide-details
+                                ></v-select>
+                              </v-col>
+                            </v-row>
+
                             <div
                               class="text-caption text-medium-emphasis mt-4 mb-1"
                             >
@@ -4737,6 +4838,13 @@ const positionOptions = [
   { label: 'Bottom Right', value: 'bottom-right' },
 ];
 
+// Vertical band for the full-width critical-battery banner.
+const critBandOptions = [
+  { label: 'Top', value: 'top' },
+  { label: 'Center', value: 'center' },
+  { label: 'Bottom', value: 'bottom' },
+];
+
 const batteryStyleOptions = [
   { label: 'Icon + Text', value: 'both' },
   { label: 'Icon only', value: 'icon' },
@@ -5192,6 +5300,13 @@ const openAddDeviceDialog = () => {
     battery_position: 'top-right',
     battery_style: 'both',
     battery_rotation: 0,
+    low_battery_warn_enabled: false,
+    low_battery_warn_percent: 25,
+    low_battery_warn_text: 'Time to charge me soon',
+    low_battery_warn_position: 'top-center',
+    critical_battery_warn_percent: 10,
+    critical_battery_warn_text: 'Charge me now!',
+    critical_battery_warn_position: 'center',
     battery_text_side: 'right',
     battery_icon_scale: 1,
     overlay_scale: 1,
@@ -5373,6 +5488,18 @@ const saveDevice = async () => {
         weather_position: editingDevice.weather_position || 'bottom-right',
         battery_position: editingDevice.battery_position || 'top-right',
         battery_style: editingDevice.battery_style || 'both',
+        low_battery_warn_enabled:
+          editingDevice.low_battery_warn_enabled || false,
+        low_battery_warn_percent: editingDevice.low_battery_warn_percent || 25,
+        low_battery_warn_text: editingDevice.low_battery_warn_text || '',
+        low_battery_warn_position:
+          editingDevice.low_battery_warn_position || 'top-center',
+        critical_battery_warn_percent:
+          editingDevice.critical_battery_warn_percent || 10,
+        critical_battery_warn_text:
+          editingDevice.critical_battery_warn_text || '',
+        critical_battery_warn_position:
+          editingDevice.critical_battery_warn_position || 'center',
         battery_rotation: editingDevice.battery_rotation || 0,
         battery_text_side: editingDevice.battery_text_side || 'right',
         battery_icon_scale: editingDevice.battery_icon_scale ?? 1,
@@ -5444,6 +5571,19 @@ const saveDevice = async () => {
           weather_position: editingDevice.weather_position || 'bottom-right',
           battery_position: editingDevice.battery_position || 'top-right',
           battery_style: editingDevice.battery_style || 'both',
+          low_battery_warn_enabled:
+            editingDevice.low_battery_warn_enabled || false,
+          low_battery_warn_percent:
+            editingDevice.low_battery_warn_percent || 25,
+          low_battery_warn_text: editingDevice.low_battery_warn_text || '',
+          low_battery_warn_position:
+            editingDevice.low_battery_warn_position || 'top-center',
+          critical_battery_warn_percent:
+            editingDevice.critical_battery_warn_percent || 10,
+          critical_battery_warn_text:
+            editingDevice.critical_battery_warn_text || '',
+          critical_battery_warn_position:
+            editingDevice.critical_battery_warn_position || 'center',
           battery_rotation: editingDevice.battery_rotation || 0,
           battery_text_side: editingDevice.battery_text_side || 'right',
           battery_icon_scale: editingDevice.battery_icon_scale ?? 1,
