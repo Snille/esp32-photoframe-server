@@ -355,7 +355,20 @@ func (s *DeviceService) TriggerOTAUpdate(id uint) (bool, string, error) {
 	}
 
 	pf := photoframe.NewClient(device.Host)
-	available, err := pf.OTACheck()
+	// The frame's own OTA check hits GitHub over TLS and can occasionally exceed
+	// its check timeout on a slow link. Firmware >= v2.14.1 returns a distinct
+	// error for that (instead of a false "no update available"), so retry a few
+	// times before giving up — the frame stays awake for the check and a
+	// transient timeout usually clears on the next attempt. Older firmware that
+	// still reports the premature false is unaffected by the retry.
+	var available bool
+	var err error
+	for attempt := 0; attempt < 3; attempt++ {
+		if available, err = pf.OTACheck(); err == nil {
+			break
+		}
+		time.Sleep(2 * time.Second)
+	}
 	if err != nil {
 		return false, "", fmt.Errorf("could not reach frame: %w", err)
 	}
