@@ -71,9 +71,19 @@ type RenderOptions struct {
 	BatteryRotation   int     // rotate the battery badge: 0/90/180/270 degrees
 	BatteryTextSide   string  // side of the icon the % text sits: right | left | top | bottom
 	BatteryIconScale  float64 // size multiplier for the battery icon only (0.5–2.0)
-	OverlayScale      float64 // size multiplier for overlay elements (0.5–2.0)
-	OverlayFont       string  // typeface key for overlay chips (see overlayFontFamily)
-	OverlayWeight     string  // regular | medium | bold
+	// Two-tier on-screen low-battery warning (see model.Device). The caller
+	// computes the Show* flags from the reported battery %; the renderer places
+	// tier 1 as a chip (LowBatteryWarnPosition) and tier 2 as a large centred
+	// banner (CriticalBatteryWarnPosition = vertical band top|center|bottom).
+	ShowLowBatteryWarn          bool
+	LowBatteryWarnText          string
+	LowBatteryWarnPosition      string
+	ShowCriticalBatteryWarn     bool
+	CriticalBatteryWarnText     string
+	CriticalBatteryWarnPosition string
+	OverlayScale                float64 // size multiplier for overlay elements (0.5–2.0)
+	OverlayFont                 string  // typeface key for overlay chips (see overlayFontFamily)
+	OverlayWeight               string  // regular | medium | bold
 	// People names + photo location overlays (Immich metadata). The caller
 	// formats Names (per device name-format/age/length) and Location into final
 	// strings; the renderer just places them. Both only show on photo_overlay.
@@ -366,7 +376,16 @@ func (s *RendererService) Render(opts RenderOptions) (image.Image, error) {
 		BatteryRotation:   model.NormalizeBatteryRotation(opts.BatteryRotation),
 		BatteryTextSide:   model.NormalizeBatteryTextSide(opts.BatteryTextSide),
 		BatteryIconScale:  model.NormalizeBatteryIconScale(opts.BatteryIconScale),
-		OverlayScale:      model.NormalizeOverlayScale(opts.OverlayScale),
+		// Low-battery warning: tier 1 uses the standard overlay position grid;
+		// tier 2 is a full-width banner placed in a vertical band. The text is
+		// user content, so html/template auto-escapes it in the element bodies.
+		ShowLowBatteryWarn:          opts.ShowLowBatteryWarn && opts.LowBatteryWarnText != "",
+		LowBatteryWarnText:          opts.LowBatteryWarnText,
+		LowBatteryWarnPosition:      model.NormalizeOverlayPosition(opts.LowBatteryWarnPosition, "top-center"),
+		ShowCriticalBatteryWarn:     opts.ShowCriticalBatteryWarn && opts.CriticalBatteryWarnText != "",
+		CriticalBatteryWarnText:     opts.CriticalBatteryWarnText,
+		CriticalBatteryWarnPosition: model.NormalizeVerticalBand(opts.CriticalBatteryWarnPosition),
+		OverlayScale:                model.NormalizeOverlayScale(opts.OverlayScale),
 		// template.CSS marks this as known-safe CSS (it comes from a fixed
 		// whitelist, not user input). Without it, html/template's CSS sanitizer
 		// rewrites the quoted, comma-separated font list to "ZgotmplZ", so the
@@ -412,6 +431,9 @@ func (s *RendererService) Render(opts RenderOptions) (image.Image, error) {
 	markUsed(ov && data.ShowDescription, data.DescriptionPosition)
 	markUsed(ov && data.ShowRotation, data.RotationPosition)
 	markUsed(data.ShowBattery, data.BatteryPosition)
+	// The low-battery warning chip shows in every layout (like the battery badge),
+	// so it isn't gated on the overlay layout.
+	markUsed(data.ShowLowBatteryWarn, data.LowBatteryWarnPosition)
 	data.TopRowUsed = used["top-left"] || used["top-center"] || used["top-right"]
 	data.BottomRowUsed = used["bottom-left"] || used["bottom-center"] || used["bottom-right"]
 	data.WideTopUsed = used["wide-top"]
@@ -470,57 +492,64 @@ func (s *RendererService) Render(opts RenderOptions) (image.Image, error) {
 }
 
 type templateData struct {
-	Layout              string
-	DisplayMode         string // "cover" or "fit"
-	Width               int
-	Height              int
-	PhotoBase64         string
-	FontBase64          string
-	DPMM                float64 // dots per mm (kept for compatibility)
-	BaseUnit            float64 // min(width,height)/100, for viewport-relative sizing
-	ShowDate            bool
-	DateStr             string // short: "Mon, Jan 02"
-	DateStrLong         string // long: "Monday, January 02, 2006"
-	TimeStr             string
-	ShowPhotoDate       bool
-	PhotoDateStr        string // photo creation date, short format
-	ShowWeather         bool
-	Weather             *weather.CurrentWeather
-	ShowCalendar        bool
-	Events              []gcalendar.Event
-	NextEvent           *gcalendar.Event
-	IsPortrait          bool
-	IsSmall             bool
-	PhotoRatio          float64 // fraction of screen for photo (0.0-1.0)
-	ShowBattery         bool
-	BatteryPercent      int
-	BatteryCharging     bool
-	IsOverlayLayout     bool // full-photo layout: date/photo-date/weather float on the photo
-	DatePosition        string
-	PhotoDatePosition   string
-	WeatherPosition     string
-	BatteryPosition     string
-	ShowBatteryIcon     bool
-	ShowBatteryText     bool
-	BatteryRotation     int
-	BatteryTextSide     string
-	BatteryIconScale    float64
-	OverlayScale        float64
-	OverlayFontFamily   template.CSS
-	OverlayFontWeight   int
-	ShowNames           bool
-	Names               string
-	NamesPosition       string
-	ShowLocation        bool
-	Location            string
-	LocationPosition    string
-	ShowDescription     bool
-	Description         string
-	DescriptionPosition string
-	ShowRotation        bool
-	RotationText        string
-	RotationIcon        string
-	RotationPosition    string
+	Layout            string
+	DisplayMode       string // "cover" or "fit"
+	Width             int
+	Height            int
+	PhotoBase64       string
+	FontBase64        string
+	DPMM              float64 // dots per mm (kept for compatibility)
+	BaseUnit          float64 // min(width,height)/100, for viewport-relative sizing
+	ShowDate          bool
+	DateStr           string // short: "Mon, Jan 02"
+	DateStrLong       string // long: "Monday, January 02, 2006"
+	TimeStr           string
+	ShowPhotoDate     bool
+	PhotoDateStr      string // photo creation date, short format
+	ShowWeather       bool
+	Weather           *weather.CurrentWeather
+	ShowCalendar      bool
+	Events            []gcalendar.Event
+	NextEvent         *gcalendar.Event
+	IsPortrait        bool
+	IsSmall           bool
+	PhotoRatio        float64 // fraction of screen for photo (0.0-1.0)
+	ShowBattery       bool
+	BatteryPercent    int
+	BatteryCharging   bool
+	IsOverlayLayout   bool // full-photo layout: date/photo-date/weather float on the photo
+	DatePosition      string
+	PhotoDatePosition string
+	WeatherPosition   string
+	BatteryPosition   string
+	ShowBatteryIcon   bool
+	ShowBatteryText   bool
+	BatteryRotation   int
+	BatteryTextSide   string
+	BatteryIconScale  float64
+	// Two-tier low-battery warning (computed by the caller from the reported %).
+	ShowLowBatteryWarn          bool
+	LowBatteryWarnText          string
+	LowBatteryWarnPosition      string
+	ShowCriticalBatteryWarn     bool
+	CriticalBatteryWarnText     string
+	CriticalBatteryWarnPosition string
+	OverlayScale                float64
+	OverlayFontFamily           template.CSS
+	OverlayFontWeight           int
+	ShowNames                   bool
+	Names                       string
+	NamesPosition               string
+	ShowLocation                bool
+	Location                    string
+	LocationPosition            string
+	ShowDescription             bool
+	Description                 string
+	DescriptionPosition         string
+	ShowRotation                bool
+	RotationText                string
+	RotationIcon                string
+	RotationPosition            string
 	// Per-chip icon visibility (true = draw the leading icon).
 	ShowPhotoDateIcon   bool
 	ShowWeatherIcon     bool
@@ -672,6 +701,7 @@ const layoutTemplate = `
 {{- define "el_location"}}<div class="ov-chip location">{{if .ShowLocationIcon}}<span class="material-symbols-outlined">place</span> {{end}}{{.Location}}</div>{{end}}
 {{- define "el_description"}}<div class="ov-chip description">{{if .ShowDescriptionIcon}}<span class="material-symbols-outlined">notes</span> {{end}}{{.Description}}</div>{{end}}
 {{- define "el_rotation"}}<div class="ov-chip rotation">{{if .ShowRotationIcon}}<span class="material-symbols-outlined">{{.RotationIcon}}</span> {{end}}{{.RotationText}}</div>{{end}}
+{{- define "el_lowbatt"}}<div class="ov-chip low-batt"><span class="material-symbols-outlined">battery_alert</span> {{.LowBatteryWarnText}}</div>{{end}}
 {{- define "ov_slot"}}
   <div class="ov-slot {{.Pos}}">
     {{if and .D.IsOverlayLayout .D.ShowDate (eq .D.DatePosition .Pos)}}{{template "el_date" .D}}{{end}}
@@ -683,6 +713,7 @@ const layoutTemplate = `
     {{if and .D.IsOverlayLayout .D.ShowDescription (eq .D.DescriptionPosition .Pos)}}{{template "el_description" .D}}{{end}}
     {{if and .D.IsOverlayLayout .D.ShowRotation (eq .D.RotationPosition .Pos)}}{{template "el_rotation" .D}}{{end}}
     {{if and .D.ShowBattery (eq .D.BatteryPosition .Pos)}}{{template "el_battery" .D}}{{end}}
+    {{if and .D.ShowLowBatteryWarn (eq .D.LowBatteryWarnPosition .Pos)}}{{template "el_lowbatt" .D}}{{end}}
   </div>
 {{- end}}
 {{- define "floating"}}<div class="floating">
@@ -866,6 +897,33 @@ const layoutTemplate = `
      height. The 0.25em chip padding absorbs the small visual overflow. */
   .ov-chip .material-symbols-outlined { font-size: 1.3em; line-height: 0.88; }
   .ov-chip.event { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; display: block; }
+  /* Tier-1 low-battery warning: a normal overlay-slot chip in an attention
+     colour so it stands out from the neutral info chips. */
+  .ov-chip.low-batt { background: rgba(200,120,0,0.85); color: #fff; font-weight: 700; }
+  /* Tier-2 critical-battery banner: a full-width bar with large text, drawn
+     above the floating overlays (z-index 5) and every layout, anchored to a
+     vertical band. Sizes use the global :root units so it scales with the panel. */
+  .crit-warn {
+    position: absolute;
+    left: 0;
+    right: 0;
+    z-index: 20;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 0.15em;
+    padding: calc(var(--padding) * 1.2) var(--padding);
+    background: rgba(180,20,20,0.88);
+    color: #fff;
+    text-align: center;
+    font-weight: 800;
+  }
+  .crit-warn .crit-icon { font-size: calc(var(--heading-size) * 1.6); line-height: 1; }
+  .crit-warn .crit-text { font-size: calc(var(--heading-size) * 1.25); line-height: 1.1; }
+  .crit-top    { top: 0; }
+  .crit-center { top: 50%; transform: translateY(-50%); }
+  .crit-bottom { bottom: 0; }
 
   /* Battery icon rotation. A 90/270-turned icon is 1.7em tall, so reserve
      vertical room via min-height to keep it inside the chip background. */
@@ -1263,6 +1321,13 @@ const layoutTemplate = `
     <img class="photo" src="data:image/jpeg;base64,{{.PhotoBase64}}">
     {{template "floating" .}}
   </div>
+</div>
+{{end}}
+
+{{if .ShowCriticalBatteryWarn}}
+<div class="crit-warn crit-{{.CriticalBatteryWarnPosition}}">
+  <span class="material-symbols-outlined crit-icon">battery_alert</span>
+  <div class="crit-text">{{.CriticalBatteryWarnText}}</div>
 </div>
 {{end}}
 
