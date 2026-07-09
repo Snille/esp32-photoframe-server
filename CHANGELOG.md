@@ -1,5 +1,13 @@
 # Changelog
 
+## v1.45.0
+
+### Added
+- **On-screen low-battery "charge me" warning, rendered into the served image.** A local nudge for whoever is near the frame (complements the HA/server battery alerts): tier 1 shows a small chip ("Time to charge me soon") at a chosen position once the battery drops to a low threshold; tier 2 takes over with a large centred banner ("Charge me now!") at a critical threshold. Both texts, thresholds and positions are per-device (device dialog, under the overlay settings), disabled by default, and skipped while the frame is charging or its level is unknown. A live-preview test toggle (Off/Low/Critical) shows the warning in the dialog without draining a battery.
+
+### Fixed
+- **Server-triggered OTA no longer reports "Frame is already on the latest version" when a frame's update check merely timed out.** `TriggerOTAUpdate` retries the frame's OTA check a few times instead of surfacing a transient timeout as an error — pairs with firmware v2.14.1, which returns a distinct timeout/error instead of a false "no update".
+
 ## v1.44.0
 
 ### Changed
