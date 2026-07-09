@@ -523,6 +523,37 @@ func (h *DeviceHandler) UpdateDeviceBatteryCapacity(c echo.Context) error {
 	return c.JSON(http.StatusOK, map[string]interface{}{"battery_capacity_mah": req.CapacityMAh})
 }
 
+// PUT /api/devices/:id/auto-update — server-controlled OTA auto-update. Unlike
+// the other device settings this is pushed to the frame via config-sync, so it
+// bumps config_last_updated to trigger the X-Config-Payload on the next pull.
+// body: {"auto_update": true, "auto_update_battery_min": 30}.
+func (h *DeviceHandler) UpdateDeviceAutoUpdate(c echo.Context) error {
+	id, _ := strconv.Atoi(c.Param("id"))
+	var req struct {
+		AutoUpdate           bool `json:"auto_update"`
+		AutoUpdateBatteryMin int  `json:"auto_update_battery_min"`
+	}
+	if err := c.Bind(&req); err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid request"})
+	}
+	batteryMin := model.NormalizeAutoUpdateBatteryMin(req.AutoUpdateBatteryMin)
+	if err := h.db.Model(&model.Device{}).Where("id = ?", id).Updates(map[string]interface{}{
+		"auto_update":             req.AutoUpdate,
+		"auto_update_battery_min": batteryMin,
+		"config_last_updated":     time.Now().Unix(),
+	}).Error; err != nil {
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to update auto-update"})
+	}
+	// Reflect the change to Home Assistant right away.
+	if h.mqtt != nil {
+		h.mqtt.NotifyDeviceUpdated(uint(id))
+	}
+	return c.JSON(http.StatusOK, map[string]interface{}{
+		"auto_update":             req.AutoUpdate,
+		"auto_update_battery_min": batteryMin,
+	})
+}
+
 // DELETE /api/devices/:id
 func (h *DeviceHandler) DeleteDevice(c echo.Context) error {
 	id, _ := strconv.Atoi(c.Param("id"))

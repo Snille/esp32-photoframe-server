@@ -1,5 +1,10 @@
 # Changelog
 
+## v1.46.0
+
+### Added
+- **Server-controlled OTA firmware auto-update, per device.** A new "Auto-update firmware" switch (device dialog → Power tab, and a Home Assistant switch) lets the server tell a frame to install firmware updates on its own during its daily update check — no WebGUI or manual push needed, which is the clean answer for remote frames you can't physically reach. It's the first server-owned setting pushed to the frame via config-sync (merged into the config payload the frame already syncs), so it takes effect on the frame's next pull. Default **off**, so each frame stays a manual "canary" until you turn it on — verify a release on a frame you can reach before your remote frames pick it up. A configurable battery floor (default 30 %) is sent along and **enforced on-device**: the frame won't auto-install on battery below it unless it's charging, so a low, unreachable frame is never bricked mid-update. Requires firmware **v2.15.0**.
+
 ## v1.45.0
 
 ### Added

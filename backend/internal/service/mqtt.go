@@ -349,6 +349,7 @@ func (s *MQTTService) RemoveDevice(deviceID uint) {
 	client.Publish(s.discoveryTopic("button", deviceID, "favorite"), 1, true, "")
 	client.Publish(s.discoveryTopic("switch", deviceID, "on_this_day"), 1, true, "")
 	client.Publish(s.discoveryTopic("switch", deviceID, "favorites_only"), 1, true, "")
+	client.Publish(s.discoveryTopic("switch", deviceID, "auto_update"), 1, true, "")
 	client.Publish(s.discoveryTopic("binary_sensor", deviceID, "online"), 1, true, "")
 	client.Publish(s.discoveryTopic("binary_sensor", deviceID, "current_favorite"), 1, true, "")
 	client.Publish(s.controlsAvailabilityTopic(deviceID), 1, true, "")
@@ -510,6 +511,15 @@ func (s *MQTTService) handleCommand(deviceID uint, field, payload string) {
 		on := payload == "ON"
 		s.db.Model(&device).Update("favorites_only", on)
 		device.FavoritesOnly = on
+	case "auto_update":
+		// Server-owned + pushed to the frame via config-sync, so bump
+		// config_last_updated to fire the X-Config-Payload on the next pull.
+		on := payload == "ON"
+		s.db.Model(&device).Updates(map[string]interface{}{
+			"auto_update":         on,
+			"config_last_updated": time.Now().Unix(),
+		})
+		device.AutoUpdate = on
 	case "rotate":
 		if !boardSupportsLiveControl(device.BoardName) || device.Host == "" {
 			return
@@ -751,6 +761,7 @@ func (s *MQTTService) publishState(client mqtt.Client, device *model.Device) {
 	state["current_favorite"] = onOff(s.currentImageFavorite(device.ID, source))
 	state["on_this_day"] = onOff(device.OnThisDay)
 	state["favorites_only"] = onOff(device.FavoritesOnly)
+	state["auto_update"] = onOff(device.AutoUpdate)
 
 	payload, _ := json.Marshal(state)
 	client.Publish(s.stateTopic(device.ID), 1, true, payload)
@@ -1390,6 +1401,14 @@ func (s *MQTTService) publishDiscovery(client mqtt.Client, device *model.Device)
 	control("switch", "favorites_only", map[string]interface{}{
 		"name": "Favorites Only", "icon": "mdi:star-circle",
 		"state_topic": state, "value_template": "{{ value_json.favorites_only }}",
+		"payload_on": "ON", "payload_off": "OFF", "entity_category": "config",
+	})
+
+	// Server-controlled OTA auto-update: when on, the frame's daily check
+	// self-installs a found update (battery-gated on-device). Default off.
+	control("switch", "auto_update", map[string]interface{}{
+		"name": "Auto-Update Firmware", "icon": "mdi:cloud-download",
+		"state_topic": state, "value_template": "{{ value_json.auto_update }}",
 		"payload_on": "ON", "payload_off": "OFF", "entity_category": "config",
 	})
 

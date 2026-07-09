@@ -3523,6 +3523,52 @@
 
                         <v-divider class="my-4" />
 
+                        <div class="text-subtitle-2 mb-1">
+                          Firmware auto-update
+                        </div>
+                        <div class="text-caption text-medium-emphasis mb-2">
+                          When on, this frame installs firmware updates on its
+                          own during its daily update check — no WebGUI or
+                          manual push needed. Ideal for remote frames you can't
+                          reach. Keep it <strong>off</strong> on a frame you can
+                          get to (a "canary") so you can verify each release on
+                          it before your remote frames pick it up.
+                        </div>
+                        <v-switch
+                          v-model="editingDevice.auto_update"
+                          label="Auto-update firmware"
+                          color="primary"
+                          hide-details
+                          :loading="autoUpdateSaving"
+                          @update:model-value="saveAutoUpdate"
+                        />
+                        <template v-if="editingDevice.auto_update">
+                          <v-slider
+                            v-model.number="autoUpdateBatteryMin"
+                            label="Only auto-install at battery ≥"
+                            :min="10"
+                            :max="90"
+                            :step="5"
+                            thumb-label
+                            hide-details
+                            class="mt-4"
+                            @end="saveAutoUpdate"
+                          >
+                            <template #append>
+                              <span class="text-caption" style="min-width: 34px"
+                                >{{ autoUpdateBatteryMin }}%</span
+                              >
+                            </template>
+                          </v-slider>
+                          <div class="text-caption text-medium-emphasis mt-1">
+                            Safety gate: the frame won't auto-install on battery
+                            below this level (unless it's charging), so a low,
+                            unreachable frame is never bricked mid-update.
+                          </div>
+                        </template>
+
+                        <v-divider class="my-4" />
+
                         <div class="text-subtitle-2 mb-1">Button</div>
                         <div class="text-caption text-medium-emphasis mb-3">
                           What the wake button does while the frame is awake. A
@@ -4043,6 +4089,7 @@ import {
   getBatteryEstimate,
   getBatteryHistory,
   updateDeviceBatteryCapacity,
+  updateDeviceAutoUpdate,
   type BatteryEstimate,
   type BatterySample,
   listSources,
@@ -5442,6 +5489,11 @@ const editDevice = async (device: Device) => {
   // Load device remote config + battery drain estimate
   loadBatteryEstimate(device.id);
   batteryCapacityInput.value = device.battery_capacity_mah || null;
+  autoUpdateBatteryMin.value = device.auto_update_battery_min || 30;
+  autoUpdateSaved.value = {
+    enabled: !!device.auto_update,
+    min: device.auto_update_battery_min || 30,
+  };
   // Populate the Immich album picker (best-effort; only matters for Immich frames).
   if (!immichStore.albums || immichStore.albums.length === 0) {
     immichStore.fetchAlbums().catch(() => {});
@@ -5454,6 +5506,45 @@ const batteryLoading = ref(false);
 // Bound to the Power tab's capacity field; persisted by the main Save button
 // (see saveDevice) rather than its own save action.
 const batteryCapacityInput = ref<number | null>(null);
+
+// Server-controlled OTA auto-update (Power tab). Applied immediately on toggle /
+// slider release via its own endpoint (bumps config_last_updated server-side so
+// the frame picks it up on its next pull), not via the main Save button.
+const autoUpdateBatteryMin = ref<number>(30);
+const autoUpdateSaving = ref(false);
+// Last successfully-saved values, so a failed save (toggle or slider) can be
+// rolled back cleanly regardless of which control triggered it.
+const autoUpdateSaved = ref<{ enabled: boolean; min: number }>({
+  enabled: false,
+  min: 30,
+});
+
+const saveAutoUpdate = async () => {
+  if (!editingDevice.id) return;
+  autoUpdateSaving.value = true;
+  try {
+    const res = await updateDeviceAutoUpdate(
+      editingDevice.id,
+      !!editingDevice.auto_update,
+      autoUpdateBatteryMin.value
+    );
+    // Reflect the server-normalized values back into local state.
+    editingDevice.auto_update = res.auto_update;
+    editingDevice.auto_update_battery_min = res.auto_update_battery_min;
+    autoUpdateBatteryMin.value = res.auto_update_battery_min;
+    autoUpdateSaved.value = {
+      enabled: res.auto_update,
+      min: res.auto_update_battery_min,
+    };
+  } catch {
+    showMessage('Failed to update auto-update setting', true);
+    // Restore the last saved state (works for both the switch and the slider).
+    editingDevice.auto_update = autoUpdateSaved.value.enabled;
+    autoUpdateBatteryMin.value = autoUpdateSaved.value.min;
+  } finally {
+    autoUpdateSaving.value = false;
+  }
+};
 
 const loadBatteryEstimate = async (deviceId?: number) => {
   batteryEstimate.value = null;

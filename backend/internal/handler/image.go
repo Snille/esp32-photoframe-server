@@ -1090,12 +1090,30 @@ func (h *ImageHandler) ListSources(c echo.Context) error {
 
 // buildConfigPayload builds the X-Config-Payload JSON from device's stored config.
 // Returns empty string if there's nothing to send.
+//
+// auto_update is the one server-OWNED field pushed to the frame (everything else
+// in "config" is frame-reported and mirrored back): it's merged into the config
+// object here so a remote frame with no WebGUI access can be told to self-install
+// updates. The frame parses auto_update / auto_update_battery_min out of the
+// "config" object (see firmware apply_config_from_json).
 func buildConfigPayload(device *model.Device) string {
 	payload := map[string]json.RawMessage{}
 
+	// Start from the frame-reported config (if any) and inject the server-owned
+	// auto_update fields on top.
+	config := map[string]json.RawMessage{}
 	if device.DeviceConfig != "" && device.DeviceConfig != "{}" {
-		payload["config"] = json.RawMessage(device.DeviceConfig)
+		if err := json.Unmarshal([]byte(device.DeviceConfig), &config); err != nil {
+			// Malformed stored config — don't lose the auto_update push over it.
+			config = map[string]json.RawMessage{}
+		}
 	}
+	config["auto_update"] = jsonBool(device.AutoUpdate)
+	config["auto_update_battery_min"] = jsonInt(model.NormalizeAutoUpdateBatteryMin(device.AutoUpdateBatteryMin))
+	if configData, err := json.Marshal(config); err == nil {
+		payload["config"] = json.RawMessage(configData)
+	}
+
 	if device.DeviceProcessingSettings != "" && device.DeviceProcessingSettings != "{}" {
 		payload["processing_settings"] = json.RawMessage(device.DeviceProcessingSettings)
 	}
@@ -1112,6 +1130,19 @@ func buildConfigPayload(device *model.Device) string {
 		return ""
 	}
 	return string(data)
+}
+
+// jsonBool / jsonInt render a Go scalar as a raw JSON token for merging into a
+// map[string]json.RawMessage.
+func jsonBool(b bool) json.RawMessage {
+	if b {
+		return json.RawMessage("true")
+	}
+	return json.RawMessage("false")
+}
+
+func jsonInt(n int) json.RawMessage {
+	return json.RawMessage(strconv.Itoa(n))
 }
 
 func (h *ImageHandler) GetServedImageThumbnail(c echo.Context) error {

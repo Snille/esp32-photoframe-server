@@ -174,6 +174,11 @@ export interface Device {
   // frame's own local WebGUI, mirrored via X-Battery-ADC-Pin. -1/unset =
   // none configured.
   battery_adc_gpio?: number;
+  // Server-controlled OTA auto-update: when on, the frame's daily check
+  // self-installs a found update (battery-gated on-device). Pushed to the
+  // frame via config-sync. auto_update_battery_min = on-battery charge floor.
+  auto_update?: boolean;
+  auto_update_battery_min?: number;
   created_at: string;
   model?: any;
 }
@@ -424,6 +429,21 @@ export const updateDeviceBatteryCapacity = async (
 ) => {
   const response = await api.put(`/devices/${id}/battery-capacity`, {
     capacity_mah: capacityMah,
+  });
+  return response.data;
+};
+
+// Server-controlled OTA auto-update: pushed to the frame via config-sync (bumps
+// config_last_updated server-side). Separate endpoint so it applies immediately
+// on toggle, like the HA switch.
+export const updateDeviceAutoUpdate = async (
+  id: number,
+  autoUpdate: boolean,
+  autoUpdateBatteryMin: number
+) => {
+  const response = await api.put(`/devices/${id}/auto-update`, {
+    auto_update: autoUpdate,
+    auto_update_battery_min: autoUpdateBatteryMin,
   });
   return response.data;
 };

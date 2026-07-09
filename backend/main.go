@@ -386,6 +386,7 @@ func main() {
 	protectedApi.GET("/devices/:id/logs/download", deviceHandler.DownloadDeviceLogs)
 	protectedApi.PUT("/devices/:id/log-retention", deviceHandler.UpdateDeviceLogRetention)
 	protectedApi.PUT("/devices/:id/battery-capacity", deviceHandler.UpdateDeviceBatteryCapacity)
+	protectedApi.PUT("/devices/:id/auto-update", deviceHandler.UpdateDeviceAutoUpdate)
 	protectedApi.GET("/devices/:id/config", ih.GetDeviceConfig)
 	protectedApi.PUT("/devices/:id/config", ih.UpdateDeviceConfig)
 	protectedApi.GET("/sources", ih.ListSources)

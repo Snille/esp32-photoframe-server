@@ -256,8 +256,17 @@ type Device struct {
 	// reported here via X-Battery-ADC-Pin on each check-in. -1 = not
 	// configured / not applicable. Explicit column name for the same reason
 	// as BatteryCapacityMAh above.
-	BatteryADCGPIO int       `json:"battery_adc_gpio" gorm:"column:battery_adc_gpio;default:-1"`
-	CreatedAt      time.Time `json:"created_at"`
+	BatteryADCGPIO int `json:"battery_adc_gpio" gorm:"column:battery_adc_gpio;default:-1"`
+
+	// AutoUpdate is server-owned and pushed to the frame via config-sync: when
+	// on, the frame's daily OTA check self-installs a found update instead of
+	// only lighting the update icon. Default off so each frame stays a manual
+	// canary. AutoUpdateBatteryMin is the on-battery charge floor the frame
+	// requires before auto-installing (the gate is enforced on-device); clamped
+	// 10-90 via NormalizeAutoUpdateBatteryMin.
+	AutoUpdate           bool      `json:"auto_update" gorm:"column:auto_update;default:0"`
+	AutoUpdateBatteryMin int       `json:"auto_update_battery_min" gorm:"column:auto_update_battery_min;default:30"`
+	CreatedAt            time.Time `json:"created_at"`
 }
 
 const (
@@ -350,6 +359,22 @@ func NormalizeWarnPercent(p, def int) int {
 		return p
 	}
 	return def
+}
+
+// NormalizeAutoUpdateBatteryMin clamps the auto-update battery floor to 10-90,
+// mirroring the on-device clamp in config_manager_set_auto_update_battery_min.
+// 0/unset falls back to the 30 % default.
+func NormalizeAutoUpdateBatteryMin(p int) int {
+	if p == 0 {
+		return 30
+	}
+	if p < 10 {
+		return 10
+	}
+	if p > 90 {
+		return 90
+	}
+	return p
 }
 
 // NormalizeVerticalBand clamps the critical-battery banner's vertical placement
