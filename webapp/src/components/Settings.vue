@@ -5180,17 +5180,22 @@ const previewRegions = computed(() => {
 });
 
 const previewBoxStyle = computed(() => {
+  // Box dimensions derive from PREVIEW_SHORT_PX (which also drives the font
+  // scaling) so size stays in one place; long side keeps the 3:2 preview aspect.
+  const short = PREVIEW_SHORT_PX;
+  const long = Math.round(short * 1.5);
   const portrait = (editingDevice.orientation || 'landscape') === 'portrait';
   return portrait
-    ? { width: '180px', height: '270px' }
-    : { width: '270px', height: '180px' };
+    ? { width: `${short}px`, height: `${long}px` }
+    : { width: `${long}px`, height: `${short}px` };
 });
 
-// The preview box is rendered with a fixed 180px short side (270x180 landscape
-// / 180x270 portrait). To make the preview match the device 1:1, mirror the
-// renderer's --secondary-size formula for the panel, then scale it down by the
-// ratio of the preview box to the real panel.
-const PREVIEW_SHORT_PX = 180;
+// The preview box is rendered with a fixed short side (this many px; 3:2 aspect,
+// so 450x300 landscape / 300x450 portrait). To make the preview match the device
+// 1:1, mirror the renderer's --secondary-size formula for the panel, then scale
+// it down by the ratio of the preview box to the real panel. Drives both the box
+// size (previewBoxStyle) and the font scaling (previewSecondaryPx).
+const PREVIEW_SHORT_PX = 300;
 
 const previewPanelMinDim = computed(() => {
   const w = editingDevice.width || 600;
@@ -7132,6 +7137,7 @@ const getDeviceFromUA = (ua: string) => {
 /* Live overlay placement preview */
 .overlay-preview {
   position: relative;
+  margin: 0 auto; /* centre horizontally in the preview column */
   border-radius: 8px;
   overflow: hidden;
   background: linear-gradient(135deg, #6a7b8c 0%, #93a3b3 50%, #b9a48c 100%);
