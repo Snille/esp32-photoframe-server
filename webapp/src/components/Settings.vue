@@ -3136,6 +3136,31 @@
                                 ></v-select>
                               </v-col>
                             </v-row>
+                            <div
+                              v-if="editingDevice.low_battery_warn_enabled"
+                              class="d-flex align-center flex-wrap mt-2"
+                              style="gap: 8px"
+                            >
+                              <span class="text-caption text-medium-emphasis">
+                                Show in the live preview (test):
+                              </span>
+                              <v-btn-toggle
+                                v-model="warnPreview"
+                                density="compact"
+                                variant="outlined"
+                                divided
+                                mandatory
+                              >
+                                <v-btn
+                                  v-for="o in warnPreviewOptions"
+                                  :key="o.value"
+                                  :value="o.value"
+                                  size="small"
+                                >
+                                  {{ o.label }}
+                                </v-btn>
+                              </v-btn-toggle>
+                            </div>
 
                             <div
                               class="text-caption text-medium-emphasis mt-4 mb-1"
@@ -3217,6 +3242,24 @@
                                     </div>
                                   </div>
                                 </template>
+                              </div>
+                              <div
+                                v-if="
+                                  warnPreview === 'critical' &&
+                                  editingDevice.low_battery_warn_enabled
+                                "
+                                class="op-crit-warn"
+                                :class="
+                                  'op-crit-' +
+                                  (editingDevice.critical_battery_warn_position ||
+                                    'center')
+                                "
+                              >
+                                🔋
+                                {{
+                                  editingDevice.critical_battery_warn_text ||
+                                  'Charge me now!'
+                                }}
                               </div>
                             </div>
                           </template>
@@ -4980,6 +5023,15 @@ const isOverlayLayoutPreview = computed(() => {
   return l !== 'photo_info' && l !== 'side_panel';
 });
 
+// Test control for the live preview: force the low-battery warning to show even
+// though the frame's real battery is fine, so its look/placement can be checked.
+const warnPreview = ref<'off' | 'low' | 'critical'>('off');
+const warnPreviewOptions = [
+  { label: 'Off', value: 'off' },
+  { label: 'Low', value: 'low' },
+  { label: 'Critical', value: 'critical' },
+];
+
 const previewElements = computed<PreviewEl[]>(() => {
   const els: PreviewEl[] = [];
   const ov = isOverlayLayoutPreview.value;
@@ -5070,6 +5122,18 @@ const previewElements = computed<PreviewEl[]>(() => {
       text: style !== 'icon' ? `${pct}%` : '',
       pct,
       low: pct <= 15,
+    });
+  }
+  // Test preview of the tier-1 low-battery warning chip (tier 2 is drawn as a
+  // full-screen banner in the template, not a slot chip).
+  if (warnPreview.value === 'low' && editingDevice.low_battery_warn_enabled) {
+    els.push({
+      key: 'lowbatt',
+      pos: editingDevice.low_battery_warn_position || 'top-center',
+      kind: 'lowbatt' as any,
+      emoji: '🔋',
+      text: editingDevice.low_battery_warn_text || 'Time to charge me soon',
+      low: true,
     });
   }
   return els;
@@ -7144,6 +7208,30 @@ const getDeviceFromUA = (ua: string) => {
 }
 .overlay-preview .op-chip.low {
   color: #ffd6d6;
+}
+/* Tier-2 critical-battery banner in the live-preview mock (test toggle). */
+.overlay-preview .op-crit-warn {
+  position: absolute;
+  left: 0;
+  right: 0;
+  z-index: 5;
+  padding: 3px 4px;
+  background: rgba(180, 20, 20, 0.9);
+  color: #fff;
+  font-weight: 800;
+  font-size: 10px;
+  text-align: center;
+  line-height: 1.15;
+}
+.overlay-preview .op-crit-top {
+  top: 0;
+}
+.overlay-preview .op-crit-center {
+  top: 50%;
+  transform: translateY(-50%);
+}
+.overlay-preview .op-crit-bottom {
+  bottom: 0;
 }
 .overlay-preview .op-bat {
   position: relative;
