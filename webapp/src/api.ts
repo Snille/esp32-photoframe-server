@@ -355,6 +355,19 @@ export const updateDevice = async (
     on_this_day: overlayPositions?.on_this_day || false,
     favorites_only: overlayPositions?.favorites_only || false,
     overlay_hidden_icons: overlayPositions?.overlay_hidden_icons ?? '',
+    low_battery_warn_enabled:
+      overlayPositions?.low_battery_warn_enabled || false,
+    low_battery_warn_percent: overlayPositions?.low_battery_warn_percent ?? 25,
+    low_battery_warn_text:
+      overlayPositions?.low_battery_warn_text ?? 'Time to charge me soon',
+    low_battery_warn_position:
+      overlayPositions?.low_battery_warn_position || 'top-center',
+    critical_battery_warn_percent:
+      overlayPositions?.critical_battery_warn_percent ?? 10,
+    critical_battery_warn_text:
+      overlayPositions?.critical_battery_warn_text ?? 'Charge me now!',
+    critical_battery_warn_position:
+      overlayPositions?.critical_battery_warn_position || 'center',
   });
   return response.data;
 };
