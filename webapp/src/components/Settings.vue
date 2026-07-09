@@ -3206,9 +3206,12 @@
                                             :style="{ width: el.pct + '%' }"
                                           ></span>
                                         </span>
-                                        <span v-if="el.emoji">{{
-                                          el.emoji
-                                        }}</span>
+                                        <v-icon
+                                          v-if="el.icon"
+                                          size="x-small"
+                                          class="op-icon"
+                                          >{{ el.icon }}</v-icon
+                                        >
                                         <span v-if="el.text">{{
                                           el.text
                                         }}</span>
@@ -3233,9 +3236,12 @@
                                           :style="{ width: el.pct + '%' }"
                                         ></span>
                                       </span>
-                                      <span v-if="el.emoji">{{
-                                        el.emoji
-                                      }}</span>
+                                      <v-icon
+                                        v-if="el.icon"
+                                        size="x-small"
+                                        class="op-icon"
+                                        >{{ el.icon }}</v-icon
+                                      >
                                       <span v-if="el.text">{{ el.text }}</span>
                                     </div>
                                   </div>
@@ -3253,11 +3259,18 @@
                                     'center')
                                 "
                               >
-                                🔋
-                                {{
-                                  editingDevice.critical_battery_warn_text ||
-                                  'Charge me now!'
-                                }}
+                                <v-icon
+                                  size="small"
+                                  color="white"
+                                  class="op-crit-icon"
+                                  >mdi-battery-alert</v-icon
+                                >
+                                <div class="op-crit-text">
+                                  {{
+                                    editingDevice.critical_battery_warn_text ||
+                                    'Charge me now!'
+                                  }}
+                                </div>
                               </div>
                             </div>
                           </template>
@@ -5005,7 +5018,7 @@ interface PreviewEl {
   pos: string;
   kind: string;
   text?: string;
-  emoji?: string;
+  icon?: string; // mdi icon name (monochrome, matches the frame's Material Symbols)
   battery?: boolean;
   batteryRotation?: number;
   batteryTextSide?: string;
@@ -5047,7 +5060,7 @@ const previewElements = computed<PreviewEl[]>(() => {
       key: 'pdate',
       pos: editingDevice.photo_date_position || 'bottom-left',
       kind: 'photo',
-      emoji: isIconHidden('photo_date') ? undefined : '📷',
+      icon: isIconHidden('photo_date') ? undefined : 'mdi-camera',
       // Photo date is always rendered as "Jan 02, 2006" by the server.
       text: formatGoDate('Jan 02, 2006', now),
     });
@@ -5057,7 +5070,7 @@ const previewElements = computed<PreviewEl[]>(() => {
       key: 'weather',
       pos: editingDevice.weather_position || 'bottom-right',
       kind: 'weather',
-      emoji: isIconHidden('weather') ? undefined : '☀️',
+      icon: isIconHidden('weather') ? undefined : 'mdi-weather-sunny',
       // Renderer shows temperature AND humidity, e.g. "21.0°C  45%".
       text: '21.0°C  45%',
     });
@@ -5067,7 +5080,7 @@ const previewElements = computed<PreviewEl[]>(() => {
       key: 'names',
       pos: editingDevice.names_position || 'top-left',
       kind: 'names',
-      emoji: isIconHidden('names') ? undefined : '👥',
+      icon: isIconHidden('names') ? undefined : 'mdi-account-group',
       text: sampleNamesText(),
     });
   }
@@ -5076,7 +5089,7 @@ const previewElements = computed<PreviewEl[]>(() => {
       key: 'location',
       pos: editingDevice.location_position || 'bottom-center',
       kind: 'location',
-      emoji: isIconHidden('location') ? undefined : '📍',
+      icon: isIconHidden('location') ? undefined : 'mdi-map-marker',
       text: 'Björnås, Skåne, Sweden',
     });
   }
@@ -5087,7 +5100,7 @@ const previewElements = computed<PreviewEl[]>(() => {
       key: 'description',
       pos: editingDevice.description_position || 'wide-bottom',
       kind: 'description',
-      emoji: isIconHidden('description') ? undefined : '📝',
+      icon: isIconHidden('description') ? undefined : 'mdi-note-text',
       text:
         sample.length > max ? sample.slice(0, max - 1).trimEnd() + '…' : sample,
     });
@@ -5102,7 +5115,11 @@ const previewElements = computed<PreviewEl[]>(() => {
       key: 'rotation',
       pos: editingDevice.rotation_position || 'bottom-right',
       kind: 'rotation',
-      emoji: isIconHidden('rotation') ? undefined : shuffle ? '🔀' : '#️⃣',
+      icon: isIconHidden('rotation')
+        ? undefined
+        : shuffle
+          ? 'mdi-shuffle-variant'
+          : 'mdi-image-multiple',
       text: showTotal ? `${n}/${total}` : `${n}`,
     });
   }
@@ -5129,7 +5146,7 @@ const previewElements = computed<PreviewEl[]>(() => {
       key: 'lowbatt',
       pos: editingDevice.low_battery_warn_position || 'top-center',
       kind: 'lowbatt' as any,
-      emoji: '🔋',
+      icon: 'mdi-battery-alert',
       text: editingDevice.low_battery_warn_text || 'Time to charge me soon',
       low: true,
     });
@@ -7213,12 +7230,24 @@ const getDeviceFromUA = (ua: string) => {
 .overlay-preview .op-chip.low {
   color: #ffd6d6;
 }
-/* Tier-2 critical-battery banner in the live-preview mock (test toggle). */
+/* Overlay chip icons: monochrome mdi glyphs sized relative to the chip text
+   (like the frame's Material Symbols), instead of colourful emoji. */
+.overlay-preview .op-icon {
+  font-size: 1.15em !important;
+  opacity: 0.9;
+}
+/* Tier-2 critical-battery banner in the live-preview mock (test toggle):
+   icon stacked above the text, matching the rendered frame. */
 .overlay-preview .op-crit-warn {
   position: absolute;
   left: 0;
   right: 0;
   z-index: 5;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1px;
   padding: 3px 4px;
   background: rgba(180, 20, 20, 0.9);
   color: #fff;
@@ -7226,6 +7255,9 @@ const getDeviceFromUA = (ua: string) => {
   font-size: 10px;
   text-align: center;
   line-height: 1.15;
+}
+.overlay-preview .op-crit-icon {
+  font-size: 15px !important;
 }
 .overlay-preview .op-crit-top {
   top: 0;
