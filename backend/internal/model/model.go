@@ -139,7 +139,20 @@ type Device struct {
 	BatteryRotation   int     `json:"battery_rotation" gorm:"default:0"`        // rotate the battery badge: 0/90/180/270 degrees
 	BatteryTextSide   string  `json:"battery_text_side" gorm:"default:'right'"` // which side of the icon the % text sits: left | right
 	BatteryIconScale  float64 `json:"battery_icon_scale" gorm:"default:1"`      // size multiplier for the battery icon only (0.5–2.0), independent of text size
-	OverlayScale      float64 `json:"overlay_scale" gorm:"default:1"`           // size multiplier for overlay elements (0.5–2.0)
+	// Two-tier on-screen low-battery "charge me" warning, rendered into the served
+	// image from the battery % the frame reports (X-Battery-Percentage) — a local
+	// nudge for whoever is near the frame, complementing the server/HA alerts.
+	// Tier 1 (low): a chip at LowBatteryWarnPosition once battery <= LowBatteryWarnPercent.
+	// Tier 2 (critical): a large centred banner once battery <= CriticalBatteryWarnPercent
+	// (takes over from tier 1). Both texts/thresholds/positions are user-set.
+	LowBatteryWarnEnabled       bool    `json:"low_battery_warn_enabled" gorm:"column:low_battery_warn_enabled;default:0"`
+	LowBatteryWarnPercent       int     `json:"low_battery_warn_percent" gorm:"column:low_battery_warn_percent;default:25"`
+	LowBatteryWarnText          string  `json:"low_battery_warn_text" gorm:"column:low_battery_warn_text;default:'Time to charge me soon'"`
+	LowBatteryWarnPosition      string  `json:"low_battery_warn_position" gorm:"column:low_battery_warn_position;default:'top-center'"`
+	CriticalBatteryWarnPercent  int     `json:"critical_battery_warn_percent" gorm:"column:critical_battery_warn_percent;default:10"`
+	CriticalBatteryWarnText     string  `json:"critical_battery_warn_text" gorm:"column:critical_battery_warn_text;default:'Charge me now!'"`
+	CriticalBatteryWarnPosition string  `json:"critical_battery_warn_position" gorm:"column:critical_battery_warn_position;default:'center'"` // vertical band: top | center | bottom
+	OverlayScale                float64 `json:"overlay_scale" gorm:"default:1"`                                                               // size multiplier for overlay elements (0.5–2.0)
 	// Typeface for the floating overlay chips. OverlayFont is one of the keys in
 	// validOverlayFonts (mapped to a real installed family by the renderer);
 	// OverlayWeight is regular | medium | bold.
@@ -276,32 +289,40 @@ func NormalizeDisplayOrder(s string) string {
 // threaded through AddDevice/UpdateDevice as a single argument instead of five
 // more positional parameters.
 type OverlaySettings struct {
-	DatePosition        string
-	PhotoDatePosition   string
-	WeatherPosition     string
-	BatteryPosition     string
-	BatteryStyle        string
-	BatteryRotation     int
-	BatteryTextSide     string
-	BatteryIconScale    float64
-	OverlayScale        float64
-	OverlayFont         string
-	OverlayWeight       string
-	ShowNames           bool
-	NamesPosition       string
-	NameFormat          string
-	NamesShowAge        bool
-	NamesMaxLen         int
-	ShowLocation        bool
-	LocationPosition    string
-	LocationMaxLen      int
-	ShowDescription     bool
-	DescriptionPosition string
-	DescriptionMaxLen   int
-	ShowRotation        bool
-	RotationPosition    string
-	RotationShowTotal   bool
-	OverlayHiddenIcons  string
+	DatePosition      string
+	PhotoDatePosition string
+	WeatherPosition   string
+	BatteryPosition   string
+	BatteryStyle      string
+	BatteryRotation   int
+	BatteryTextSide   string
+	BatteryIconScale  float64
+	// Two-tier low-battery warning (see Device).
+	LowBatteryWarnEnabled       bool
+	LowBatteryWarnPercent       int
+	LowBatteryWarnText          string
+	LowBatteryWarnPosition      string
+	CriticalBatteryWarnPercent  int
+	CriticalBatteryWarnText     string
+	CriticalBatteryWarnPosition string
+	OverlayScale                float64
+	OverlayFont                 string
+	OverlayWeight               string
+	ShowNames                   bool
+	NamesPosition               string
+	NameFormat                  string
+	NamesShowAge                bool
+	NamesMaxLen                 int
+	ShowLocation                bool
+	LocationPosition            string
+	LocationMaxLen              int
+	ShowDescription             bool
+	DescriptionPosition         string
+	DescriptionMaxLen           int
+	ShowRotation                bool
+	RotationPosition            string
+	RotationShowTotal           bool
+	OverlayHiddenIcons          string
 }
 
 // validOverlayPositions is the set of placements the renderer understands.
@@ -320,6 +341,27 @@ func NormalizeOverlayPosition(pos, fallback string) string {
 		return pos
 	}
 	return fallback
+}
+
+// NormalizeWarnPercent clamps a low-battery warning threshold to a sane 1–100,
+// falling back to def for out-of-range input.
+func NormalizeWarnPercent(p, def int) int {
+	if p >= 1 && p <= 100 {
+		return p
+	}
+	return def
+}
+
+// NormalizeVerticalBand clamps the critical-battery banner's vertical placement
+// to a known band, defaulting to "center". Used for the full-width tier-2
+// warning, which spans the screen and only needs a top/center/bottom anchor.
+func NormalizeVerticalBand(band string) string {
+	switch band {
+	case "top", "center", "bottom":
+		return band
+	default:
+		return "center"
+	}
 }
 
 // NormalizeBatteryStyle clamps the battery display style to a known value.

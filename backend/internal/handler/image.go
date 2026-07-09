@@ -632,6 +632,20 @@ func (h *ImageHandler) ServeImage(c echo.Context) error {
 			}
 		}
 
+		// Two-tier on-screen low-battery warning, from the reported level. Tier 2
+		// (critical) takes over from tier 1 rather than stacking. Skipped while
+		// charging (nagging "charge me" on USB makes no sense) and when the level
+		// is unknown.
+		showLowBattWarn := false
+		showCritBattWarn := false
+		if device.LowBatteryWarnEnabled && !batteryCharging && overlayBatteryPercent >= 0 {
+			if overlayBatteryPercent <= device.CriticalBatteryWarnPercent {
+				showCritBattWarn = true
+			} else if overlayBatteryPercent <= device.LowBatteryWarnPercent {
+				showLowBattWarn = true
+			}
+		}
+
 		var renderErr error
 		imgWithOverlay, renderErr = h.renderer.Render(service.RenderOptions{
 			Layout:              layout,
@@ -678,6 +692,13 @@ func (h *ImageHandler) ServeImage(c echo.Context) error {
 			RotationIcon:        rotationIcon,
 			RotationPosition:    device.RotationPosition,
 			OverlayHiddenIcons:  device.OverlayHiddenIcons,
+
+			ShowLowBatteryWarn:          showLowBattWarn,
+			LowBatteryWarnText:          device.LowBatteryWarnText,
+			LowBatteryWarnPosition:      device.LowBatteryWarnPosition,
+			ShowCriticalBatteryWarn:     showCritBattWarn,
+			CriticalBatteryWarnText:     device.CriticalBatteryWarnText,
+			CriticalBatteryWarnPosition: device.CriticalBatteryWarnPosition,
 		})
 		if renderErr != nil {
 			return c.JSON(http.StatusInternalServerError, map[string]string{"error": "render failed: " + renderErr.Error()})

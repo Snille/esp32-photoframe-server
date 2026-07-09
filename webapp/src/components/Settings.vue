@@ -3036,9 +3036,133 @@
                               </template>
                             </v-slider>
 
-                            <div
-                              class="text-caption text-medium-emphasis mt-4 mb-1"
+                            <v-divider class="my-4"></v-divider>
+                            <div class="text-subtitle-2 mb-1">
+                              Low-battery warning
+                            </div>
+                            <div class="text-caption text-medium-emphasis mb-2">
+                              Show a "charge me" message on the frame when its
+                              battery gets low (rendered from the reported %,
+                              hidden while charging). Tier 2 takes over from
+                              tier 1 at the critical threshold.
+                            </div>
+                            <v-switch
+                              v-model="editingDevice.low_battery_warn_enabled"
+                              label="Enable low-battery warning"
+                              color="primary"
+                              density="compact"
+                              hide-details
+                              class="mb-1"
+                            ></v-switch>
+                            <v-row
+                              v-if="editingDevice.low_battery_warn_enabled"
+                              dense
+                              class="mt-1"
                             >
+                              <v-col cols="12" sm="6">
+                                <v-text-field
+                                  v-model="editingDevice.low_battery_warn_text"
+                                  label="Low warning text"
+                                  variant="outlined"
+                                  density="compact"
+                                  hide-details
+                                ></v-text-field>
+                              </v-col>
+                              <v-col cols="6" sm="3">
+                                <v-text-field
+                                  v-model.number="
+                                    editingDevice.low_battery_warn_percent
+                                  "
+                                  type="number"
+                                  :min="1"
+                                  :max="100"
+                                  label="Warn at %"
+                                  variant="outlined"
+                                  density="compact"
+                                  hide-details
+                                ></v-text-field>
+                              </v-col>
+                              <v-col cols="6" sm="3">
+                                <v-select
+                                  v-model="
+                                    editingDevice.low_battery_warn_position
+                                  "
+                                  :items="positionOptions"
+                                  item-title="label"
+                                  item-value="value"
+                                  label="Position"
+                                  variant="outlined"
+                                  density="compact"
+                                  hide-details
+                                ></v-select>
+                              </v-col>
+                              <v-col cols="12" sm="6">
+                                <v-text-field
+                                  v-model="
+                                    editingDevice.critical_battery_warn_text
+                                  "
+                                  label="Critical text (large, centred)"
+                                  variant="outlined"
+                                  density="compact"
+                                  hide-details
+                                ></v-text-field>
+                              </v-col>
+                              <v-col cols="6" sm="3">
+                                <v-text-field
+                                  v-model.number="
+                                    editingDevice.critical_battery_warn_percent
+                                  "
+                                  type="number"
+                                  :min="1"
+                                  :max="100"
+                                  label="Critical at %"
+                                  variant="outlined"
+                                  density="compact"
+                                  hide-details
+                                ></v-text-field>
+                              </v-col>
+                              <v-col cols="6" sm="3">
+                                <v-select
+                                  v-model="
+                                    editingDevice.critical_battery_warn_position
+                                  "
+                                  :items="critBandOptions"
+                                  item-title="label"
+                                  item-value="value"
+                                  label="Band"
+                                  variant="outlined"
+                                  density="compact"
+                                  hide-details
+                                ></v-select>
+                              </v-col>
+                            </v-row>
+                            <div
+                              v-if="editingDevice.low_battery_warn_enabled"
+                              class="d-flex align-center flex-wrap mt-2"
+                              style="gap: 8px"
+                            >
+                              <span class="text-caption text-medium-emphasis">
+                                Show in the live preview (test):
+                              </span>
+                              <v-btn-toggle
+                                v-model="warnPreview"
+                                density="compact"
+                                variant="outlined"
+                                divided
+                                mandatory
+                              >
+                                <v-btn
+                                  v-for="o in warnPreviewOptions"
+                                  :key="o.value"
+                                  :value="o.value"
+                                  size="small"
+                                >
+                                  {{ o.label }}
+                                </v-btn>
+                              </v-btn-toggle>
+                            </div>
+
+                            <div class="text-subtitle-2 text-center mt-4 mb-2">
                               Live preview
                             </div>
                             <div
@@ -3082,9 +3206,12 @@
                                             :style="{ width: el.pct + '%' }"
                                           ></span>
                                         </span>
-                                        <span v-if="el.emoji">{{
-                                          el.emoji
-                                        }}</span>
+                                        <v-icon
+                                          v-if="el.icon"
+                                          size="x-small"
+                                          class="op-icon"
+                                          >{{ el.icon }}</v-icon
+                                        >
                                         <span v-if="el.text">{{
                                           el.text
                                         }}</span>
@@ -3109,13 +3236,41 @@
                                           :style="{ width: el.pct + '%' }"
                                         ></span>
                                       </span>
-                                      <span v-if="el.emoji">{{
-                                        el.emoji
-                                      }}</span>
+                                      <v-icon
+                                        v-if="el.icon"
+                                        size="x-small"
+                                        class="op-icon"
+                                        >{{ el.icon }}</v-icon
+                                      >
                                       <span v-if="el.text">{{ el.text }}</span>
                                     </div>
                                   </div>
                                 </template>
+                              </div>
+                              <div
+                                v-if="
+                                  warnPreview === 'critical' &&
+                                  editingDevice.low_battery_warn_enabled
+                                "
+                                class="op-crit-warn"
+                                :class="
+                                  'op-crit-' +
+                                  (editingDevice.critical_battery_warn_position ||
+                                    'center')
+                                "
+                              >
+                                <v-icon
+                                  size="small"
+                                  color="white"
+                                  class="op-crit-icon"
+                                  >mdi-battery-alert</v-icon
+                                >
+                                <div class="op-crit-text">
+                                  {{
+                                    editingDevice.critical_battery_warn_text ||
+                                    'Charge me now!'
+                                  }}
+                                </div>
                               </div>
                             </div>
                           </template>
@@ -4737,6 +4892,13 @@ const positionOptions = [
   { label: 'Bottom Right', value: 'bottom-right' },
 ];
 
+// Vertical band for the full-width critical-battery banner.
+const critBandOptions = [
+  { label: 'Top', value: 'top' },
+  { label: 'Center', value: 'center' },
+  { label: 'Bottom', value: 'bottom' },
+];
+
 const batteryStyleOptions = [
   { label: 'Icon + Text', value: 'both' },
   { label: 'Icon only', value: 'icon' },
@@ -4856,7 +5018,7 @@ interface PreviewEl {
   pos: string;
   kind: string;
   text?: string;
-  emoji?: string;
+  icon?: string; // mdi icon name (monochrome, matches the frame's Material Symbols)
   battery?: boolean;
   batteryRotation?: number;
   batteryTextSide?: string;
@@ -4871,6 +5033,15 @@ const isOverlayLayoutPreview = computed(() => {
   const l = editingDevice.layout || 'photo_overlay';
   return l !== 'photo_info' && l !== 'side_panel';
 });
+
+// Test control for the live preview: force the low-battery warning to show even
+// though the frame's real battery is fine, so its look/placement can be checked.
+const warnPreview = ref<'off' | 'low' | 'critical'>('off');
+const warnPreviewOptions = [
+  { label: 'Off', value: 'off' },
+  { label: 'Low', value: 'low' },
+  { label: 'Critical', value: 'critical' },
+];
 
 const previewElements = computed<PreviewEl[]>(() => {
   const els: PreviewEl[] = [];
@@ -4889,7 +5060,7 @@ const previewElements = computed<PreviewEl[]>(() => {
       key: 'pdate',
       pos: editingDevice.photo_date_position || 'bottom-left',
       kind: 'photo',
-      emoji: isIconHidden('photo_date') ? undefined : '📷',
+      icon: isIconHidden('photo_date') ? undefined : 'mdi-camera',
       // Photo date is always rendered as "Jan 02, 2006" by the server.
       text: formatGoDate('Jan 02, 2006', now),
     });
@@ -4899,7 +5070,7 @@ const previewElements = computed<PreviewEl[]>(() => {
       key: 'weather',
       pos: editingDevice.weather_position || 'bottom-right',
       kind: 'weather',
-      emoji: isIconHidden('weather') ? undefined : '☀️',
+      icon: isIconHidden('weather') ? undefined : 'mdi-weather-sunny',
       // Renderer shows temperature AND humidity, e.g. "21.0°C  45%".
       text: '21.0°C  45%',
     });
@@ -4909,7 +5080,7 @@ const previewElements = computed<PreviewEl[]>(() => {
       key: 'names',
       pos: editingDevice.names_position || 'top-left',
       kind: 'names',
-      emoji: isIconHidden('names') ? undefined : '👥',
+      icon: isIconHidden('names') ? undefined : 'mdi-account-group',
       text: sampleNamesText(),
     });
   }
@@ -4918,7 +5089,7 @@ const previewElements = computed<PreviewEl[]>(() => {
       key: 'location',
       pos: editingDevice.location_position || 'bottom-center',
       kind: 'location',
-      emoji: isIconHidden('location') ? undefined : '📍',
+      icon: isIconHidden('location') ? undefined : 'mdi-map-marker',
       text: 'Björnås, Skåne, Sweden',
     });
   }
@@ -4929,7 +5100,7 @@ const previewElements = computed<PreviewEl[]>(() => {
       key: 'description',
       pos: editingDevice.description_position || 'wide-bottom',
       kind: 'description',
-      emoji: isIconHidden('description') ? undefined : '📝',
+      icon: isIconHidden('description') ? undefined : 'mdi-note-text',
       text:
         sample.length > max ? sample.slice(0, max - 1).trimEnd() + '…' : sample,
     });
@@ -4944,7 +5115,11 @@ const previewElements = computed<PreviewEl[]>(() => {
       key: 'rotation',
       pos: editingDevice.rotation_position || 'bottom-right',
       kind: 'rotation',
-      emoji: isIconHidden('rotation') ? undefined : shuffle ? '🔀' : '#️⃣',
+      icon: isIconHidden('rotation')
+        ? undefined
+        : shuffle
+          ? 'mdi-shuffle-variant'
+          : 'mdi-image-multiple',
       text: showTotal ? `${n}/${total}` : `${n}`,
     });
   }
@@ -4962,6 +5137,18 @@ const previewElements = computed<PreviewEl[]>(() => {
       text: style !== 'icon' ? `${pct}%` : '',
       pct,
       low: pct <= 15,
+    });
+  }
+  // Test preview of the tier-1 low-battery warning chip (tier 2 is drawn as a
+  // full-screen banner in the template, not a slot chip).
+  if (warnPreview.value === 'low' && editingDevice.low_battery_warn_enabled) {
+    els.push({
+      key: 'lowbatt',
+      pos: editingDevice.low_battery_warn_position || 'top-center',
+      kind: 'lowbatt' as any,
+      icon: 'mdi-battery-alert',
+      text: editingDevice.low_battery_warn_text || 'Time to charge me soon',
+      low: true,
     });
   }
   return els;
@@ -5008,17 +5195,22 @@ const previewRegions = computed(() => {
 });
 
 const previewBoxStyle = computed(() => {
+  // Box dimensions derive from PREVIEW_SHORT_PX (which also drives the font
+  // scaling) so size stays in one place; long side keeps the 3:2 preview aspect.
+  const short = PREVIEW_SHORT_PX;
+  const long = Math.round(short * 1.5);
   const portrait = (editingDevice.orientation || 'landscape') === 'portrait';
   return portrait
-    ? { width: '180px', height: '270px' }
-    : { width: '270px', height: '180px' };
+    ? { width: `${short}px`, height: `${long}px` }
+    : { width: `${long}px`, height: `${short}px` };
 });
 
-// The preview box is rendered with a fixed 180px short side (270x180 landscape
-// / 180x270 portrait). To make the preview match the device 1:1, mirror the
-// renderer's --secondary-size formula for the panel, then scale it down by the
-// ratio of the preview box to the real panel.
-const PREVIEW_SHORT_PX = 180;
+// The preview box is rendered with a fixed short side (this many px; 3:2 aspect,
+// so 450x300 landscape / 300x450 portrait). To make the preview match the device
+// 1:1, mirror the renderer's --secondary-size formula for the panel, then scale
+// it down by the ratio of the preview box to the real panel. Drives both the box
+// size (previewBoxStyle) and the font scaling (previewSecondaryPx).
+const PREVIEW_SHORT_PX = 300;
 
 const previewPanelMinDim = computed(() => {
   const w = editingDevice.width || 600;
@@ -5192,6 +5384,13 @@ const openAddDeviceDialog = () => {
     battery_position: 'top-right',
     battery_style: 'both',
     battery_rotation: 0,
+    low_battery_warn_enabled: false,
+    low_battery_warn_percent: 25,
+    low_battery_warn_text: 'Time to charge me soon',
+    low_battery_warn_position: 'top-center',
+    critical_battery_warn_percent: 10,
+    critical_battery_warn_text: 'Charge me now!',
+    critical_battery_warn_position: 'center',
     battery_text_side: 'right',
     battery_icon_scale: 1,
     overlay_scale: 1,
@@ -5373,6 +5572,18 @@ const saveDevice = async () => {
         weather_position: editingDevice.weather_position || 'bottom-right',
         battery_position: editingDevice.battery_position || 'top-right',
         battery_style: editingDevice.battery_style || 'both',
+        low_battery_warn_enabled:
+          editingDevice.low_battery_warn_enabled || false,
+        low_battery_warn_percent: editingDevice.low_battery_warn_percent || 25,
+        low_battery_warn_text: editingDevice.low_battery_warn_text || '',
+        low_battery_warn_position:
+          editingDevice.low_battery_warn_position || 'top-center',
+        critical_battery_warn_percent:
+          editingDevice.critical_battery_warn_percent || 10,
+        critical_battery_warn_text:
+          editingDevice.critical_battery_warn_text || '',
+        critical_battery_warn_position:
+          editingDevice.critical_battery_warn_position || 'center',
         battery_rotation: editingDevice.battery_rotation || 0,
         battery_text_side: editingDevice.battery_text_side || 'right',
         battery_icon_scale: editingDevice.battery_icon_scale ?? 1,
@@ -5444,6 +5655,19 @@ const saveDevice = async () => {
           weather_position: editingDevice.weather_position || 'bottom-right',
           battery_position: editingDevice.battery_position || 'top-right',
           battery_style: editingDevice.battery_style || 'both',
+          low_battery_warn_enabled:
+            editingDevice.low_battery_warn_enabled || false,
+          low_battery_warn_percent:
+            editingDevice.low_battery_warn_percent || 25,
+          low_battery_warn_text: editingDevice.low_battery_warn_text || '',
+          low_battery_warn_position:
+            editingDevice.low_battery_warn_position || 'top-center',
+          critical_battery_warn_percent:
+            editingDevice.critical_battery_warn_percent || 10,
+          critical_battery_warn_text:
+            editingDevice.critical_battery_warn_text || '',
+          critical_battery_warn_position:
+            editingDevice.critical_battery_warn_position || 'center',
           battery_rotation: editingDevice.battery_rotation || 0,
           battery_text_side: editingDevice.battery_text_side || 'right',
           battery_icon_scale: editingDevice.battery_icon_scale ?? 1,
@@ -6928,6 +7152,7 @@ const getDeviceFromUA = (ua: string) => {
 /* Live overlay placement preview */
 .overlay-preview {
   position: relative;
+  margin: 0 auto; /* centre horizontally in the preview column */
   border-radius: 8px;
   overflow: hidden;
   background: linear-gradient(135deg, #6a7b8c 0%, #93a3b3 50%, #b9a48c 100%);
@@ -7004,6 +7229,45 @@ const getDeviceFromUA = (ua: string) => {
 }
 .overlay-preview .op-chip.low {
   color: #ffd6d6;
+}
+/* Overlay chip icons: monochrome mdi glyphs sized relative to the chip text
+   (like the frame's Material Symbols), instead of colourful emoji. */
+.overlay-preview .op-icon {
+  font-size: 1.15em !important;
+  opacity: 0.9;
+}
+/* Tier-2 critical-battery banner in the live-preview mock (test toggle):
+   icon stacked above the text, matching the rendered frame. */
+.overlay-preview .op-crit-warn {
+  position: absolute;
+  left: 0;
+  right: 0;
+  z-index: 5;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1px;
+  padding: 3px 4px;
+  background: rgba(180, 20, 20, 0.9);
+  color: #fff;
+  font-weight: 800;
+  font-size: 10px;
+  text-align: center;
+  line-height: 1.15;
+}
+.overlay-preview .op-crit-icon {
+  font-size: 15px !important;
+}
+.overlay-preview .op-crit-top {
+  top: 0;
+}
+.overlay-preview .op-crit-center {
+  top: 50%;
+  transform: translateY(-50%);
+}
+.overlay-preview .op-crit-bottom {
+  bottom: 0;
 }
 .overlay-preview .op-bat {
   position: relative;

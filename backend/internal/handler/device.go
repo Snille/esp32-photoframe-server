@@ -131,6 +131,14 @@ func (h *DeviceHandler) AddDevice(c echo.Context) error {
 		RotationPosition    string  `json:"rotation_position"`
 		RotationShowTotal   bool    `json:"rotation_show_total"`
 		OverlayHiddenIcons  string  `json:"overlay_hidden_icons"`
+
+		LowBatteryWarnEnabled       bool   `json:"low_battery_warn_enabled"`
+		LowBatteryWarnPercent       int    `json:"low_battery_warn_percent"`
+		LowBatteryWarnText          string `json:"low_battery_warn_text"`
+		LowBatteryWarnPosition      string `json:"low_battery_warn_position"`
+		CriticalBatteryWarnPercent  int    `json:"critical_battery_warn_percent"`
+		CriticalBatteryWarnText     string `json:"critical_battery_warn_text"`
+		CriticalBatteryWarnPosition string `json:"critical_battery_warn_position"`
 	}
 	if err := c.Bind(&req); err != nil {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid request"})
@@ -171,6 +179,14 @@ func (h *DeviceHandler) AddDevice(c echo.Context) error {
 		RotationPosition:    req.RotationPosition,
 		RotationShowTotal:   req.RotationShowTotal,
 		OverlayHiddenIcons:  req.OverlayHiddenIcons,
+
+		LowBatteryWarnEnabled:       req.LowBatteryWarnEnabled,
+		LowBatteryWarnPercent:       req.LowBatteryWarnPercent,
+		LowBatteryWarnText:          req.LowBatteryWarnText,
+		LowBatteryWarnPosition:      req.LowBatteryWarnPosition,
+		CriticalBatteryWarnPercent:  req.CriticalBatteryWarnPercent,
+		CriticalBatteryWarnText:     req.CriticalBatteryWarnText,
+		CriticalBatteryWarnPosition: req.CriticalBatteryWarnPosition,
 	})
 	if err != nil {
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": err.Error()})
@@ -244,6 +260,14 @@ func (h *DeviceHandler) UpdateDevice(c echo.Context) error {
 		RotationPosition    string  `json:"rotation_position"`
 		RotationShowTotal   bool    `json:"rotation_show_total"`
 		OverlayHiddenIcons  string  `json:"overlay_hidden_icons"`
+
+		LowBatteryWarnEnabled       bool   `json:"low_battery_warn_enabled"`
+		LowBatteryWarnPercent       int    `json:"low_battery_warn_percent"`
+		LowBatteryWarnText          string `json:"low_battery_warn_text"`
+		LowBatteryWarnPosition      string `json:"low_battery_warn_position"`
+		CriticalBatteryWarnPercent  int    `json:"critical_battery_warn_percent"`
+		CriticalBatteryWarnText     string `json:"critical_battery_warn_text"`
+		CriticalBatteryWarnPosition string `json:"critical_battery_warn_position"`
 	}
 	if err := c.Bind(&req); err != nil {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid request"})
@@ -280,6 +304,14 @@ func (h *DeviceHandler) UpdateDevice(c echo.Context) error {
 		RotationPosition:    req.RotationPosition,
 		RotationShowTotal:   req.RotationShowTotal,
 		OverlayHiddenIcons:  req.OverlayHiddenIcons,
+
+		LowBatteryWarnEnabled:       req.LowBatteryWarnEnabled,
+		LowBatteryWarnPercent:       req.LowBatteryWarnPercent,
+		LowBatteryWarnText:          req.LowBatteryWarnText,
+		LowBatteryWarnPosition:      req.LowBatteryWarnPosition,
+		CriticalBatteryWarnPercent:  req.CriticalBatteryWarnPercent,
+		CriticalBatteryWarnText:     req.CriticalBatteryWarnText,
+		CriticalBatteryWarnPosition: req.CriticalBatteryWarnPosition,
 	})
 	if err != nil {
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": err.Error()})
