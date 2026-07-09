@@ -3162,9 +3162,7 @@
                               </v-btn-toggle>
                             </div>
 
-                            <div
-                              class="text-caption text-medium-emphasis mt-4 mb-1"
-                            >
+                            <div class="text-subtitle-2 text-center mt-4 mb-2">
                               Live preview
                             </div>
                             <div
