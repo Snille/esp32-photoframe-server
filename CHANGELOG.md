@@ -1,5 +1,10 @@
 # Changelog
 
+## v1.47.0
+
+### Added
+- **Config sync is now bidirectional — edits made on a frame's own WebGUI propagate back to the server** (adapted from upstream `a0238e3`). The config sync on image fetch was push-only: when a frame reported a newer `X-Config-Last-Updated` (config was changed on the frame itself), the server did nothing, so on-device edits never made it back. Now, when the frame's timestamp is newer, the server answers the image fetch with `X-Post-Rotate-Wait-Sec` (asking the frame to stay awake) and pulls the frame's config / processing settings / palette / orientation in a background goroutine, retrying within that window until the frame's HTTP server answers, then advances `config_last_updated`. The push direction (server newer) is unchanged, and the server-owned `auto_update` field is not overwritten by a pull. Pairs with firmware **v2.16.0**.
+
 ## v1.46.1
 
 ### Fixed
