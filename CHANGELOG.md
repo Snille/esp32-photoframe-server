@@ -1,5 +1,10 @@
 # Changelog
 
+## v1.48.1
+
+### Added
+- **The default Immich server now has an editable label too** (Settings → Immich), so it reads with a friendly name in the album picker when you have more than one server — not just the added servers.
+
 ## v1.48.0
 
 ### Added

@@ -558,6 +558,21 @@
                     </v-alert>
 
                     <v-text-field
+                      v-model="defaultImmichLabel"
+                      label="Label (shown in the album picker)"
+                      placeholder="e.g. My Immich"
+                      density="compact"
+                      variant="outlined"
+                      class="mb-3"
+                      :loading="defaultImmichLabelSaving"
+                      append-inner-icon="mdi-content-save"
+                      hint="A friendly name for this server, used to group albums when you have more than one Immich."
+                      persistent-hint
+                      @click:append-inner="saveDefaultImmichLabel"
+                      @keyup.enter="saveDefaultImmichLabel"
+                    ></v-text-field>
+
+                    <v-text-field
                       :model-value="getImageUrl('immich')"
                       label="Image Endpoint URL (for firmware config)"
                       readonly
@@ -4245,6 +4260,36 @@ const immichConnected = ref(false);
 const additionalImmichServers = computed(() =>
   (immichStore.servers || []).filter((s: any) => s.id !== 1)
 );
+
+// The default (settings-driven) server keeps its url/key in settings, but its
+// LABEL lives in immich_servers row 1 and is editable here so the album picker
+// groups it with a friendly name.
+const defaultImmichLabel = ref('');
+const defaultImmichLabelSaving = ref(false);
+watch(
+  () => immichStore.servers,
+  (servers) => {
+    const def = (servers || []).find((s: any) => s.id === 1);
+    if (def) defaultImmichLabel.value = def.label || '';
+  },
+  { immediate: true }
+);
+async function saveDefaultImmichLabel() {
+  defaultImmichLabelSaving.value = true;
+  try {
+    await immichStore.updateServer(1, {
+      label: defaultImmichLabel.value,
+      url: form.immich_url,
+      enabled: true,
+    });
+    await immichStore.fetchAlbums().catch(() => {});
+    showMessage('Label saved');
+  } catch (e: any) {
+    showMessage(e.response?.data?.error || 'Failed to save label', true);
+  } finally {
+    defaultImmichLabelSaving.value = false;
+  }
+}
 const immichServerDialog = reactive({
   show: false,
   id: 0,
