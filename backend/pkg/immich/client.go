@@ -97,8 +97,38 @@ func (c *Client) testViaAlbums(prevStatus int) error {
 }
 
 // ListAlbums returns all albums visible to the API key owner
+// ListAlbums returns every album the API key can see — both albums OWNED by the
+// key's user and albums SHARED with them. The shared set is what makes a
+// dedicated "photoframes" user work: the owner shares only chosen albums with
+// that user, so only those albums appear here — real per-album control on the
+// owner's side, without exposing the rest of their library. Deduped by album id.
 func (c *Client) ListAlbums() ([]Album, error) {
-	resp, err := c.do("GET", "/api/albums")
+	owned, err := c.listAlbumsAt("/api/albums")
+	if err != nil {
+		return nil, err
+	}
+	// Shared albums are best-effort: if the ?shared filter isn't supported by
+	// this Immich version / key, don't let that hide the owned albums.
+	shared, sErr := c.listAlbumsAt("/api/albums?shared=true")
+	if sErr != nil {
+		return owned, nil
+	}
+	seen := make(map[string]bool, len(owned))
+	for _, a := range owned {
+		seen[a.ID] = true
+	}
+	for _, a := range shared {
+		if !seen[a.ID] {
+			seen[a.ID] = true
+			owned = append(owned, a)
+		}
+	}
+	return owned, nil
+}
+
+// listAlbumsAt GETs and decodes one albums-list endpoint.
+func (c *Client) listAlbumsAt(path string) ([]Album, error) {
+	resp, err := c.do("GET", path)
 	if err != nil {
 		return nil, err
 	}

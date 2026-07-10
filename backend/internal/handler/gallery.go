@@ -300,7 +300,7 @@ func (h *GalleryHandler) GetThumbnail(c echo.Context) error {
 
 	// Case 1b: Immich (Proxy)
 	if item.Source == model.SourceImmich {
-		thumbBytes, err := h.immich.GetPhoto(item.ImmichAssetID, "thumbnail")
+		thumbBytes, err := h.immich.GetPhoto(uint(item.ImmichServerID), item.ImmichAssetID, "thumbnail")
 		if err != nil {
 			fmt.Printf("Failed to fetch immich thumbnail (asset=%s): %v\n", item.ImmichAssetID, err)
 			return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to fetch immich thumbnail"})

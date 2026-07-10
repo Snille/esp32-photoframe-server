@@ -441,6 +441,11 @@ func main() {
 
 	// Immich (Protected)
 	protectedApi.POST("/immich/test", imh.TestConnection)
+	protectedApi.GET("/immich/servers", imh.ListServers)
+	protectedApi.POST("/immich/servers", imh.CreateServer)
+	protectedApi.PUT("/immich/servers/:id", imh.UpdateServer)
+	protectedApi.DELETE("/immich/servers/:id", imh.DeleteServer)
+	protectedApi.POST("/immich/servers/:id/test", imh.TestServer)
 	protectedApi.POST("/immich/sync", imh.Sync)
 	protectedApi.POST("/immich/resync", imh.Resync)
 	protectedApi.POST("/immich/clear", imh.Clear)

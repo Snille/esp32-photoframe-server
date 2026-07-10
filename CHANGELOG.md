@@ -1,5 +1,10 @@
 # Changelog
 
+## v1.48.0
+
+### Added
+- **Multiple Immich servers.** A frame can now show selected albums from more than one Immich server at once — e.g. your own instance plus a family member's separate Immich. Manage extra servers under Settings → Immich → "Additional Immich servers" (add/edit/remove, with a per-server connection test); the default server keeps using the existing single-server fields. Albums are picked per device as before, now grouped/disambiguated by server (album names can collide), and the frame transparently mixes photos from every selected album across all servers. **Album control is via Immich sharing:** point each extra server at a dedicated "photoframes" Immich user and share only the albums you want with it — the server lists owned **and shared** albums (`/api/albums?shared=true`), so only shared albums appear in the picker and the owner never exposes the rest of their library. Required API-key permissions: `album.read`, `asset.read`, `asset.view`, `asset.download`. Server-side only — no firmware change. Migration `000060` seeds the existing single-server config as the default server and back-fills existing Immich photos, so nothing changes for a single-server setup.
+
 ## v1.47.0
 
 ### Added

@@ -688,6 +688,60 @@
                       re-imports everything (also refreshes recognised faces) —
                       it resets each frame's rotation, so use it sparingly.
                     </div>
+
+                    <v-divider class="my-4" />
+
+                    <div class="text-subtitle-2 mb-1">
+                      Additional Immich servers
+                    </div>
+                    <div class="text-caption text-medium-emphasis mb-2">
+                      Add another Immich server (e.g. a family member's separate
+                      instance) to show its shared albums on your frames too.
+                      Point it at a dedicated "photoframes" user's API key that
+                      only has the albums they've shared with you — only those
+                      albums appear in the per-device picker, so they stay in
+                      control of what's exposed.
+                    </div>
+                    <v-list
+                      v-if="additionalImmichServers.length"
+                      density="compact"
+                      class="pa-0 mb-2"
+                    >
+                      <v-list-item
+                        v-for="srv in additionalImmichServers"
+                        :key="srv.id"
+                        :title="srv.label || 'Server ' + srv.id"
+                        :subtitle="srv.url"
+                      >
+                        <template #append>
+                          <v-chip
+                            v-if="!srv.enabled"
+                            size="x-small"
+                            class="mr-2"
+                            >disabled</v-chip
+                          >
+                          <v-btn
+                            size="small"
+                            variant="text"
+                            icon="mdi-pencil"
+                            @click="openImmichServerDialog(srv)"
+                          ></v-btn>
+                          <v-btn
+                            size="small"
+                            variant="text"
+                            icon="mdi-delete"
+                            @click="removeImmichServer(srv)"
+                          ></v-btn>
+                        </template>
+                      </v-list-item>
+                    </v-list>
+                    <v-btn
+                      size="small"
+                      variant="outlined"
+                      prepend-icon="mdi-plus"
+                      @click="openImmichServerDialog()"
+                      >Add server</v-btn
+                    >
                   </div>
 
                   <div v-else>
@@ -718,6 +772,78 @@
                   </div>
                 </v-card-text>
               </v-window-item>
+
+              <!-- Add/Edit additional Immich server -->
+              <v-dialog v-model="immichServerDialog.show" max-width="480">
+                <v-card>
+                  <v-card-title>
+                    {{ immichServerDialog.id ? 'Edit' : 'Add' }} Immich server
+                  </v-card-title>
+                  <v-card-text>
+                    <v-text-field
+                      v-model="immichServerDialog.label"
+                      label="Label"
+                      placeholder="e.g. Brother's Immich"
+                      density="compact"
+                      variant="outlined"
+                    ></v-text-field>
+                    <v-text-field
+                      v-model="immichServerDialog.url"
+                      label="Immich Server URL"
+                      placeholder="https://immich.example.com"
+                      density="compact"
+                      variant="outlined"
+                    ></v-text-field>
+                    <v-text-field
+                      v-model="immichServerDialog.api_key"
+                      :label="
+                        immichServerDialog.id
+                          ? 'API Key (leave blank to keep current)'
+                          : 'API Key (a dedicated photoframes user)'
+                      "
+                      type="password"
+                      density="compact"
+                      variant="outlined"
+                    ></v-text-field>
+                    <v-switch
+                      v-model="immichServerDialog.enabled"
+                      label="Enabled"
+                      color="primary"
+                      density="compact"
+                      hide-details
+                    ></v-switch>
+                    <v-alert
+                      v-if="immichServerDialog.testResult"
+                      :type="immichServerDialog.testOk ? 'success' : 'error'"
+                      density="compact"
+                      variant="tonal"
+                      class="mt-2 text-body-2"
+                    >
+                      {{ immichServerDialog.testResult }}
+                    </v-alert>
+                  </v-card-text>
+                  <v-card-actions>
+                    <v-btn
+                      variant="text"
+                      :loading="immichServerDialog.testing"
+                      @click="testImmichServerDialog"
+                      >Test</v-btn
+                    >
+                    <v-spacer />
+                    <v-btn
+                      variant="text"
+                      @click="immichServerDialog.show = false"
+                      >Cancel</v-btn
+                    >
+                    <v-btn
+                      color="primary"
+                      :loading="immichServerDialog.saving"
+                      @click="saveImmichServer"
+                      >Save</v-btn
+                    >
+                  </v-card-actions>
+                </v-card>
+              </v-dialog>
 
               <!-- Gallery -->
               <v-window-item value="gallery">
@@ -4113,6 +4239,85 @@ const store = useSettingsStore();
 const synologyStore = useSynologyStore();
 const immichStore = useImmichStore();
 const immichConnected = ref(false);
+
+// Additional Immich servers (id != 1). Server 1 is the settings-driven default
+// managed by the fields above; extra servers are managed via this dialog.
+const additionalImmichServers = computed(() =>
+  (immichStore.servers || []).filter((s: any) => s.id !== 1)
+);
+const immichServerDialog = reactive({
+  show: false,
+  id: 0,
+  label: '',
+  url: '',
+  api_key: '',
+  enabled: true,
+  testing: false,
+  testResult: '',
+  testOk: false,
+  saving: false,
+});
+function openImmichServerDialog(srv?: any) {
+  immichServerDialog.id = srv?.id || 0;
+  immichServerDialog.label = srv?.label || '';
+  immichServerDialog.url = srv?.url || '';
+  immichServerDialog.api_key = '';
+  immichServerDialog.enabled = srv ? !!srv.enabled : true;
+  immichServerDialog.testResult = '';
+  immichServerDialog.show = true;
+}
+async function testImmichServerDialog() {
+  immichServerDialog.testing = true;
+  immichServerDialog.testResult = '';
+  try {
+    await immichStore.testCredentials(
+      immichServerDialog.url,
+      immichServerDialog.api_key
+    );
+    immichServerDialog.testOk = true;
+    immichServerDialog.testResult = 'Connection OK';
+  } catch (e: any) {
+    immichServerDialog.testOk = false;
+    immichServerDialog.testResult =
+      e.response?.data?.error || e.message || 'Connection failed';
+  } finally {
+    immichServerDialog.testing = false;
+  }
+}
+async function saveImmichServer() {
+  immichServerDialog.saving = true;
+  try {
+    const payload = {
+      label: immichServerDialog.label,
+      url: immichServerDialog.url,
+      api_key: immichServerDialog.api_key,
+      enabled: immichServerDialog.enabled,
+    };
+    if (immichServerDialog.id) {
+      await immichStore.updateServer(immichServerDialog.id, payload);
+    } else {
+      await immichStore.createServer(payload);
+    }
+    immichServerDialog.show = false;
+    await immichStore.fetchAlbums().catch(() => {});
+    showMessage('Immich server saved — syncing shortly');
+  } catch (e: any) {
+    showMessage(e.response?.data?.error || 'Failed to save server', true);
+  } finally {
+    immichServerDialog.saving = false;
+  }
+}
+async function removeImmichServer(srv: any) {
+  if (!confirm(`Remove Immich server "${srv.label || srv.id}" and its photos?`))
+    return;
+  try {
+    await immichStore.deleteServer(srv.id);
+    await immichStore.fetchAlbums().catch(() => {});
+    showMessage('Immich server removed');
+  } catch (e: any) {
+    showMessage(e.response?.data?.error || 'Failed to remove server', true);
+  }
+}
 const authStore = useAuthStore();
 const galleryStore = useGalleryStore();
 const activeMainTab = ref('devices');
@@ -4205,13 +4410,20 @@ const displayOrderOptions = [
 // Per-frame Immich album selection (shown when the source is Immich). The
 // album list comes from the global Immich connection, already sorted A–Z by the
 // server. Stored on the device as a comma-separated id list.
-const deviceImmichAlbumOptions = computed(() =>
-  (immichStore.albums || []).map((a: any) => ({
+const deviceImmichAlbumOptions = computed(() => {
+  const albums = immichStore.albums || [];
+  // Disambiguate by server only when albums span more than one server (names can
+  // collide, e.g. "Family" on both).
+  const multiServer = new Set(albums.map((a: any) => a.serverId)).size > 1;
+  return albums.map((a: any) => ({
     title:
-      a.assetCount != null ? `${a.albumName} (${a.assetCount})` : a.albumName,
+      (a.assetCount != null
+        ? `${a.albumName} (${a.assetCount})`
+        : a.albumName) +
+      (multiServer && a.serverLabel ? ` — ${a.serverLabel}` : ''),
     value: a.id,
-  }))
-);
+  }));
+});
 const immichAlbumIdsArray = computed<string[]>({
   get() {
     return (editingDevice.immich_album_ids || '')
@@ -6653,6 +6865,7 @@ onMounted(async () => {
     parallelFetches.push(
       (async () => {
         await immichStore.fetchCount();
+        await immichStore.fetchServers();
         try {
           await immichStore.fetchAlbums();
           form.immich_albums = immichStore.albums;
@@ -6915,7 +7128,7 @@ const clearSynology = async () => {
 const testImmich = async () => {
   try {
     await saveSettingsInternal();
-    await immichStore.testConnection();
+    await immichStore.testConnection(form.immich_url, form.immich_api_key);
     immichConnected.value = true;
     showMessage('Connection Successful!');
   } catch (e: any) {

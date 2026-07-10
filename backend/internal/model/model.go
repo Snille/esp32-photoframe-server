@@ -39,19 +39,24 @@ func IsOrderedSource(source string) bool {
 }
 
 type Image struct {
-	ID              uint       `gorm:"primaryKey" json:"id"`
-	FilePath        string     `json:"file_path"`
-	Caption         string     `json:"caption"`
-	Width           int        `json:"width"`
-	Height          int        `json:"height"`
-	Orientation     string     `json:"orientation"` // "landscape", "portrait"
-	UserID          int64      `json:"user_id"`
-	Status          string     `json:"status"`                                                                                                                      // pending, shown
-	Source          string     `gorm:"index:idx_images_source;index:idx_images_source_synology,priority:1;index:idx_images_source_immich,priority:1" json:"source"` // "local", "google_photos", "synology_photos"
-	SynologyPhotoID int        `gorm:"index:idx_images_source_synology,priority:2" json:"synology_id"`
-	ThumbnailKey    string     `json:"thumbnail_key"`                                                    // Cache key for Synology
-	ImmichAssetID   string     `gorm:"index:idx_images_source_immich,priority:2" json:"immich_asset_id"` // UUID for Immich assets
-	PhotoTakenAt    *time.Time `json:"photo_taken_at"`                                                   // Original photo creation/taken date
+	ID              uint   `gorm:"primaryKey" json:"id"`
+	FilePath        string `json:"file_path"`
+	Caption         string `json:"caption"`
+	Width           int    `json:"width"`
+	Height          int    `json:"height"`
+	Orientation     string `json:"orientation"` // "landscape", "portrait"
+	UserID          int64  `json:"user_id"`
+	Status          string `json:"status"`                                                                                                                      // pending, shown
+	Source          string `gorm:"index:idx_images_source;index:idx_images_source_synology,priority:1;index:idx_images_source_immich,priority:1" json:"source"` // "local", "google_photos", "synology_photos"
+	SynologyPhotoID int    `gorm:"index:idx_images_source_synology,priority:2" json:"synology_id"`
+	ThumbnailKey    string `json:"thumbnail_key"`                                                    // Cache key for Synology
+	ImmichAssetID   string `gorm:"index:idx_images_source_immich,priority:2" json:"immich_asset_id"` // UUID for Immich assets
+	// ImmichServerID is which configured Immich server this asset came from (see
+	// model.ImmichServer). Immich pixels are fetched on-demand at serve time, so
+	// the serve/thumbnail path uses this to hit the right server with the right
+	// API key. 1 = the seeded default server; 0 = non-Immich source.
+	ImmichServerID int        `gorm:"column:immich_server_id;default:0" json:"immich_server_id"`
+	PhotoTakenAt   *time.Time `json:"photo_taken_at"` // Original photo creation/taken date
 	// PeopleJSON is a JSON array of {"name","birthDate"} for faces recognized in
 	// the photo (Immich only). Location is a formatted "City, State, Country"
 	// string from EXIF (Immich only). Both empty for sources that lack metadata.
@@ -662,17 +667,39 @@ type BatterySample struct {
 type ImmichImageAlbum struct {
 	ImageID       uint   `gorm:"primaryKey" json:"image_id"`
 	ImmichAlbumID string `gorm:"primaryKey;index:idx_immich_image_albums_album" json:"immich_album_id"`
+	// ImmichServerID is which Immich server this album membership came from.
+	// Album/asset UUIDs are globally unique per instance, so the album-filter
+	// query still matches on the UUID alone; this column groups the picker and
+	// scopes per-server sync/prune.
+	ImmichServerID int `gorm:"column:immich_server_id;default:1" json:"immich_server_id"`
 }
 
 func (ImmichImageAlbum) TableName() string { return "immich_image_albums" }
+
+// ImmichServer is one configured Immich instance. Multiple are supported so a
+// frame can show selected albums from several servers (e.g. the user's own plus
+// a family member's separate Immich). Each is reached via its own API key —
+// typically a dedicated "photoframes" user that only sees shared albums, which
+// is how the owner controls exactly which albums are exposed.
+type ImmichServer struct {
+	ID        uint      `gorm:"primaryKey" json:"id"`
+	Label     string    `json:"label"`
+	URL       string    `json:"url"`
+	APIKey    string    `json:"api_key"`
+	Enabled   bool      `json:"enabled" gorm:"default:1"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
+func (ImmichServer) TableName() string { return "immich_servers" }
 
 // ImmichAlbum caches an Immich album's display name keyed by its UUID, so the
 // Home Assistant "Immich Albums" sensor can resolve a frame's selected album IDs
 // to names without calling the Immich API on each publish. Refreshed whenever the
 // album list is fetched (album picker / import).
 type ImmichAlbum struct {
-	ImmichAlbumID string `gorm:"primaryKey" json:"immich_album_id"`
-	AlbumName     string `json:"album_name"`
+	ImmichAlbumID  string `gorm:"primaryKey" json:"immich_album_id"`
+	AlbumName      string `json:"album_name"`
+	ImmichServerID int    `gorm:"column:immich_server_id;default:1" json:"immich_server_id"`
 }
 
 func (ImmichAlbum) TableName() string { return "immich_albums" }
