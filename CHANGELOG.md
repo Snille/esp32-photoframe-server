@@ -1,5 +1,10 @@
 # Changelog
 
+## v1.46.1
+
+### Fixed
+- **`/api/status` now reports the correct version.** `config.yaml`'s `version:` field — the source the build stamps into the binary via ldflags — was not bumped for v1.46.0, so the v1.46.0 image kept reporting `v1.45.0`. Bumped to v1.46.1. No functional change from v1.46.0 (same server-controlled auto-update feature).
+
 ## v1.46.0
 
 ### Added
