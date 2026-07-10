@@ -558,21 +558,6 @@
                     </v-alert>
 
                     <v-text-field
-                      v-model="defaultImmichLabel"
-                      label="Label (shown in the album picker)"
-                      placeholder="e.g. My Immich"
-                      density="compact"
-                      variant="outlined"
-                      class="mb-3"
-                      :loading="defaultImmichLabelSaving"
-                      append-inner-icon="mdi-content-save"
-                      hint="A friendly name for this server, used to group albums when you have more than one Immich."
-                      persistent-hint
-                      @click:append-inner="saveDefaultImmichLabel"
-                      @keyup.enter="saveDefaultImmichLabel"
-                    ></v-text-field>
-
-                    <v-text-field
                       :model-value="getImageUrl('immich')"
                       label="Image Endpoint URL (for firmware config)"
                       readonly
@@ -706,29 +691,34 @@
 
                     <v-divider class="my-4" />
 
-                    <div class="text-subtitle-2 mb-1">
-                      Additional Immich servers
-                    </div>
+                    <div class="text-subtitle-2 mb-1">Immich servers</div>
                     <div class="text-caption text-medium-emphasis mb-2">
-                      Add another Immich server (e.g. a family member's separate
-                      instance) to show its shared albums on your frames too.
-                      Point it at a dedicated "photoframes" user's API key that
-                      only has the albums they've shared with you — only those
-                      albums appear in the per-device picker, so they stay in
-                      control of what's exposed.
+                      Name each server (the label groups its albums in the
+                      picker) and add more — e.g. a family member's separate
+                      instance. Point an extra server at a dedicated
+                      "photoframes" user's API key that only has the albums
+                      they've shared with you, so only those appear.
                     </div>
                     <v-list
-                      v-if="additionalImmichServers.length"
+                      v-if="immichStore.servers.length"
                       density="compact"
                       class="pa-0 mb-2"
                     >
                       <v-list-item
-                        v-for="srv in additionalImmichServers"
+                        v-for="srv in immichStore.servers"
                         :key="srv.id"
                         :title="srv.label || 'Server ' + srv.id"
                         :subtitle="srv.url"
                       >
                         <template #append>
+                          <v-chip
+                            v-if="srv.id === 1"
+                            size="x-small"
+                            class="mr-2"
+                            color="primary"
+                            variant="tonal"
+                            >default</v-chip
+                          >
                           <v-chip
                             v-if="!srv.enabled"
                             size="x-small"
@@ -742,6 +732,7 @@
                             @click="openImmichServerDialog(srv)"
                           ></v-btn>
                           <v-btn
+                            v-if="srv.id !== 1"
                             size="small"
                             variant="text"
                             icon="mdi-delete"
@@ -808,8 +799,16 @@
                       placeholder="https://immich.example.com"
                       density="compact"
                       variant="outlined"
+                      :readonly="immichServerDialog.id === 1"
+                      :hint="
+                        immichServerDialog.id === 1
+                          ? 'The default server\'s connection is managed by the fields above — here you just set its name.'
+                          : ''
+                      "
+                      :persistent-hint="immichServerDialog.id === 1"
                     ></v-text-field>
                     <v-text-field
+                      v-if="immichServerDialog.id !== 1"
                       v-model="immichServerDialog.api_key"
                       :label="
                         immichServerDialog.id
@@ -819,8 +818,10 @@
                       type="password"
                       density="compact"
                       variant="outlined"
+                      class="mt-3"
                     ></v-text-field>
                     <v-switch
+                      v-if="immichServerDialog.id !== 1"
                       v-model="immichServerDialog.enabled"
                       label="Enabled"
                       color="primary"
@@ -839,6 +840,7 @@
                   </v-card-text>
                   <v-card-actions>
                     <v-btn
+                      v-if="immichServerDialog.id !== 1"
                       variant="text"
                       :loading="immichServerDialog.testing"
                       @click="testImmichServerDialog"
@@ -4255,41 +4257,9 @@ const synologyStore = useSynologyStore();
 const immichStore = useImmichStore();
 const immichConnected = ref(false);
 
-// Additional Immich servers (id != 1). Server 1 is the settings-driven default
-// managed by the fields above; extra servers are managed via this dialog.
-const additionalImmichServers = computed(() =>
-  (immichStore.servers || []).filter((s: any) => s.id !== 1)
-);
-
-// The default (settings-driven) server keeps its url/key in settings, but its
-// LABEL lives in immich_servers row 1 and is editable here so the album picker
-// groups it with a friendly name.
-const defaultImmichLabel = ref('');
-const defaultImmichLabelSaving = ref(false);
-watch(
-  () => immichStore.servers,
-  (servers) => {
-    const def = (servers || []).find((s: any) => s.id === 1);
-    if (def) defaultImmichLabel.value = def.label || '';
-  },
-  { immediate: true }
-);
-async function saveDefaultImmichLabel() {
-  defaultImmichLabelSaving.value = true;
-  try {
-    await immichStore.updateServer(1, {
-      label: defaultImmichLabel.value,
-      url: form.immich_url,
-      enabled: true,
-    });
-    await immichStore.fetchAlbums().catch(() => {});
-    showMessage('Label saved');
-  } catch (e: any) {
-    showMessage(e.response?.data?.error || 'Failed to save label', true);
-  } finally {
-    defaultImmichLabelSaving.value = false;
-  }
-}
+// All Immich servers are managed uniformly in one list + the add/edit dialog.
+// Server 1 is the settings-driven default (url/key managed by the main settings
+// fields; only its label is editable in the dialog) and can't be deleted.
 const immichServerDialog = reactive({
   show: false,
   id: 0,

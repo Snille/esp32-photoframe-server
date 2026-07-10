@@ -1,5 +1,10 @@
 # Changelog
 
+## v1.48.2
+
+### Changed
+- **All Immich servers are now managed the same way** in one "Immich servers" list (Settings → Immich): every server — including the default one — is renamed via the same edit dialog, so no server is treated specially and it doesn't matter which one happens to be first. The default server shows a "default" chip, keeps its connection managed by the main settings fields (URL/key read-only in its dialog), and can't be removed.
+
 ## v1.48.1
 
 ### Added
