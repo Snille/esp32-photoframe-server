@@ -2345,6 +2345,30 @@
                             :disabled="!deviceConfig.auto_rotate"
                           />
                           <v-select
+                            v-if="deviceConfig.auto_rotate_aligned"
+                            v-model="deviceConfig.rotate_offset"
+                            :items="rotateOffsetOptions"
+                            label="Rotation Offset"
+                            variant="outlined"
+                            density="compact"
+                            class="mb-2"
+                            :disabled="!deviceConfig.auto_rotate"
+                            :hint="rotateOffsetHint"
+                            persistent-hint
+                          />
+                          <v-alert
+                            v-if="collidingDeviceNames.length > 0"
+                            type="warning"
+                            variant="tonal"
+                            density="compact"
+                            class="mb-2"
+                          >
+                            Fetches at the same moment as
+                            {{ collidingDeviceNames.join(', ') }}. Give this
+                            frame a different offset so they don't all hit the
+                            server at once.
+                          </v-alert>
+                          <v-select
                             v-model="deviceConfig.rotation_mode"
                             :items="[
                               { title: 'Local Storage', value: 'storage' },
@@ -4601,6 +4625,7 @@ const deviceConfig = reactive<Record<string, any>>({
   auto_rotate: false,
   rotate_interval: 3600,
   auto_rotate_aligned: true,
+  rotate_offset: 0,
   rotation_mode: 'storage',
   image_url: '',
   save_downloaded_images: true,
@@ -4808,6 +4833,75 @@ const derivedOrientation = computed(() => {
   return lw >= lh ? 'landscape' : 'portrait';
 });
 
+// Offsets are whole minutes; only those shorter than the rotation interval make
+// sense (a full interval is the same grid as no offset at all).
+const rotateOffsetOptions = computed(() => {
+  const interval = Number(deviceConfig.rotate_interval) || 3600;
+  return [0, 1, 2, 3, 5, 10, 15, 20, 30, 45]
+    .filter((m) => m * 60 < interval)
+    .map((m) => ({
+      title:
+        m === 0 ? 'None (on the boundary)' : `${m} minute${m === 1 ? '' : 's'}`,
+      value: m * 60,
+    }));
+});
+
+const rotateOffsetHint = computed(() => {
+  const offset = Number(deviceConfig.rotate_offset) || 0;
+  if (offset === 0) {
+    return 'Fetches exactly on the clock boundary. Give frames that share an interval different offsets so they do not all fetch at the same moment.';
+  }
+  const interval = Number(deviceConfig.rotate_interval) || 3600;
+  const example = new Date(Date.UTC(2000, 0, 1, 0, 0, 0) + offset * 1000);
+  const pad = (n: number) => String(n).padStart(2, '0');
+  const first = `${pad(example.getUTCHours())}:${pad(example.getUTCMinutes())}`;
+  const second = new Date(example.getTime() + interval * 1000);
+  return `Shifts the aligned wake-up, e.g. ${first} then ${pad(second.getUTCHours())}:${pad(second.getUTCMinutes())}.`;
+});
+
+// Two clock-aligned frames land on the same second whenever the gap between
+// their offsets is a multiple of the greatest common divisor of their intervals
+// — which is why an unshifted 15-minute frame and an unshifted 30-minute frame
+// collide twice an hour, every hour. Warn while there is still a dialog open to
+// fix it in.
+const collidingDeviceNames = computed(() => {
+  if (!deviceConfig.auto_rotate || !deviceConfig.auto_rotate_aligned) return [];
+  const myInterval = Number(deviceConfig.rotate_interval) || 0;
+  if (myInterval <= 0) return [];
+  const norm = (value: number, interval: number) =>
+    (((value || 0) % interval) + interval) % interval;
+  const myOffset = norm(Number(deviceConfig.rotate_offset), myInterval);
+  const gcd = (a: number, b: number): number => (b === 0 ? a : gcd(b, a % b));
+
+  return availableDevices.value
+    .filter((d) => d.id !== editingDevice.id)
+    .filter((d) => {
+      let cfg: Record<string, any> = {};
+      try {
+        cfg =
+          d.device_config && d.device_config !== '{}'
+            ? JSON.parse(d.device_config)
+            : {};
+      } catch {
+        return false;
+      }
+      // Unaligned frames drift on their own phase, so they cannot collide
+      // predictably — nothing to warn about.
+      if (cfg.auto_rotate === false || cfg.auto_rotate_aligned === false)
+        return false;
+      const interval = Number(cfg.rotate_interval) || 0;
+      if (interval <= 0) return false;
+      const step = gcd(myInterval, interval);
+      return (
+        step > 0 &&
+        Math.abs(myOffset - norm(Number(cfg.rotate_offset), interval)) %
+          step ===
+          0
+      );
+    })
+    .map((d) => d.name || `Device ${d.id}`);
+});
+
 const rotateIntervalOptions = [
   { title: '5 minutes', value: 300 },
   { title: '15 minutes', value: 900 },
@@ -4843,6 +4937,7 @@ const loadDeviceConfig = async (deviceId: number) => {
       auto_rotate: cfg.auto_rotate ?? false,
       rotate_interval: cfg.rotate_interval ?? 3600,
       auto_rotate_aligned: cfg.auto_rotate_aligned ?? true,
+      rotate_offset: cfg.rotate_offset ?? 0,
       rotation_mode: cfg.rotation_mode ?? 'storage',
       image_url: cfg.image_url ?? '',
       save_downloaded_images: cfg.save_downloaded_images ?? true,
@@ -5689,6 +5784,7 @@ const openAddDeviceDialog = () => {
     auto_rotate: false,
     rotate_interval: 3600,
     auto_rotate_aligned: true,
+    rotate_offset: 0,
     rotation_mode: 'storage',
     image_url: '',
     save_downloaded_images: true,
@@ -6054,6 +6150,9 @@ const saveDevice = async () => {
           auto_rotate: deviceConfig.auto_rotate,
           rotate_interval: deviceConfig.rotate_interval,
           auto_rotate_aligned: deviceConfig.auto_rotate_aligned,
+          rotate_offset: deviceConfig.auto_rotate_aligned
+            ? deviceConfig.rotate_offset
+            : 0,
           rotation_mode: deviceConfig.rotation_mode,
           image_url: imageUrl,
           save_downloaded_images: deviceConfig.save_downloaded_images,

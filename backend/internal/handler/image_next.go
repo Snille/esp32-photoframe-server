@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"image"
@@ -58,6 +59,16 @@ func (h *ImageHandler) afterServe(device model.Device, source string, servedImag
 // battery level at the next display is unknown — and the dither is forced to the
 // PNG path so the thumbnail is built the same way regardless of frame firmware.
 func (h *ImageHandler) renderNextThumbnail(deviceID uint, source string, justServedID uint) ([]byte, error) {
+	// This runs a second full pipeline for every serve, in the background. It
+	// must not compete with the frames' own pulls during a clock-aligned wake
+	// wave, so it takes a slot from the same pool. Nobody is waiting on it, so
+	// letting it queue is free.
+	releaseSlot, slotErr := service.AcquireRenderSlot(context.Background(), fmt.Sprintf("next-image preview for device %d", deviceID))
+	if slotErr != nil {
+		return nil, fmt.Errorf("image pipeline busy: %w", slotErr)
+	}
+	defer releaseSlot()
+
 	var device model.Device
 	if err := h.db.First(&device, deviceID).Error; err != nil {
 		return nil, err

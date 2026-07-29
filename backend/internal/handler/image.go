@@ -85,6 +85,18 @@ func NewImageHandler(deps ImageHandlerDeps) *ImageHandler {
 	}
 }
 
+// deviceLabel names a device for log lines, falling back to something usable
+// when the request carried no device identity.
+func deviceLabel(device *model.Device, found bool) string {
+	if !found {
+		return "unknown device"
+	}
+	if device.Name != "" {
+		return device.Name
+	}
+	return fmt.Sprintf("device %d", device.ID)
+}
+
 func (h *ImageHandler) ServeImage(c echo.Context) error {
 	// Get source from route parameter
 	source := c.Param("source")
@@ -458,6 +470,23 @@ func (h *ImageHandler) ServeImage(c echo.Context) error {
 	if !h.sources.Has(source) {
 		return c.JSON(http.StatusNotFound, map[string]string{"error": "invalid source"})
 	}
+
+	// Everything from here on is the expensive part: source fetch, overlay
+	// render, dithering. Bound how many run at once so clock-aligned frames
+	// waking in the same second queue up instead of starving each other (a
+	// stalled transfer is what leaves a torn image on a panel). Released as
+	// soon as this handler returns, response body included.
+	releaseSlot, err := service.AcquireRenderSlot(c.Request().Context(), fmt.Sprintf("%s/%s", source, deviceLabel(&device, deviceFound)))
+	if err != nil {
+		if errors.Is(err, service.ErrRenderBusy) {
+			c.Response().Header().Set("Retry-After", "30")
+			return c.JSON(http.StatusServiceUnavailable, map[string]string{"error": "server busy, retry shortly"})
+		}
+		// Context cancelled: the frame gave up or the server is shutting down.
+		return err
+	}
+	defer releaseSlot()
+
 	var devicePtr *model.Device
 	if deviceFound {
 		devicePtr = &device

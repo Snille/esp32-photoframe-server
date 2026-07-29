@@ -82,6 +82,10 @@ export interface Device {
   // false on no-PSRAM boards (FireBeetle) that can't do HTTPS; drives the
   // https:// image-URL warning in the device dialog.
   https_supported?: boolean;
+  // Last-synced frame config as raw JSON (rotate_interval, auto_rotate_aligned,
+  // rotate_offset, …). Present on the devices list, which lets the device dialog
+  // spot frames scheduled to fetch at the same moment without a per-row call.
+  device_config?: string;
 
   enable_collage: boolean;
   show_date?: boolean;

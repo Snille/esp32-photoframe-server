@@ -3,6 +3,7 @@ package service
 import (
 	"bytes"
 	"compress/gzip"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -422,6 +423,15 @@ func (s *DeviceService) PushToDevice(deviceID uint, imagePath string, photoTaken
 // This encapsulates the logic previously in Telegram bot
 // Now includes fetching device parameters if configured
 func (s *DeviceService) PushToHost(device *model.Device, imagePath string, extraOpts map[string]string, photoTakenAt *time.Time, peopleJSON, location, description string) error {
+	// A push runs the same render + dither pipeline as a pull, so it draws from
+	// the same bounded pool — a push landing on top of a wave of clock-aligned
+	// frame pulls must not overload the box either.
+	releaseSlot, slotErr := AcquireRenderSlot(context.Background(), fmt.Sprintf("push to %s", device.Name))
+	if slotErr != nil {
+		return fmt.Errorf("image pipeline busy, try again: %w", slotErr)
+	}
+	defer releaseSlot()
+
 	// 0. Fetch system info to determine firmware version and optionally device parameters
 	processingOpts := make(map[string]string)
 	for k, v := range extraOpts {
