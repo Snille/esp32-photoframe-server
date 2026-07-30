@@ -975,8 +975,9 @@ func (h *ImageHandler) UpdateDeviceConfig(c echo.Context) error {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid request"})
 	}
 
+	configTS := time.Now().Unix()
 	updates := map[string]interface{}{
-		"config_last_updated": time.Now().Unix(),
+		"config_last_updated": configTS,
 	}
 
 	// Merge the incoming config onto the last-synced device config rather than
@@ -1058,7 +1059,7 @@ func (h *ImageHandler) UpdateDeviceConfig(c echo.Context) error {
 	if device.Host != "" {
 		client := photoframe.NewClient(device.Host)
 		if len(req.Config) > 0 && len(configMap) > 0 {
-			if err := client.PushConfig(configMap); err != nil {
+			if err := client.PushConfig(configMap, configTS); err != nil {
 				log.Printf("Could not push config to device %s: %v (will sync on next image fetch)", device.Host, err)
 				pushResult = "offline"
 			}

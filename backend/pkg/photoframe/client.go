@@ -567,8 +567,30 @@ func (c *Client) postJSON(path string, jsonData []byte) error {
 	return nil
 }
 
-func (c *Client) PushConfig(config map[string]interface{}) error {
-	jsonData, err := json.Marshal(config)
+// PushConfig sends a config change to an awake frame's /api/config.
+//
+// configLastUpdated is the moment WE last changed this config, sent so the frame
+// adopts our timestamp instead of stamping itself with the time it applied the
+// change. A frame that stamps itself ends up reporting a stamp newer than ours on
+// its next image fetch, and the server then concludes the frame holds the newer
+// config and tries to pull from it — every cycle, logging a "could not reach
+// device" failure each time because the frame is asleep by then. The content is
+// identical either way; the timestamp is what keeps the two sides agreeing on who
+// is authoritative. Pass 0 to leave the frame's own stamping alone.
+//
+// Frames older than v2.17.3 ignore the field and stamp themselves as before.
+func (c *Client) PushConfig(config map[string]interface{}, configLastUpdated int64) error {
+	// Copy rather than mutate: the caller's map is also what gets stored as the
+	// device's config, and the timestamp is transport metadata, not config.
+	body := make(map[string]interface{}, len(config)+1)
+	for k, v := range config {
+		body[k] = v
+	}
+	if configLastUpdated > 0 {
+		body["config_last_updated"] = configLastUpdated
+	}
+
+	jsonData, err := json.Marshal(body)
 	if err != nil {
 		return fmt.Errorf("failed to marshal config: %w", err)
 	}

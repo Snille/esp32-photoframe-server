@@ -1,5 +1,10 @@
 # Changelog
 
+## v1.49.1
+
+### Fixed
+- **The direct config push now carries its timestamp too.** v1.49.0 stamped the config-sync payload (the one riding the image response), but a config pushed straight to an awake frame goes to its `/api/config` endpoint, which had no timestamp — so the frame stamped itself with the moment it applied the change, reported a config newer than the one it was just handed, and the server spent every following cycle trying to pull config back from it, logging a "could not reach device ... within 20s" failure each time once the frame slept. Both push paths now send `config_last_updated`. Pairs with firmware **v2.17.3**; older frames ignore the field.
+
 ## v1.49.0
 
 ### Added

@@ -578,7 +578,7 @@ func (s *MQTTService) applyConfigChange(device *model.Device, mutate func(map[st
 		// frame picks the change up via config-sync on its next pull regardless.
 		host, id := device.Host, device.ID
 		safego.Go(fmt.Sprintf("mqtt pushConfig(%d)", id), func() {
-			if err := photoframe.NewClient(host).PushConfig(cfg); err != nil {
+			if err := photoframe.NewClient(host).PushConfig(cfg, ts); err != nil {
 				fmt.Printf("[mqtt] config push to device %d failed (will sync on next pull): %v\n", id, err)
 			}
 		})
