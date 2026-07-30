@@ -1,5 +1,12 @@
 # Changelog
 
+## v1.50.0
+
+### Added
+- **The server tells frames when firmware is available**, on the image response they are already fetching. Every frame used to ask GitHub itself on a 24-hour timer — a TLS handshake and a multi-hundred-KB JSON parse per frame per day, up to a day of latency before a release was noticed, and an unauthenticated rate limit (60/hour per IP) shared by every frame behind the same NAT. One lookup here now serves the whole fleet, cached an hour (5 minutes on failure, keeping the last good result so a GitHub outage never reads as "no update"). Silence is always safe: a frame that hears nothing falls back to its own check, which is also what firmware older than **v2.18.0** does. Merged factory images are deliberately excluded from the asset match — a frame that pulled one as an OTA image would flash padding over its own NVS.
+- **Frames can download firmware from this server instead of GitHub** — per device, in the device dialog (migration `000063`), over a server-wide default. Serving the image ourselves means the frames need no internet access at all, which matters on a restricted IoT VLAN, and the fleet costs one download rather than one per frame. GitHub stays the default deliberately: pointing there means the server can only ever name a real published release, never substitute the binary — the conservative side of a genuine trade-off. The route sits behind the same device-token auth as the image route, the cache downloads once per board and release with a temp-file-then-rename, and a short read is discarded rather than cached. Unrecognised values normalise to "follow the default", so a typo can never silently mean "server".
+- **Battery calibration is mirrored and handed back after a re-flash** (migration `000062`). The per-unit voltage scale is measured against a multimeter and lives only in the frame's NVS, so a merged factory flash erases it for good — as happened to a frame on 2026-07-30, which then needed the multimeter again. The server now records what the frame reports (`X-Battery-Cal-Scale`) and offers it back when a frame comes up on the factory default while we hold a real value. The frame remains the source of truth: one reporting its own calibration is never overwritten, and the mirror is only written when the value actually changed, so a check-in every few minutes isn't a database write every few minutes. Needs firmware **v2.18.0** to report it.
+
 ## v1.49.1
 
 ### Fixed
