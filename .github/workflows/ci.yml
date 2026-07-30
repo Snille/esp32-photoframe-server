@@ -126,6 +126,92 @@ jobs:
             ${{ secrets.DOCKERHUB_USERNAME }}/photoframe-server:${{ steps.version.outputs.VERSION }}-amd64 \
             ${{ secrets.DOCKERHUB_USERNAME }}/photoframe-server:${{ steps.version.outputs.VERSION }}-arm64
 
+      # Tags used to pile up unnoticed — 25 of them once, going back four months —
+      # because pruning was a manual step someone had to remember after every
+      # release. Doing it here means it simply happens, and no one has to handle a
+      # Docker Hub token by hand to do it.
+      #
+      # Deliberately never fatal: the release is already published by this point,
+      # and a failed cleanup must not turn a good release red.
+      - name: Prune superseded tags
+        continue-on-error: true
+        env:
+          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+          CURRENT_VERSION: ${{ steps.version.outputs.VERSION }}
+        run: |
+          python3 - <<'PRUNE'
+          import json, os, re, urllib.request, urllib.error
+
+          user = os.environ["DOCKERHUB_USERNAME"]
+          repo = f"{user}/photoframe-server"
+          current = os.environ["CURRENT_VERSION"]
+
+          def api(url, method="GET", data=None, token=None):
+              req = urllib.request.Request(url, method=method)
+              if data is not None:
+                  req.add_header("Content-Type", "application/json")
+                  data = json.dumps(data).encode()
+              if token:
+                  req.add_header("Authorization", f"JWT {token}")
+              with urllib.request.urlopen(req, data, timeout=30) as r:
+                  body = r.read()
+                  return json.loads(body) if body else None
+
+          # Collect every tag, following pagination — a single page could hide old
+          # tags and quietly make the prune a no-op.
+          tags, url = [], f"https://hub.docker.com/v2/repositories/{repo}/tags/?page_size=100"
+          while url:
+              page = api(url)
+              tags += [t["name"] for t in page.get("results", [])]
+              url = page.get("next")
+          print(f"{len(tags)} tags on {repo}")
+
+          def parse(tag):
+              m = re.fullmatch(r"v(\d+)\.(\d+)\.(\d+)(?:-(amd64|arm64))?", tag)
+              return (tuple(int(x) for x in m.groups()[:3]), m.group(4)) if m else None
+
+          versions = sorted({parse(t)[0] for t in tags if parse(t)}, reverse=True)
+          cur = parse(current)
+          if not cur:
+              raise SystemExit(f"unrecognised version {current!r} — pruning nothing")
+
+          # Keep the release just published, plus the one before it for rollback.
+          # Anything the API happens not to list is simply never considered, so a
+          # lagging listing can only under-delete, never delete something live.
+          keep_versions = {cur[0]} | set(versions[:2])
+          keep = {"latest", "latest-amd64", "latest-arm64"}
+          for v in keep_versions:
+              base = "v%d.%d.%d" % v
+              keep |= {base, f"{base}-amd64", f"{base}-arm64"}
+
+          # Only ever touch tags matching the version scheme; anything else was put
+          # there on purpose and is not ours to remove.
+          doomed = sorted(t for t in tags if parse(t) and t not in keep)
+          if not doomed:
+              print("nothing to prune")
+              raise SystemExit(0)
+
+          print("keeping :", ", ".join(sorted(keep & set(tags))))
+          print("deleting:", ", ".join(doomed))
+
+          token = api("https://hub.docker.com/v2/users/login/", "POST",
+                      {"username": user, "password": os.environ["DOCKERHUB_TOKEN"]})["token"]
+
+          failed = 0
+          for tag in doomed:
+              try:
+                  api(f"https://hub.docker.com/v2/repositories/{repo}/tags/{tag}/", "DELETE", token=token)
+                  print(f"  deleted {tag}")
+              except urllib.error.HTTPError as e:
+                  if e.code == 404:
+                      print(f"  already gone {tag}")
+                  else:
+                      print(f"  FAILED {tag} (HTTP {e.code})")
+                      failed += 1
+          print(f"done, {failed} failure(s)")
+          PRUNE
+
   update-readme:
     name: Update Docker Hub README
     runs-on: ubuntu-latest
