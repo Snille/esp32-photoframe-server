@@ -10,6 +10,7 @@ import (
 	"image/png"
 	"io"
 	"log"
+	"math"
 
 	_ "image/jpeg"
 
@@ -51,6 +52,7 @@ type ImageHandlerDeps struct {
 	DB             *gorm.DB
 	DataDir        string
 	MQTT           *service.MQTTService
+	Firmware       *service.FirmwareService
 }
 
 type ImageHandler struct {
@@ -65,6 +67,7 @@ type ImageHandler struct {
 	db             *gorm.DB
 	battery        *service.BatteryService
 	mqtt           *service.MQTTService
+	firmware       *service.FirmwareService
 	dataDir        string
 }
 
@@ -81,6 +84,7 @@ func NewImageHandler(deps ImageHandlerDeps) *ImageHandler {
 		db:             deps.DB,
 		battery:        service.NewBatteryService(deps.DB),
 		mqtt:           deps.MQTT,
+		firmware:       deps.Firmware,
 		dataDir:        deps.DataDir,
 	}
 }
@@ -200,6 +204,16 @@ func (h *ImageHandler) ServeImage(c echo.Context) error {
 	if vStr := c.Request().Header.Get("X-Battery-Voltage"); vStr != "" {
 		if v, err := strconv.Atoi(vStr); err == nil {
 			voltageMV = v
+		}
+	}
+
+	// Per-unit voltage calibration the frame computed against a multimeter. It
+	// lives only in the frame's NVS, so mirroring it on every check-in is what
+	// lets us hand it back after a re-flash wipes it.
+	calScale := 0.0
+	if cStr := c.Request().Header.Get("X-Battery-Cal-Scale"); cStr != "" {
+		if v, err := strconv.ParseFloat(cStr, 64); err == nil && v > 0 {
+			calScale = v
 		}
 	}
 	// Charge status the frame reports (X-Battery-Status: charging | full |
@@ -539,6 +553,8 @@ func (h *ImageHandler) ServeImage(c echo.Context) error {
 		body := buf.Bytes()
 
 		h.applyConfigSync(c, &device, deviceFound)
+		h.applyFirmwareNotice(c, &device, deviceFound)
+		h.applyCalibrationSync(c, &device, deviceFound, calScale, preview)
 
 		// These sources ship a panel-ready image with no stored thumbnail, so
 		// there's no current/next image to publish — just refresh the bridge
@@ -872,6 +888,8 @@ func (h *ImageHandler) ServeImage(c echo.Context) error {
 
 	// 5. Config Sync: push config payload if server has newer config
 	h.applyConfigSync(c, &device, deviceFound)
+	h.applyFirmwareNotice(c, &device, deviceFound)
+	h.applyCalibrationSync(c, &device, deviceFound, calScale, preview)
 
 	// Set Content-Length header
 	c.Response().Header().Set("Content-Length", fmt.Sprintf("%d", len(processedBytes)))
@@ -1240,6 +1258,74 @@ func (h *ImageHandler) GetServedImageFull(c echo.Context) error {
 // we can pull its config (X-Post-Rotate-Wait-Sec). The firmware clamps this to
 // its own maximum (POST_ROTATE_WAIT_MAX_SEC).
 const postRotateWaitSec = 20
+
+// applyCalibrationSync mirrors the frame's battery calibration, and hands it back
+// if the frame has lost it.
+//
+// The scale is measured per physical unit and stored only in the frame's NVS, so
+// a merged-image flash erases it and it can otherwise only be recovered with a
+// multimeter. Recording what the frame reports costs nothing; the restore is
+// deliberately narrow — only when the frame comes up on the factory default while
+// we hold a real value, which is what a wiped NVS looks like. A frame that
+// reports its own calibration always keeps it.
+func (h *ImageHandler) applyCalibrationSync(c echo.Context, device *model.Device, deviceFound bool, reported float64, preview bool) {
+	if !deviceFound || preview {
+		return
+	}
+
+	if service.CalibrationNeedsRestore(reported, device.BatteryCalScale) {
+		c.Response().Header().Set("X-Battery-Cal-Restore", strconv.FormatFloat(device.BatteryCalScale, 'f', 6, 64))
+		log.Printf("Restoring battery calibration %.4f to %s (it reported the factory default)",
+			device.BatteryCalScale, deviceLabel(device, true))
+		return
+	}
+
+	// Otherwise just keep our mirror current. Skip the write when nothing moved,
+	// so a check-in every few minutes isn't a database write every few minutes.
+	if reported > 0 && math.Abs(reported-device.BatteryCalScale) > 1e-9 {
+		if err := h.db.Model(device).Update("battery_cal_scale", reported).Error; err != nil {
+			log.Printf("Could not record battery calibration for device %d: %v", device.ID, err)
+		}
+	}
+}
+
+// applyFirmwareNotice tells the frame, on the image response it is already
+// fetching, that newer firmware exists for its board and where to get it.
+//
+// The frame can find this out by itself — it queries GitHub on a 24 h timer —
+// but that costs it a TLS handshake and a multi-hundred-KB JSON parse per day,
+// leaves up to a day of latency before a release is noticed, and makes every
+// frame independently subject to a rate limit they all share. We already know
+// the answer here, cached for the whole fleet, and we are already sending this
+// frame a response. Two headers cost nothing.
+//
+// Saying nothing is always safe: a frame that hears no notice simply falls back
+// to its own periodic check, which is also what happens with firmware too old to
+// read these headers.
+func (h *ImageHandler) applyFirmwareNotice(c echo.Context, device *model.Device, deviceFound bool) {
+	if !deviceFound || h.firmware == nil || device.BoardName == "" {
+		return
+	}
+	// The frame reports its version on every fetch; without it we cannot tell
+	// whether it is behind, and guessing risks pushing a frame into a reinstall
+	// loop of the version it already runs.
+	current := strings.TrimSpace(c.Request().Header.Get("X-Firmware-Version"))
+	if current == "" {
+		return
+	}
+
+	latest, ok := h.firmware.LatestForBoard(device.BoardName)
+	if !ok || latest.URL == "" {
+		return
+	}
+	if photoframe.CompareVersions(current, latest.Version) >= 0 {
+		return // already current (or ahead, e.g. a locally built frame)
+	}
+
+	c.Response().Header().Set("X-Firmware-Update", latest.Version)
+	c.Response().Header().Set("X-Firmware-Url", latest.URL)
+	log.Printf("Firmware notice to %s: %s -> %s", deviceLabel(device, true), current, latest.Version)
+}
 
 // applyConfigSync reconciles config between server and device on each image
 // fetch, using the device's reported X-Config-Last-Updated timestamp:

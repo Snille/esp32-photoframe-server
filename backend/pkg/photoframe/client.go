@@ -29,6 +29,13 @@ func SupportsEPDGZ(version string) bool {
 	return compareVersions(version, MinEPDGZVersion) > 0
 }
 
+// CompareVersions is the exported form of compareVersions, for callers deciding
+// whether a frame is behind a published release. Same ordering rules, including
+// dev builds ranking below every release.
+func CompareVersions(v1, v2 string) int {
+	return compareVersions(v1, v2)
+}
+
 // compareVersions compares two semver strings (with optional "v" prefix).
 // Returns -1 if v1 < v2, 0 if equal, 1 if v1 > v2.
 // Dev versions (e.g. "dev-abc123") are considered older than any release.

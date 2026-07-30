@@ -1,0 +1,15 @@
+-- Per-unit battery voltage calibration scale, as last reported by the frame.
+--
+-- The scale is measured per physical unit (one-point calibration against a
+-- multimeter) and lives in the frame's own NVS. Flashing a merged factory image
+-- wipes NVS, and the value is then gone for good — there is no copy anywhere and
+-- recovering it needs the multimeter again. That happened on 2026-07-30.
+--
+-- The frame already computes and knows it; mirroring it here costs nothing and
+-- lets the server hand it back to a frame that has come up on the factory
+-- default. The frame stays the source of truth: this is only ever written FROM
+-- the frame's report, and only restored when the frame has clearly lost it.
+--
+-- 0 = never reported (older firmware doesn't send it, and boards without a
+-- divider have nothing to calibrate).
+ALTER TABLE devices ADD COLUMN battery_cal_scale REAL NOT NULL DEFAULT 0;

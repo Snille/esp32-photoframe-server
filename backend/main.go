@@ -304,6 +304,7 @@ func main() {
 		DB:             database,
 		DataDir:        dataDir,
 		MQTT:           mqttService,
+		Firmware:       service.NewFirmwareService(),
 	})
 	pah := handler.NewPublicArtHandler(publicArtService, settingsService)
 	ch := handler.NewCalendarHandler(googleCalendarClient, calendarClient)

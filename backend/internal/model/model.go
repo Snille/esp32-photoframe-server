@@ -223,6 +223,11 @@ type Device struct {
 	// every real pull; surfaced as "Last check-in" in the Devices list. Nullable:
 	// null means the frame has never been seen since this column was added.
 	LastSeenAt *time.Time `json:"last_seen_at"`
+	// BatteryCalScale mirrors the frame's per-unit voltage calibration
+	// (X-Battery-Cal-Scale on each pull). The frame owns it — this copy exists
+	// only so a frame that lost its NVS can be handed it back instead of needing
+	// a multimeter. 0 = never reported. See CalibrationNeedsRestore.
+	BatteryCalScale float64 `json:"battery_cal_scale" gorm:"column:battery_cal_scale;default:0"`
 	// OTAStartedAt is when the server last kicked off an install on this frame.
 	// firmware_version only refreshes when the frame next checks in, so without
 	// this the Devices list keeps offering an update that is already running.
