@@ -1154,6 +1154,14 @@ func buildConfigPayload(device *model.Device) string {
 		return ""
 	}
 
+	// Stamp the payload with the time this config was last changed here, so the
+	// frame can adopt it rather than stamping itself with "now" on apply. A frame
+	// that stamps itself ends up reporting a timestamp newer than ours on its
+	// next fetch, which flips applyConfigSync into the pull-back branch on every
+	// cycle and means a pushed setting never sticks. Frames too old to read this
+	// field are unaffected — it is additive.
+	payload["config_last_updated"] = jsonInt(int(device.ConfigLastUpdated))
+
 	data, err := json.Marshal(payload)
 	if err != nil {
 		return ""
