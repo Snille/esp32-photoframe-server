@@ -64,6 +64,9 @@ func (h *DeviceHandler) ListDevices(c echo.Context) error {
 		BatteryPlugged       bool    `json:"battery_plugged"`              // implausible reading → on USB
 		BatteryCurrentMA     float64 `json:"battery_estimated_current_ma"` // 0 = capacity not set
 		Online               bool    `json:"online"`                       // checked in within ~2 rotation cycles
+		// OTAPending: an install was started and the frame has not checked in
+		// since, so its reported firmware_version is still the pre-update one.
+		OTAPending bool `json:"ota_pending"`
 	}
 	items := make([]deviceListItem, 0, len(devices))
 	for _, d := range devices {
@@ -80,6 +83,7 @@ func (h *DeviceHandler) ListDevices(c echo.Context) error {
 			BatteryPlugged:       est.Plugged,
 			BatteryCurrentMA:     est.EstimatedCurrentMA,
 			Online:               service.DeviceOnline(d.LastSeenAt, d.DeviceConfig),
+			OTAPending:           service.DeviceOTAPending(d.OTAStartedAt, d.LastSeenAt),
 		})
 	}
 	return c.JSON(http.StatusOK, items)

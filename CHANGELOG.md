@@ -1,5 +1,17 @@
 # Changelog
 
+## v1.49.0
+
+### Added
+- **Rotation Offset per frame** (device dialog → Auto Rotate). With "align rotation to clock boundaries" the wake grid is absolute — computed from midnight — so every frame sharing an interval fetches in the same second, and harmonic intervals collide on the shared boundaries: a 15-minute frame and two 30-minute frames all fetch at :00 and :30, twice an hour, every hour. The offset shifts a frame's grid so the frames keep tidy clock times without landing on the same one. The dialog also **warns when other frames are scheduled to fetch at the same moment** (they collide when the gap between their offsets is a multiple of the greatest common divisor of their intervals). Needs firmware **v2.17.0+** on the frame; an offset of 0 is the previous behaviour exactly.
+- **"Waiting for the frame" state on the update button.** A frame's `firmware_version` only refreshes when it next checks in, so right after starting an install the Devices list kept offering the same update — for a sleeping frame, potentially a whole rotation interval — which invited triggering it twice. The row now shows a waiting indicator instead. It is derived (`ota_started_at` vs `last_seen_at`, migration `000061`), never stored as a flag, so the frame's next check-in resolves it whatever the outcome: a successful install reports the new version and the offer disappears; a failed one reports the old version and the offer correctly returns. Capped at 2 h so a frame that never comes back doesn't hide its button forever.
+
+### Fixed
+- **Config pushed to a frame now sticks.** The frame stamped itself with the moment it applied a pushed config — always later than the server's own `config_last_updated` — then reported that newer stamp on its next fetch, so the server concluded the *frame* held the newer config and switched to pulling from it instead of pushing. That repeated every cycle, and since a sleeping frame is usually gone before the pull-back window closes ("could not reach device … within 20s"), settings saved in the web UI silently never landed. The config payload now carries `config_last_updated` for the frame to adopt. Pairs with firmware **v2.17.1+**; older frames are unaffected.
+
+### Changed
+- **Concurrent image pipelines are bounded** (default 2, `MAX_CONCURRENT_RENDERS`). Clock-aligned frames waking together each run a source fetch, a headless-Chrome overlay render and a dither — and every serve also kicks off a second full pipeline in the background for the next-image preview. Pull, push and that preview now draw from one pool, with a 75 s queue cap returning a retryable 503 (well inside the firmware's 120 s timeout, which also allows retries). Measured honestly: on a fast host 12 simultaneous pulls complete either way and the gate costs wall time, so this is a safety net for smaller hosts, not the fix — the frames not arriving together is.
+
 ## v1.48.2
 
 ### Changed

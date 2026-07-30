@@ -1,0 +1,16 @@
+-- When the server last kicked off an OTA install on this frame.
+--
+-- The Devices list decides whether to offer an update by comparing the frame's
+-- reported firmware_version against the newest GitHub release. That version only
+-- refreshes when the frame next checks in, which for a sleeping frame can be a
+-- whole rotation interval away — so right after triggering an update the row
+-- still advertises the update as available, and it is tempting to trigger it
+-- again.
+--
+-- Recording when we started lets "waiting for the frame to report back" be
+-- DERIVED rather than tracked: it holds while ota_started_at is set and the
+-- frame has not checked in since (last_seen_at <= ota_started_at). The frame's
+-- next check-in ends it by itself, whatever the outcome — a successful install
+-- reports the new version and the offer disappears, a failed one reports the old
+-- version and the offer legitimately returns. Nothing has to clear this column.
+ALTER TABLE devices ADD COLUMN ota_started_at DATETIME;

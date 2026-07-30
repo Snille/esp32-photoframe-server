@@ -1789,6 +1789,15 @@
                     </td>
                     <td class="text-right">
                       <v-btn
+                        v-if="device.ota_pending && !otaUpdating.has(device.id)"
+                        color="info"
+                        variant="text"
+                        size="small"
+                        icon="mdi-clock-outline"
+                        :title="`Update installed — waiting for ${device.name} to check in and report its version. The frame reports on its next image fetch.`"
+                        disabled
+                      ></v-btn>
+                      <v-btn
                         v-if="updateAvailable(device)"
                         color="info"
                         variant="text"
@@ -6339,6 +6348,10 @@ const firmwareBehind = (device: Device): boolean => {
 // latest firmware no longer shows a misleading "update" icon.
 const updateAvailable = (device: Device): boolean => {
   if (!deviceSupportsOta(device)) return false;
+  // An install we started is still running: the frame has not checked in since,
+  // so firmware_version is necessarily the pre-update one and would keep the
+  // offer up. Show the waiting state instead, so nobody triggers it twice.
+  if (device.ota_pending) return false;
   const cur = (device.firmware_version || '').trim().replace(/^v/, '');
   if (!cur) return true; // unknown version — keep the manual trigger reachable
   return firmwareBehind(device);
@@ -6753,6 +6766,11 @@ const otaUpdate = async (device: Device) => {
       res.message ||
         (res.updated ? 'Firmware update started.' : 'Already up to date.')
     );
+    if (res.updated) {
+      // Pick up ota_pending straight away so the row switches to "waiting for
+      // the frame" instead of re-offering the update it just started.
+      await refreshDevicesSilently();
+    }
   } catch (e: unknown) {
     const err = e as { response?: { data?: { error?: string } } };
     showMessage(

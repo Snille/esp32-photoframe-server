@@ -805,6 +805,35 @@ func DeviceOnline(lastSeenAt *time.Time, deviceConfig string) bool {
 	return time.Since(*lastSeenAt) < threshold
 }
 
+// otaPendingMaxWait bounds how long "waiting for the frame to report back" can
+// hold. A frame that never returns — bricked, off, out of range — must not hide
+// its update button forever.
+const otaPendingMaxWait = 2 * time.Hour
+
+// DeviceOTAPending reports whether an install the server started is still
+// waiting to be confirmed by the frame. It is derived, never stored: it holds
+// while an install has been started and the frame has not checked in since.
+//
+// The frame's own next check-in resolves it either way, with no cleanup: a
+// successful install reports the new firmware version (so the update stops being
+// offered on its own merits) and a failed one reports the old version (so the
+// offer correctly comes back). Without this, the Devices list keeps advertising
+// an update that is already installing — for a sleeping frame, potentially for a
+// whole rotation interval — which invites triggering it a second time.
+func DeviceOTAPending(otaStartedAt, lastSeenAt *time.Time) bool {
+	if otaStartedAt == nil || otaStartedAt.IsZero() {
+		return false
+	}
+	if time.Since(*otaStartedAt) > otaPendingMaxWait {
+		return false
+	}
+	// Any check-in at or after the trigger is the frame's answer.
+	if lastSeenAt != nil && !lastSeenAt.Before(*otaStartedAt) {
+		return false
+	}
+	return true
+}
+
 // pollConfig holds the frame's rotation / sleep settings parsed from the synced
 // device_config blob (the same JSON the config-sync pushes to the frame).
 type pollConfig struct {

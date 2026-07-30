@@ -393,6 +393,17 @@ func (s *DeviceService) TriggerOTAUpdate(id uint) (bool, string, error) {
 	if err := pf.OTAUpdate(); err != nil {
 		return false, "", fmt.Errorf("failed to start update: %w", err)
 	}
+
+	// Mark when the install began. The frame's firmware_version only refreshes on
+	// its next check-in, so until then the Devices list would keep offering an
+	// update that is already running; DeviceOTAPending derives "waiting for the
+	// frame" from this. Best-effort — a failed write costs a stale offer, not the
+	// update itself, which is already under way.
+	now := time.Now()
+	if err := s.db.Model(&device).Update("ota_started_at", now).Error; err != nil {
+		log.Printf("Could not record OTA start time for device %d: %v", device.ID, err)
+	}
+
 	return true, "Firmware update started on the frame.", nil
 }
 

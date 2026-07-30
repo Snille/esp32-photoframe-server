@@ -223,6 +223,12 @@ type Device struct {
 	// every real pull; surfaced as "Last check-in" in the Devices list. Nullable:
 	// null means the frame has never been seen since this column was added.
 	LastSeenAt *time.Time `json:"last_seen_at"`
+	// OTAStartedAt is when the server last kicked off an install on this frame.
+	// firmware_version only refreshes when the frame next checks in, so without
+	// this the Devices list keeps offering an update that is already running.
+	// Nothing clears it — see DeviceOTAPending, which derives "waiting for the
+	// frame to report back" from this plus LastSeenAt.
+	OTAStartedAt *time.Time `json:"ota_started_at"`
 	// LastResetReason is the frame's most recent reset cause (X-Reset-Reason on
 	// pull): poweron / deepsleep / sw / task_wdt / int_wdt / wdt / panic /
 	// brownout / efuse / pwr_glitch / cpu_lockup / usb / jtag / sdio / ext.

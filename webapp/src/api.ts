@@ -82,6 +82,11 @@ export interface Device {
   // false on no-PSRAM boards (FireBeetle) that can't do HTTPS; drives the
   // https:// image-URL warning in the device dialog.
   https_supported?: boolean;
+  // True while an install the server started is waiting to be confirmed: the
+  // frame has not checked in since, so firmware_version is still the pre-update
+  // one. Server-derived from ota_started_at vs last_seen_at, so it resolves on
+  // the frame's next check-in whatever the outcome.
+  ota_pending?: boolean;
   // Last-synced frame config as raw JSON (rotate_interval, auto_rotate_aligned,
   // rotate_offset, …). Present on the devices list, which lets the device dialog
   // spot frames scheduled to fetch at the same moment without a per-row call.
