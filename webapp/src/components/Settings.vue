@@ -3710,6 +3710,18 @@
                           get to (a "canary") so you can verify each release on
                           it before your remote frames pick it up.
                         </div>
+                        <v-select
+                          v-if="editingDeviceSupportsOta"
+                          v-model="editingDevice.firmware_source"
+                          :items="firmwareSourceOptions"
+                          label="Download firmware from"
+                          variant="outlined"
+                          density="compact"
+                          class="mb-2"
+                          :hint="firmwareSourceHint"
+                          persistent-hint
+                          @update:model-value="saveFirmwareSource"
+                        />
                         <v-alert
                           v-if="!editingDeviceSupportsOta"
                           type="info"
@@ -4284,6 +4296,7 @@ import {
   getBatteryHistory,
   updateDeviceBatteryCapacity,
   updateDeviceAutoUpdate,
+  updateDeviceFirmwareSource,
   type BatteryEstimate,
   type BatterySample,
   listSources,
@@ -6331,6 +6344,36 @@ const deviceSupportsOta = (device: Device): boolean =>
 const editingDeviceSupportsOta = computed(() =>
   deviceSupportsOta(editingDevice as Device)
 );
+
+// Where a frame downloads firmware from once the server tells it an update
+// exists. The frame downloads whatever URL it is handed, so this is purely a
+// server-side choice and takes effect on the next update — nothing is pushed.
+const firmwareSourceOptions = [
+  { title: 'Server default', value: '' },
+  { title: 'Directly from GitHub', value: 'github' },
+  { title: 'Through this server', value: 'server' },
+];
+
+const firmwareSourceHint = computed(() => {
+  switch (editingDevice.firmware_source) {
+    case 'server':
+      return 'The frame downloads from this server, so it never needs internet access — and the fleet costs one download instead of one per frame. This server then decides what firmware it runs.';
+    case 'github':
+      return 'The frame downloads straight from the GitHub release. This server can only point at a published release, never substitute the binary — but the frame needs internet access.';
+    default:
+      return 'Follows the server-wide default (GitHub unless changed).';
+  }
+});
+
+const saveFirmwareSource = async (value: string) => {
+  if (!editingDevice.id) return;
+  try {
+    await updateDeviceFirmwareSource(editingDevice.id, value || '');
+    showMessage('Firmware download source saved.');
+  } catch {
+    showMessage('Could not save the firmware download source.', true);
+  }
+};
 
 // Latest published firmware version (from the fork's GitHub releases), used to
 // only surface the OTA button when the frame is actually behind — otherwise it

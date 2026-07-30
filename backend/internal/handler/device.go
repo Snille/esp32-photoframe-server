@@ -558,6 +558,35 @@ func (h *DeviceHandler) UpdateDeviceAutoUpdate(c echo.Context) error {
 	})
 }
 
+// PUT /api/devices/:id/firmware-source
+//
+// Where this frame downloads firmware from when told an update exists. Purely a
+// server-side choice: the frame downloads whatever URL it is handed, so this
+// changes nothing on the device and needs no config push.
+func (h *DeviceHandler) UpdateDeviceFirmwareSource(c echo.Context) error {
+	id, _ := strconv.Atoi(c.Param("id"))
+	var req struct {
+		FirmwareSource string `json:"firmware_source"`
+	}
+	if err := c.Bind(&req); err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid request"})
+	}
+
+	// Store only values we understand. "" means "follow the global default", and
+	// anything unrecognised is normalised to that rather than silently becoming
+	// a source the user did not pick.
+	source := strings.ToLower(strings.TrimSpace(req.FirmwareSource))
+	if source != service.FirmwareSourceGitHub && source != service.FirmwareSourceServer {
+		source = ""
+	}
+
+	if err := h.db.Model(&model.Device{}).Where("id = ?", id).
+		Update("firmware_source", source).Error; err != nil {
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to update firmware source"})
+	}
+	return c.JSON(http.StatusOK, map[string]interface{}{"firmware_source": source})
+}
+
 // DELETE /api/devices/:id
 func (h *DeviceHandler) DeleteDevice(c echo.Context) error {
 	id, _ := strconv.Atoi(c.Param("id"))

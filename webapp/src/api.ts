@@ -82,6 +82,9 @@ export interface Device {
   // false on no-PSRAM boards (FireBeetle) that can't do HTTPS; drives the
   // https:// image-URL warning in the device dialog.
   https_supported?: boolean;
+  // "" = follow the global default, "github" or "server". See
+  // updateDeviceFirmwareSource.
+  firmware_source?: string;
   // True while an install the server started is waiting to be confirmed: the
   // frame has not checked in since, so firmware_version is still the pre-update
   // one. Server-derived from ota_started_at vs last_seen_at, so it resolves on
@@ -445,6 +448,19 @@ export const updateDeviceBatteryCapacity = async (
 // Server-controlled OTA auto-update: pushed to the frame via config-sync (bumps
 // config_last_updated server-side). Separate endpoint so it applies immediately
 // on toggle, like the HA switch.
+// Where this frame downloads firmware from: "" (follow the global default),
+// "github" or "server". The frame is unaware of the choice — it downloads
+// whatever URL the server hands it — so this only ever changes server behaviour.
+export const updateDeviceFirmwareSource = async (
+  id: number,
+  source: string
+) => {
+  const response = await api.put(`/devices/${id}/firmware-source`, {
+    firmware_source: source,
+  });
+  return response.data;
+};
+
 export const updateDeviceAutoUpdate = async (
   id: number,
   autoUpdate: boolean,

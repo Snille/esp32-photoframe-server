@@ -292,6 +292,10 @@ func main() {
 	sh := handler.NewSynologyHandler(synologyService)
 	imh := handler.NewImmichHandler(immichService)
 	gh := handler.NewGalleryHandler(database, synologyService, immichService, dataDir)
+	// Shared by the image handler (which tells frames about updates) and the
+	// firmware proxy route (which can serve the image itself).
+	firmwareService := service.NewFirmwareService(dataDir)
+
 	ih := handler.NewImageHandler(handler.ImageHandlerDeps{
 		Settings:       settingsService,
 		Renderer:       rendererService,
@@ -304,7 +308,7 @@ func main() {
 		DB:             database,
 		DataDir:        dataDir,
 		MQTT:           mqttService,
-		Firmware:       service.NewFirmwareService(),
+		Firmware:       firmwareService,
 	})
 	pah := handler.NewPublicArtHandler(publicArtService, settingsService)
 	ch := handler.NewCalendarHandler(googleCalendarClient, calendarClient)
@@ -350,6 +354,10 @@ func main() {
 
 	// Image Route (Protected)
 	e.GET("/image/:source", ih.ServeImage, authMiddleware)
+	// Firmware images served from the server's own cache, for frames configured
+	// to update without reaching GitHub. Same device-token auth as the image
+	// route — a frame that may fetch photos may fetch its firmware.
+	e.GET("/firmware/:board", ih.ServeFirmware, authMiddleware)
 
 	// Thumbnail likely needs protection too, or obscure IDs. For now, keep public as they are temporary?
 	// User said "access the /image/<source>/ endpoint. This one... people can't just access".
@@ -388,6 +396,7 @@ func main() {
 	protectedApi.PUT("/devices/:id/log-retention", deviceHandler.UpdateDeviceLogRetention)
 	protectedApi.PUT("/devices/:id/battery-capacity", deviceHandler.UpdateDeviceBatteryCapacity)
 	protectedApi.PUT("/devices/:id/auto-update", deviceHandler.UpdateDeviceAutoUpdate)
+	protectedApi.PUT("/devices/:id/firmware-source", deviceHandler.UpdateDeviceFirmwareSource)
 	protectedApi.GET("/devices/:id/config", ih.GetDeviceConfig)
 	protectedApi.PUT("/devices/:id/config", ih.UpdateDeviceConfig)
 	protectedApi.GET("/sources", ih.ListSources)

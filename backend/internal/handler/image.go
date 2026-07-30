@@ -1322,9 +1322,74 @@ func (h *ImageHandler) applyFirmwareNotice(c echo.Context, device *model.Device,
 		return // already current (or ahead, e.g. a locally built frame)
 	}
 
+	// Where should it download from? GitHub keeps us honest — we can only name a
+	// real published release, never substitute the binary. Serving it ourselves
+	// means the frames need no internet at all and the fleet costs one download,
+	// at the price of trusting this server with what runs on them. The user
+	// chooses; GitHub is the default.
+	downloadURL := latest.URL
+	globalDefault, _ := h.settings.Get("firmware_source_default") // unset → GitHub
+	source := service.ResolveFirmwareSource(device.FirmwareSource, globalDefault)
+	if source == service.FirmwareSourceServer {
+		if proxied := firmwareProxyURL(device); proxied != "" {
+			downloadURL = proxied
+		} else {
+			// We don't know our own address for this frame (its image URL is
+			// unusable), so pointing it at ourselves would just break the update.
+			log.Printf("Firmware source is 'server' for %s but its server URL is unknown; using GitHub",
+				deviceLabel(device, true))
+		}
+	}
+
 	c.Response().Header().Set("X-Firmware-Update", latest.Version)
-	c.Response().Header().Set("X-Firmware-Url", latest.URL)
-	log.Printf("Firmware notice to %s: %s -> %s", deviceLabel(device, true), current, latest.Version)
+	c.Response().Header().Set("X-Firmware-Url", downloadURL)
+	log.Printf("Firmware notice to %s: %s -> %s (via %s)",
+		deviceLabel(device, true), current, latest.Version, source)
+}
+
+// firmwareProxyURL builds this server's own firmware URL for a frame, derived
+// from the image URL that frame is already configured to fetch from. Taking it
+// from the device's own config rather than from a server-side setting means it
+// is correct by construction behind a reverse proxy or an external hostname —
+// it is literally the address the frame just reached us on.
+func firmwareProxyURL(device *model.Device) string {
+	var cfg struct {
+		ImageURL string `json:"image_url"`
+	}
+	if device.DeviceConfig == "" || json.Unmarshal([]byte(device.DeviceConfig), &cfg) != nil {
+		return ""
+	}
+	i := strings.Index(cfg.ImageURL, "/image/")
+	if i < 0 {
+		return ""
+	}
+	return cfg.ImageURL[:i] + "/firmware/" + device.BoardName
+}
+
+// ServeFirmware streams the newest firmware image for a board from the server's
+// own cache, so a frame can update without reaching GitHub.
+//
+// Sits behind the same device-token auth as the image route. Content-Length is
+// set from the file so the frame can tell a complete download from a cut-off one
+// — an incomplete firmware image is the one download worth being strict about.
+func (h *ImageHandler) ServeFirmware(c echo.Context) error {
+	board := c.Param("board")
+	if board == "" {
+		return c.JSON(http.StatusNotFound, map[string]string{"error": "board required"})
+	}
+	if h.firmware == nil {
+		return c.JSON(http.StatusServiceUnavailable, map[string]string{"error": "firmware service unavailable"})
+	}
+
+	path, rel, err := h.firmware.CachedImagePath(board)
+	if err != nil {
+		log.Printf("Firmware proxy for %s failed: %v", board, err)
+		return c.JSON(http.StatusNotFound, map[string]string{"error": err.Error()})
+	}
+
+	c.Response().Header().Set("X-Firmware-Version", rel.Version)
+	log.Printf("Serving firmware %s for %s from cache", rel.Version, board)
+	return c.File(path)
 }
 
 // applyConfigSync reconciles config between server and device on each image

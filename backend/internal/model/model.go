@@ -223,6 +223,11 @@ type Device struct {
 	// every real pull; surfaced as "Last check-in" in the Devices list. Nullable:
 	// null means the frame has never been seen since this column was added.
 	LastSeenAt *time.Time `json:"last_seen_at"`
+	// FirmwareSource is where this frame downloads firmware from when told an
+	// update exists: "" (follow the global default), "github" or "server".
+	// See service.ResolveFirmwareSource — the frame is unaware of the choice,
+	// it just downloads the URL it is handed.
+	FirmwareSource string `json:"firmware_source" gorm:"column:firmware_source;default:''"`
 	// BatteryCalScale mirrors the frame's per-unit voltage calibration
 	// (X-Battery-Cal-Scale on each pull). The frame owns it — this copy exists
 	// only so a frame that lost its NVS can be handed it back instead of needing

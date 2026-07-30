@@ -1,0 +1,14 @@
+-- Where a frame downloads firmware from when the server tells it an update
+-- exists: "" (follow the global default), "github" or "server".
+--
+-- Pointing a frame at GitHub means the server can only ever name a real
+-- published release — it cannot substitute the binary. Proxying through the
+-- server instead means the frames never need internet access at all (useful on a
+-- restricted IoT VLAN) and the fleet shares one download, but it also makes
+-- whoever controls the server able to decide what firmware runs on the frames.
+-- That trade-off is the user's to make, so it is a setting rather than a
+-- decision baked in — defaulting to GitHub, the conservative side.
+--
+-- The frame is unaware of any of this: it downloads whatever URL the server put
+-- in X-Firmware-Url, so switching source needs no firmware change.
+ALTER TABLE devices ADD COLUMN firmware_source TEXT NOT NULL DEFAULT '';

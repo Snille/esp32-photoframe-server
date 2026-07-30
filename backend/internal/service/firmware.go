@@ -3,9 +3,11 @@ package service
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -47,24 +49,134 @@ type FirmwareRelease struct {
 // and each frame independently exposed to a rate limit it shares with its
 // siblings. One cached lookup here serves the whole fleet.
 type FirmwareService struct {
-	repo   string
-	client *http.Client
+	repo     string
+	client   *http.Client
+	cacheDir string
 
 	mu        sync.Mutex
 	byBoard   map[string]FirmwareRelease
 	fetchedAt time.Time
 	lastErr   error
+	// One lock per board so concurrent frames share a single download instead of
+	// each pulling their own copy of the same image.
+	fetching map[string]*sync.Mutex
 }
 
-func NewFirmwareService() *FirmwareService {
+// Firmware download source for a frame. The frame never sees this — it just
+// downloads the URL the server hands it — so switching is server-side only.
+const (
+	FirmwareSourceGitHub = "github"
+	FirmwareSourceServer = "server"
+)
+
+// ResolveFirmwareSource picks the effective source for a device: its own setting
+// if it has one, else the global default, else GitHub. GitHub is the fallback
+// because it is the conservative choice — the server can only ever point at a
+// real published release, never substitute the binary.
+func ResolveFirmwareSource(deviceSetting, globalDefault string) string {
+	for _, v := range []string{deviceSetting, globalDefault} {
+		switch strings.ToLower(strings.TrimSpace(v)) {
+		case FirmwareSourceServer:
+			return FirmwareSourceServer
+		case FirmwareSourceGitHub:
+			return FirmwareSourceGitHub
+		}
+	}
+	return FirmwareSourceGitHub
+}
+
+func NewFirmwareService(dataDir string) *FirmwareService {
 	repo := os.Getenv("FIRMWARE_REPO")
 	if repo == "" {
 		repo = defaultFirmwareRepo
 	}
 	return &FirmwareService{
-		repo:   repo,
-		client: &http.Client{Timeout: 20 * time.Second},
+		repo:     repo,
+		client:   &http.Client{Timeout: 20 * time.Second},
+		cacheDir: filepath.Join(dataDir, "firmware"),
+		fetching: map[string]*sync.Mutex{},
 	}
+}
+
+// CachedImagePath returns a local copy of the board's newest firmware image,
+// downloading it once if needed.
+//
+// This backs the option to have frames download firmware from the server instead
+// of GitHub: the frames then need no internet at all, and the fleet costs one
+// download rather than one per frame. The download is serialised per board so
+// five frames waking together don't each pull the same 3 MB.
+//
+// A short read is treated as failure rather than cached: a truncated firmware
+// image is far worse than a missed update, and the temp-file-then-rename means a
+// partial download is never visible under the final name.
+func (s *FirmwareService) CachedImagePath(board string) (string, FirmwareRelease, error) {
+	rel, ok := s.LatestForBoard(board)
+	if !ok || rel.URL == "" {
+		return "", FirmwareRelease{}, fmt.Errorf("no firmware known for board %q", board)
+	}
+
+	// Tag in the filename so a new release lands beside the old one rather than
+	// racing to overwrite a file a frame may be downloading right now.
+	name := fmt.Sprintf("%s-%s.bin", board, strings.ReplaceAll(rel.Version, "/", "_"))
+	path := filepath.Join(s.cacheDir, name)
+
+	lock := s.lockFor(board)
+	lock.Lock()
+	defer lock.Unlock()
+
+	if st, err := os.Stat(path); err == nil && st.Size() > 0 {
+		return path, rel, nil
+	}
+
+	if err := os.MkdirAll(s.cacheDir, 0755); err != nil {
+		return "", rel, fmt.Errorf("firmware cache dir: %w", err)
+	}
+
+	log.Printf("Caching firmware %s for %s from %s", rel.Version, board, rel.URL)
+	resp, err := s.client.Get(rel.URL)
+	if err != nil {
+		return "", rel, fmt.Errorf("download firmware: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return "", rel, fmt.Errorf("download firmware: upstream returned %d", resp.StatusCode)
+	}
+
+	tmp, err := os.CreateTemp(s.cacheDir, "download-*.part")
+	if err != nil {
+		return "", rel, fmt.Errorf("firmware temp file: %w", err)
+	}
+	tmpName := tmp.Name()
+	written, copyErr := io.Copy(tmp, resp.Body)
+	closeErr := tmp.Close()
+	if copyErr != nil || closeErr != nil {
+		os.Remove(tmpName)
+		return "", rel, fmt.Errorf("write firmware: %v / %v", copyErr, closeErr)
+	}
+	if resp.ContentLength > 0 && written != resp.ContentLength {
+		os.Remove(tmpName)
+		return "", rel, fmt.Errorf("firmware truncated: got %d of %d bytes", written, resp.ContentLength)
+	}
+	if written == 0 {
+		os.Remove(tmpName)
+		return "", rel, fmt.Errorf("firmware download was empty")
+	}
+	if err := os.Rename(tmpName, path); err != nil {
+		os.Remove(tmpName)
+		return "", rel, fmt.Errorf("publish firmware to cache: %w", err)
+	}
+
+	log.Printf("Cached firmware %s for %s (%d bytes)", rel.Version, board, written)
+	return path, rel, nil
+}
+
+func (s *FirmwareService) lockFor(board string) *sync.Mutex {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.fetching[board] == nil {
+		s.fetching[board] = &sync.Mutex{}
+	}
+	return s.fetching[board]
 }
 
 // LatestForBoard returns the newest published release carrying that board's
