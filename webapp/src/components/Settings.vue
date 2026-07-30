@@ -3710,15 +3710,33 @@
                           get to (a "canary") so you can verify each release on
                           it before your remote frames pick it up.
                         </div>
+                        <v-alert
+                          v-if="!editingDeviceSupportsOta"
+                          type="info"
+                          variant="tonal"
+                          density="compact"
+                          class="mb-2"
+                        >
+                          This board has a single firmware partition, so there
+                          is nowhere to write an update to — it can only be
+                          updated over USB with the web flasher. The frame
+                          ignores this setting.
+                        </v-alert>
                         <v-switch
                           v-model="editingDevice.auto_update"
                           label="Auto-update firmware"
                           color="primary"
                           hide-details
+                          :disabled="!editingDeviceSupportsOta"
                           :loading="autoUpdateSaving"
                           @update:model-value="saveAutoUpdate"
                         />
-                        <template v-if="editingDevice.auto_update">
+                        <template
+                          v-if="
+                            editingDevice.auto_update &&
+                            editingDeviceSupportsOta
+                          "
+                        >
                           <v-slider
                             v-model.number="autoUpdateBatteryMin"
                             label="Only auto-install at battery ≥"
@@ -6304,6 +6322,15 @@ const boardUrl = (device: Device): string =>
 const NO_OTA_BOARDS = new Set(['dfrobot_firebeetle_esp32e']);
 const deviceSupportsOta = (device: Device): boolean =>
   !device.board_name || !NO_OTA_BOARDS.has(device.board_name);
+
+// Same test for the device dialog. The Power tab's auto-update switch is
+// disabled on a board with no second app partition: the frame's own
+// ota_is_supported() is false there, so it never registers the periodic update
+// check and the setting can never do anything. Leaving it operable just invites
+// turning on a feature that silently does nothing.
+const editingDeviceSupportsOta = computed(() =>
+  deviceSupportsOta(editingDevice as Device)
+);
 
 // Latest published firmware version (from the fork's GitHub releases), used to
 // only surface the OTA button when the frame is actually behind — otherwise it
