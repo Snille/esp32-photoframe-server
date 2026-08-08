@@ -1220,8 +1220,13 @@ func (s *MQTTService) publishDiscovery(client mqtt.Client, device *model.Device)
 			// Several sensor keys are only present when the frame reports them
 			// (battery_status, days_remaining, trend, last_seen). Guarding on
 			// `is defined` keeps HA from logging a template variable warning on
-			// every state message; an empty render leaves the sensor untouched.
-			"value_template": fmt.Sprintf("{%% if value_json.%s is defined %%}{{ value_json.%s }}{%% endif %%}", valueKey, valueKey),
+			// every state message. The else branch renders the literal "None",
+			// which is HA's PAYLOAD_NONE: the MQTT sensor maps it to a null
+			// native value, so the entity reads "unknown". Rendering nothing at
+			// all is not equivalent — HA only ignores an empty payload for
+			// numeric sensors, so a text sensor like battery_status would take
+			// the empty string as its state.
+			"value_template": fmt.Sprintf("{%% if value_json.%s is defined %%}{{ value_json.%s }}{%% else %%}None{%% endif %%}", valueKey, valueKey),
 			"availability":   avail,
 			"device":         dev,
 		}

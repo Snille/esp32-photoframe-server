@@ -1,5 +1,10 @@
 # Changelog
 
+## v1.50.2
+
+### Fixed
+- **Sensors for keys a frame doesn't report read "unknown" again instead of blank.** The v1.50.1 guard rendered nothing when a key was absent, on the assumption that Home Assistant ignores an empty payload. It only does so for *numeric* sensors — `mqtt/sensor.py` short-circuits an empty string in that branch alone — so a text sensor like `battery_status` accepted the empty string as its state and showed blank in the UI. The guard now renders the literal `None`, which is Home Assistant's `PAYLOAD_NONE`: the MQTT sensor maps it to a null native value and the entity reads "unknown", which is what an unreported key has always been meant to look like. Numeric keys such as `days_remaining` were never affected either way.
+
 ## v1.50.1
 
 ### Fixed
