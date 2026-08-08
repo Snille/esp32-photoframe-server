@@ -1213,11 +1213,15 @@ func (s *MQTTService) publishDiscovery(client mqtt.Client, device *model.Device)
 
 	sensor := func(key, name, valueKey string, extra map[string]interface{}) {
 		cfg := map[string]interface{}{
-			"name":           name,
-			"unique_id":      fmt.Sprintf("photoframe_%d_%s", device.ID, key),
-			"object_id":      fmt.Sprintf("photoframe_%s_%s", sanitize(device.Name), key),
-			"state_topic":    state,
-			"value_template": fmt.Sprintf("{{ value_json.%s }}", valueKey),
+			"name":        name,
+			"unique_id":   fmt.Sprintf("photoframe_%d_%s", device.ID, key),
+			"object_id":   fmt.Sprintf("photoframe_%s_%s", sanitize(device.Name), key),
+			"state_topic": state,
+			// Several sensor keys are only present when the frame reports them
+			// (battery_status, days_remaining, trend, last_seen). Guarding on
+			// `is defined` keeps HA from logging a template variable warning on
+			// every state message; an empty render leaves the sensor untouched.
+			"value_template": fmt.Sprintf("{%% if value_json.%s is defined %%}{{ value_json.%s }}{%% endif %%}", valueKey, valueKey),
 			"availability":   avail,
 			"device":         dev,
 		}

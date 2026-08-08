@@ -1,5 +1,10 @@
 # Changelog
 
+## v1.50.1
+
+### Fixed
+- **Home Assistant no longer logs a template warning for sensor keys a frame doesn't report.** The MQTT discovery config built one unconditional `{{ value_json.<key> }}` template per sensor, but several keys are published only when there is something to publish — `battery_status` (only boards that can sense USB report it), plus `days_remaining`, `trend` and `last_seen`. Home Assistant renders the template against every state message regardless, so each absent key produced a `Template variable warning: 'dict object' has no attribute ...` on every publish; three frames on a five-minute cadence were the single loudest source of warnings in the log. The templates are now guarded with `{% if value_json.<key> is defined %}`, which never stringifies the undefined value and so never trips Home Assistant's logging Jinja undefined. An empty render leaves the sensor at its previous state instead of writing a placeholder, which is the same "stays unknown" behaviour the omission was always meant to produce.
+
 ## v1.50.0
 
 ### Added
