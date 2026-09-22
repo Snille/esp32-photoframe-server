@@ -4,6 +4,9 @@
 
 Four fixes ported from upstream (`aitjcize/esp32-photoframe-server`), each adapted to this fork's data model rather than cherry-picked.
 
+### Changed
+- **Release images build on native runners, not QEMU.** The arm64 leg built on an amd64 runner through QEMU user-mode emulation, where the `canvas` native module (no musl prebuilds) compiles from source in an hour or more, and qemu-user's multithreading bugs regularly hang npm outright — it hung this release twice, each time until GitHub's 6-hour job limit killed the job and skipped the multi-arch manifest. Each arch now builds on its own native runner (`ubuntu-24.04-arm` for arm64, free for public repositories) and the QEMU setup step is gone. (Upstream `2978289`.)
+
 ### Fixed
 - **Immich "memories" (on-this-day) sync works again on Immich v3.0.3+.** The `for` parameter on `/api/memories` was sent as a full ISO timestamp; Immich v3.0.3+ validates it as a strict `YYYY-MM-DD` date and answered 400, so memories mode silently imported nothing. The date is now local (the lane flips at local midnight, like the official web client), sent date-only first, with a one-shot retry in the legacy timestamp layout when a v3.0.0–v3.0.2 server rejects it. Verified against Immich 3.2.0. Note that the Immich API key also needs the `memory.read` permission — a missing one now shows up as the error below instead of vanishing. (Upstream `abe6a30`, `3143782`.)
 - **Photos cropped or rotated in the Immich editor reach the frame.** `/api/assets/{id}/original` and `/thumbnail` default to `edited=false`, so an edit made in Immich (v2.5.0+) always synced as the untouched original. Both fetches now send `edited=true` — the edited rendition when one exists, the original otherwise — and retry once without the parameter if a server rejects it with 400. (Upstream `028b523`.)

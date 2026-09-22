@@ -55,7 +55,13 @@ jobs:
 
   docker-build:
     name: Build Docker Image (${{ matrix.arch }})
-    runs-on: ubuntu-latest
+    # Each arch builds on a native runner. The arm64 leg used to build on an
+    # amd64 runner through QEMU, where compiling the canvas native module
+    # (no musl prebuilds) took an hour+ and qemu-user's multithreading bugs
+    # regularly hung npm outright — it hung the v1.51.0 release twice, each
+    # time until GitHub's 6h job limit killed it. GitHub's arm runners are
+    # free for public repos, which this is. (Upstream 2978289.)
+    runs-on: ${{ matrix.runner }}
     needs: [build-go, build-frontend]
     if: startsWith(github.ref, 'refs/tags/v')
     permissions:
@@ -66,13 +72,12 @@ jobs:
         include:
           - arch: amd64
             platform: linux/amd64
+            runner: ubuntu-latest
           - arch: arm64
             platform: linux/arm64
+            runner: ubuntu-24.04-arm
     steps:
       - uses: actions/checkout@v5
-
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v4
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4
