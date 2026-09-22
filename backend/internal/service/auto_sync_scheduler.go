@@ -22,6 +22,17 @@ type AutoSyncScheduler struct {
 	stateMu       sync.Mutex
 	lastSuccessAt time.Time
 	retryAfter    time.Time
+	lastError     string
+}
+
+// LastError returns the failure message of the most recent completed sync run,
+// or "" if it succeeded (or none has run yet). Lets a status endpoint surface
+// auto-sync failures the dashboard would otherwise never see — the manual
+// "Sync Now" button already gets the error back directly. (Upstream db40766.)
+func (s *AutoSyncScheduler) LastError() string {
+	s.stateMu.Lock()
+	defer s.stateMu.Unlock()
+	return s.lastError
 }
 
 func NewAutoSyncScheduler(opts AutoSyncSchedulerOptions) *AutoSyncScheduler {
@@ -88,6 +99,7 @@ func (s *AutoSyncScheduler) SyncNow() (err error) {
 		if err != nil {
 			s.stateMu.Lock()
 			s.retryAfter = time.Now().Add(s.retryInterval)
+			s.lastError = err.Error()
 			s.stateMu.Unlock()
 		}
 	}()
@@ -99,6 +111,7 @@ func (s *AutoSyncScheduler) SyncNow() (err error) {
 	s.stateMu.Lock()
 	s.lastSuccessAt = time.Now()
 	s.retryAfter = time.Time{}
+	s.lastError = ""
 	s.stateMu.Unlock()
 	s.TriggerReset()
 	return nil

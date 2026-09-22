@@ -1,5 +1,15 @@
 # Changelog
 
+## v1.51.0
+
+Four fixes ported from upstream (`aitjcize/esp32-photoframe-server`), each adapted to this fork's data model rather than cherry-picked.
+
+### Fixed
+- **Immich "memories" (on-this-day) sync works again on Immich v3.0.3+.** The `for` parameter on `/api/memories` was sent as a full ISO timestamp; Immich v3.0.3+ validates it as a strict `YYYY-MM-DD` date and answered 400, so memories mode silently imported nothing. The date is now local (the lane flips at local midnight, like the official web client), sent date-only first, with a one-shot retry in the legacy timestamp layout when a v3.0.0–v3.0.2 server rejects it. Verified against Immich 3.2.0. Note that the Immich API key also needs the `memory.read` permission — a missing one now shows up as the error below instead of vanishing. (Upstream `abe6a30`, `3143782`.)
+- **Photos cropped or rotated in the Immich editor reach the frame.** `/api/assets/{id}/original` and `/thumbnail` default to `edited=false`, so an edit made in Immich (v2.5.0+) always synced as the untouched original. Both fetches now send `edited=true` — the edited rendition when one exists, the original otherwise — and retry once without the parameter if a server rejects it with 400. (Upstream `028b523`.)
+- **A failing Immich fetch is no longer a silent "sync complete".** A broken album, server or mode fetch was only logged; the sync finished "successfully" with 0 new photos and the dashboard showed nothing. Healthy albums and servers still sync as before, but the failures are aggregated into the returned error: "Sync Now" reports it directly, and the periodic auto-sync's last failure is exposed as `last_sync_error` on `/api/immich/count` and shown as a dismissible warning under the photo count on the Immich settings panel. (Upstream `db40766`.)
+- **The web app no longer serves a stale bundle after a deploy.** `index.html` was sent without `Cache-Control`, so browsers heuristically cached it and kept loading the previous deploy's hashed assets behind the reverse proxy until a hard refresh. `index.html` (and the SPA fallback) is now `no-cache`; the hashed `/assets/*` are `public, max-age=31536000, immutable` on successful responses only, so a cached 404 can never wedge a bundle. (Upstream `98d161b`.)
+
 ## v1.50.2
 
 ### Fixed

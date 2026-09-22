@@ -129,7 +129,12 @@ func (h *ImmichHandler) GetPhotoCount(c echo.Context) error {
 	if err != nil {
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": err.Error()})
 	}
-	return c.JSON(http.StatusOK, map[string]interface{}{"count": count})
+	// last_sync_error piggybacks on the count the Settings page already loads,
+	// so an auto-sync failure surfaces without a new polling endpoint.
+	return c.JSON(http.StatusOK, map[string]interface{}{
+		"count":           count,
+		"last_sync_error": h.immich.LastSyncError(),
+	})
 }
 
 // UsedAlbums returns the Immich albums that currently have synced photos, for

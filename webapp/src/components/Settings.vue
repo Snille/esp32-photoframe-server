@@ -557,6 +557,19 @@
                       </div>
                     </v-alert>
 
+                    <v-alert
+                      v-if="immichStore.lastSyncError"
+                      type="warning"
+                      variant="tonal"
+                      class="mb-4"
+                      density="compact"
+                      icon="mdi-sync-alert"
+                      closable
+                      @click:close="immichStore.lastSyncError = ''"
+                    >
+                      Last sync failed: {{ immichStore.lastSyncError }}
+                    </v-alert>
+
                     <v-text-field
                       :model-value="getImageUrl('immich')"
                       label="Image Endpoint URL (for firmware config)"

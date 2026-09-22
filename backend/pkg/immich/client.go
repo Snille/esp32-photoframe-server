@@ -174,23 +174,48 @@ func (c *Client) GetAsset(assetID string) (*Asset, error) {
 // GetThumbnail fetches thumbnail bytes for an asset.
 // size is "thumbnail" (small) or "preview" (large).
 func (c *Client) GetThumbnail(assetID, size string) ([]byte, error) {
-	req, err := http.NewRequest("GET", c.BaseURL+"/api/assets/"+assetID+"/thumbnail?size="+size, nil)
+	return c.fetchAssetBytes(c.httpClient,
+		"/api/assets/"+assetID+"/thumbnail?size="+size, "thumbnail fetch")
+}
+
+// fetchAssetBytes GETs an asset-serving path with edited=true appended, so
+// Immich returns the edited rendition of an asset when one exists (crops etc.
+// made in the Immich editor, v2.5.0+) and the untouched file otherwise. Both
+// /original and /thumbnail default to edited=false, which is why edits never
+// reached the frame. If a server rejects the parameter with a 400 (in case
+// some version validates its query strictly), the request is retried without
+// it. (Ported from upstream 028b523.)
+func (c *Client) fetchAssetBytes(httpClient *http.Client, path, what string) ([]byte, error) {
+	sep := "?"
+	if strings.Contains(path, "?") {
+		sep = "&"
+	}
+	data, status, err := c.fetchBytes(httpClient, path+sep+"edited=true", what)
+	if status == http.StatusBadRequest {
+		data, _, err = c.fetchBytes(httpClient, path, what)
+	}
+	return data, err
+}
+
+func (c *Client) fetchBytes(httpClient *http.Client, path, what string) ([]byte, int, error) {
+	req, err := http.NewRequest("GET", c.BaseURL+path, nil)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	req.Header.Set("x-api-key", c.APIKey)
-	req.Header.Set("Accept", "image/jpeg,image/*,*/*")
+	req.Header.Set("Accept", "application/octet-stream,image/*,*/*")
 
-	resp, err := c.httpClient.Do(req)
+	resp, err := httpClient.Do(req)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("thumbnail fetch returned status %d: %s", resp.StatusCode, string(body))
+		return nil, resp.StatusCode, fmt.Errorf("%s returned status %d: %s", what, resp.StatusCode, string(body))
 	}
-	return io.ReadAll(resp.Body)
+	data, err := io.ReadAll(resp.Body)
+	return data, resp.StatusCode, err
 }
 
 // doJSON is like do() but for POST bodies with a JSON payload.
@@ -250,28 +275,29 @@ func (c *Client) SearchAssets(filter SearchMetadataRequest) ([]Asset, error) {
 	return out, nil
 }
 
+// legacyMemoriesForLayout is the full-timestamp format Immich v3.0.0-v3.0.2
+// require for the memories `for` param (validated as an ISO datetime there);
+// v3.0.3+ validates it as a strict YYYY-MM-DD date and v2.x accepts both.
+const legacyMemoriesForLayout = "2006-01-02T15:04:05.000Z"
+
 // GetMemoryAssets returns the flattened set of "on this day" assets — one
 // MemoryLane per past year that has a photo from this month/day.
 //
 // The /api/memories endpoint must be scoped with a `for` date, otherwise
 // Immich returns every persisted memory lane the user has rather than the
-// ones relevant to today. We pass today's date (UTC) plus type=on_this_day
-// so the frame shows "this day, past years" instead of a random grab-bag.
+// ones relevant to today. We pass today's date plus type=on_this_day so the
+// frame shows "this day, past years" instead of a random grab-bag. The date
+// is local (like the official web client), so the lane flips at local
+// midnight; date-only is tried first (required by Immich v3.0.3+) with a
+// retry in the legacy timestamp format for v3.0.0-v3.0.2 on a 400.
+// (Ported from upstream abe6a30 + 3143782.)
 func (c *Client) GetMemoryAssets() ([]Asset, error) {
-	q := url.Values{}
-	q.Set("for", time.Now().UTC().Format("2006-01-02T15:04:05.000Z"))
-	q.Set("type", "on_this_day")
-	resp, err := c.do("GET", "/api/memories?"+q.Encode())
+	now := time.Now()
+	lanes, status, err := c.getMemoryLanes(now.Format(time.DateOnly))
+	if status == http.StatusBadRequest {
+		lanes, _, err = c.getMemoryLanes(now.UTC().Format(legacyMemoriesForLayout))
+	}
 	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		b, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("memories returned status %d: %s", resp.StatusCode, string(b))
-	}
-	var lanes []MemoryLane
-	if err := json.NewDecoder(resp.Body).Decode(&lanes); err != nil {
 		return nil, err
 	}
 	var out []Asset
@@ -281,23 +307,33 @@ func (c *Client) GetMemoryAssets() ([]Asset, error) {
 	return out, nil
 }
 
-// DownloadOriginal fetches the original full-resolution asset.
-func (c *Client) DownloadOriginal(assetID string) ([]byte, error) {
-	req, err := http.NewRequest("GET", c.BaseURL+"/api/assets/"+assetID+"/original", nil)
+// getMemoryLanes performs one GET /api/memories request scoped to forDate.
+// The HTTP status is returned alongside the error so the caller can
+// distinguish a validation reject (retryable with another date format) from
+// other failures.
+func (c *Client) getMemoryLanes(forDate string) ([]MemoryLane, int, error) {
+	q := url.Values{}
+	q.Set("for", forDate)
+	q.Set("type", "on_this_day")
+	resp, err := c.do("GET", "/api/memories?"+q.Encode())
 	if err != nil {
-		return nil, err
-	}
-	req.Header.Set("x-api-key", c.APIKey)
-	req.Header.Set("Accept", "application/octet-stream")
-
-	resp, err := c.downloadClient.Do(req)
-	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("original download returned status %d: %s", resp.StatusCode, string(body))
+		b, _ := io.ReadAll(resp.Body)
+		return nil, resp.StatusCode, fmt.Errorf("memories returned status %d: %s", resp.StatusCode, string(b))
 	}
-	return io.ReadAll(resp.Body)
+	var lanes []MemoryLane
+	if err := json.NewDecoder(resp.Body).Decode(&lanes); err != nil {
+		return nil, resp.StatusCode, err
+	}
+	return lanes, resp.StatusCode, nil
+}
+
+// DownloadOriginal fetches the full-resolution asset — the edited rendition
+// when one exists, the untouched original otherwise.
+func (c *Client) DownloadOriginal(assetID string) ([]byte, error) {
+	return c.fetchAssetBytes(c.downloadClient,
+		"/api/assets/"+assetID+"/original", "original download")
 }

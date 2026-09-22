@@ -433,11 +433,17 @@ func (s *ImmichService) ImportPhotos() error {
 
 	globalNew, albumNew := 0, 0
 	pruned := int64(0)
+	// Failures are collected rather than aborting: a broken album or server must
+	// not stop the healthy ones from syncing, but they must also not vanish into
+	// the log while the UI reports a successful sync with 0 new photos (that is
+	// exactly how the Immich v3 memories 400 went unnoticed upstream, #44).
+	var failures []string
 
 	for _, srv := range servers {
 		client, err := s.getClient(srv.ID)
 		if err != nil {
 			log.Printf("Immich: skipping server %d (%s): %v", srv.ID, srv.Label, err)
+			failures = append(failures, fmt.Sprintf("server %q: %v", srv.Label, err))
 			continue
 		}
 		serverID := srv.ID
@@ -458,6 +464,7 @@ func (s *ImmichService) ImportPhotos() error {
 			}
 		} else {
 			log.Printf("Immich: album list failed for server %d: %v", serverID, aerr)
+			failures = append(failures, fmt.Sprintf("server %q album list: %v", srv.Label, aerr))
 			fetchFailed = true
 		}
 
@@ -467,6 +474,7 @@ func (s *ImmichService) ImportPhotos() error {
 			assets, e := s.fetchAssetsForMode(client)
 			if e != nil && !(errors.Is(e, errImmichNoAlbum) && len(deviceAlbums) > 0) {
 				log.Printf("Immich: global fetch failed for server %d: %v", serverID, e)
+				failures = append(failures, fmt.Sprintf("%s mode: %v", s.immichSourceMode(), e))
 				fetchFailed = true
 			}
 			for _, asset := range assets {
@@ -490,6 +498,7 @@ func (s *ImmichService) ImportPhotos() error {
 			if e != nil {
 				if len(serverAlbumIDs) > 0 { // known to be this server's album → real error
 					log.Printf("Immich: failed to fetch album %s on server %d: %v", albumID, serverID, e)
+					failures = append(failures, fmt.Sprintf("album %s: %v", albumID, e))
 					fetchFailed = true
 				}
 				continue
@@ -530,7 +539,16 @@ func (s *ImmichService) ImportPhotos() error {
 
 	log.Printf("Immich ImportPhotos complete across %d server(s): %d new (global) + %d new (albums); %d pruned; %d album(s) selected across frames",
 		len(servers), globalNew, albumNew, pruned, len(deviceAlbums))
+	if len(failures) > 0 {
+		return fmt.Errorf("%d fetch(es) failed — %s", len(failures), strings.Join(failures, "; "))
+	}
 	return nil
+}
+
+// LastSyncError reports the most recent sync run's failure ("" on success), so
+// the dashboard can show auto-sync errors instead of a silent "N photos synced".
+func (s *ImmichService) LastSyncError() string {
+	return s.autoSync.LastError()
 }
 
 // cacheAlbumName upserts the server-scoped album-name cache used by the picker

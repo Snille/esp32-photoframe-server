@@ -12,6 +12,9 @@ export interface ImmichServer {
 export const useImmichStore = defineStore('immich', {
   state: () => ({
     count: 0,
+    // Failure message of the most recent (auto or manual) sync run, '' when it
+    // succeeded — shown as an alert so a broken album/server is not silent.
+    lastSyncError: '' as string,
     // albums are AlbumInfo: { id, name, server_id, server_label }
     albums: [] as any[],
     servers: [] as ImmichServer[],
@@ -59,6 +62,7 @@ export const useImmichStore = defineStore('immich', {
       try {
         const res = await api.get('/immich/count');
         this.count = res.data.count || 0;
+        this.lastSyncError = res.data.last_sync_error || '';
       } catch (e: any) {
         console.error('Failed to fetch Immich photo count', e);
       }
