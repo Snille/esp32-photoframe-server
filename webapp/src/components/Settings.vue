@@ -2311,18 +2311,15 @@
                         </v-row>
                         <v-row>
                           <v-col cols="12" md="6">
-                            <v-text-field
-                              v-model.number="deviceConfig.timezone_offset"
-                              label="Timezone (UTC offset)"
-                              type="number"
-                              :min="-12"
-                              :max="14"
-                              :step="0.5"
+                            <v-autocomplete
+                              v-model="deviceConfig.timezone"
+                              :items="timezoneItems"
+                              label="Timezone"
                               variant="outlined"
                               density="compact"
-                              hint="e.g., -8 for PST, +1 for CET, +8 for CST"
+                              :hint="`Sent to the frame as ${deviceConfig.timezone}. Named zones switch to summer/winter time automatically.`"
                               persistent-hint
-                            ></v-text-field>
+                            ></v-autocomplete>
                           </v-col>
                         </v-row>
                         <v-row>
@@ -4328,6 +4325,7 @@ import {
 import Gallery from './Gallery.vue';
 import ConfirmDialog from './ConfirmDialog.vue';
 import PublicArtPanel from './PublicArtPanel.vue';
+import { timezoneOptionsFor } from '../timezones';
 
 const store = useSettingsStore();
 const synologyStore = useSynologyStore();
@@ -4687,7 +4685,7 @@ const deviceConfig = reactive<Record<string, any>>({
   sleep_end_time: '07:00',
   display_orientation: 'portrait',
   display_rotation_deg: 0,
-  timezone_offset: 0,
+  timezone: 'UTC0',
   ntp_server: 'pool.ntp.org',
   deep_sleep_enabled: true,
   button_action_short: 'next_image',
@@ -4713,6 +4711,8 @@ const deviceConfig = reactive<Record<string, any>>({
   public_art_min_image_long_edge: 1600,
   public_art_preferred_image_long_edge: 2000,
 });
+
+const timezoneItems = computed(() => timezoneOptionsFor(deviceConfig.timezone));
 
 // Device processing settings (synced remotely)
 const deviceProcessing = reactive({
@@ -5035,17 +5035,9 @@ const loadDeviceConfig = async (deviceId: number) => {
     const endMin = cfg.sleep_schedule_end ?? 420;
     deviceConfig.sleep_end_time = `${String(Math.floor(endMin / 60)).padStart(2, '0')}:${String(endMin % 60).padStart(2, '0')}`;
 
-    // Parse POSIX timezone (e.g., "UTC-8" → 8, "UTC+1" → -1, POSIX sign is inverted)
-    const tz = cfg.timezone || 'UTC0';
-    const tzMatch = tz.match(/UTC([+-]?)(\d+)(?::(\d+))?/);
-    if (tzMatch) {
-      const sign = tzMatch[1] === '-' ? 1 : -1;
-      const hours = parseInt(tzMatch[2]) || 0;
-      const minutes = parseInt(tzMatch[3]) || 0;
-      deviceConfig.timezone_offset = sign * (hours + minutes / 60);
-    } else {
-      deviceConfig.timezone_offset = 0;
-    }
+    // Keep the frame's POSIX TZ string as-is (e.g. "UTC-2" or a DST rule like
+    // "CET-1CEST,M3.5.0,M10.5.0/3"); timezoneItems lists it even if unknown.
+    deviceConfig.timezone = (cfg.timezone || '').trim() || 'UTC0';
 
     // Processing settings
     const proc = parse(data.processing_settings);
@@ -6174,20 +6166,6 @@ const saveDevice = async () => {
         .map(Number);
       const [endH, endM] = deviceConfig.sleep_end_time.split(':').map(Number);
 
-      // Convert UTC offset to POSIX timezone format (sign is inverted)
-      const offsetVal = deviceConfig.timezone_offset || 0;
-      let timezone = 'UTC0';
-      if (offsetVal !== 0) {
-        const absOff = Math.abs(offsetVal);
-        const h = Math.floor(absOff);
-        const m = Math.round((absOff - h) * 60);
-        const sign = offsetVal > 0 ? '-' : '+';
-        timezone =
-          m === 0
-            ? `UTC${sign}${h}`
-            : `UTC${sign}${h}:${String(m).padStart(2, '0')}`;
-      }
-
       // Compute image URL: use server URL if "use this server" is checked.
       // getImageUrl() targets the direct add-on port, so the URL works when
       // the ESP32 reaches the server straight (ingress port 8123 cannot serve
@@ -6214,7 +6192,7 @@ const saveDevice = async () => {
           sleep_schedule_end: endH * 60 + endM,
           display_orientation: derivedOrientation.value,
           display_rotation_deg: deviceConfig.display_rotation_deg,
-          timezone: timezone,
+          timezone: deviceConfig.timezone || 'UTC0',
           ntp_server: deviceConfig.ntp_server,
           deep_sleep_enabled: deviceConfig.deep_sleep_enabled,
           button_action_short: deviceConfig.button_action_short,
