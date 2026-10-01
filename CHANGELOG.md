@@ -1,5 +1,10 @@
 # Changelog
 
+## v1.52.0
+
+### Fixed
+- **Frame timezone: pick a real zone, and saving no longer resets it.** The device dialog's "Timezone (UTC offset)" field only understood `UTC±N`. A frame set to a daylight-saving rule such as `CET-1CEST,M3.5.0,M10.5.0/3` showed as 0, and saving the dialog for any other reason (an album change, say) wrote `UTC0` back to the frame through config-sync, putting it hours off. The field is now a searchable list of named zones that switch between summer and winter time on their own (Stockholm/Berlin/Paris, London, New York, Sydney, …) plus fixed UTC offsets. A value the list doesn't know is shown as "(custom)" and saved back unchanged.
+
 ## v1.51.0
 
 Four fixes ported from upstream (`aitjcize/esp32-photoframe-server`), each adapted to this fork's data model rather than cherry-picked.
