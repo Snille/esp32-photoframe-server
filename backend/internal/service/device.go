@@ -184,6 +184,10 @@ func (s *DeviceService) AddDevice(host string, enableCollage, showDate, showPhot
 		ShowRotation:                overlay.ShowRotation,
 		RotationPosition:            model.NormalizeOverlayPosition(overlay.RotationPosition, "bottom-right"),
 		RotationShowTotal:           overlay.RotationShowTotal,
+		ShowWifi:                    overlay.ShowWifi,
+		WifiPosition:                model.NormalizeOverlayPosition(overlay.WifiPosition, "top-left"),
+		WifiStyle:                   model.NormalizeBatteryStyle(overlay.WifiStyle),
+		OverlayChipFlow:             model.NormalizeOverlayChipFlow(overlay.OverlayChipFlow),
 		OverlayHiddenIcons:          model.NormalizeOverlayHiddenIcons(overlay.OverlayHiddenIcons),
 		LowBatteryWarnEnabled:       overlay.LowBatteryWarnEnabled,
 		LowBatteryWarnPercent:       model.NormalizeWarnPercent(overlay.LowBatteryWarnPercent, 25),
@@ -277,6 +281,10 @@ func (s *DeviceService) UpdateDevice(id uint, name, host, orientation string, en
 	device.ShowRotation = overlay.ShowRotation
 	device.RotationPosition = model.NormalizeOverlayPosition(overlay.RotationPosition, "bottom-right")
 	device.RotationShowTotal = overlay.RotationShowTotal
+	device.ShowWifi = overlay.ShowWifi
+	device.WifiPosition = model.NormalizeOverlayPosition(overlay.WifiPosition, "top-left")
+	device.WifiStyle = model.NormalizeBatteryStyle(overlay.WifiStyle)
+	device.OverlayChipFlow = model.NormalizeOverlayChipFlow(overlay.OverlayChipFlow)
 	device.OverlayHiddenIcons = model.NormalizeOverlayHiddenIcons(overlay.OverlayHiddenIcons)
 	device.LowBatteryWarnEnabled = overlay.LowBatteryWarnEnabled
 	device.LowBatteryWarnPercent = model.NormalizeWarnPercent(overlay.LowBatteryWarnPercent, 25)
@@ -520,7 +528,14 @@ func (s *DeviceService) PushToHost(device *model.Device, imagePath string, extra
 		descriptionStr = FormatDescription(description, device.DescriptionMaxLen)
 	}
 
-	needsOverlay := device.ShowDate || device.ShowPhotoDate || device.ShowWeather || device.ShowCalendar || showBattery || showNames || showLocation || showDescription
+	// A push carries no frame headers: draw the last signal the frame reported.
+	wifiText, wifiLevel := "", -1
+	if device.ShowWifi {
+		wifiText, wifiLevel = FormatWifiOverlay(device.WifiRSSI)
+	}
+	showWifi := wifiText != ""
+
+	needsOverlay := device.ShowDate || device.ShowPhotoDate || device.ShowWeather || device.ShowCalendar || showBattery || showNames || showLocation || showDescription || showWifi
 	var finalImg image.Image
 
 	if needsOverlay {
@@ -604,6 +619,12 @@ func (s *DeviceService) PushToHost(device *model.Device, imagePath string, extra
 			ShowDescription:     showDescription,
 			Description:         descriptionStr,
 			DescriptionPosition: device.DescriptionPosition,
+			ShowWifi:            showWifi,
+			WifiText:            wifiText,
+			WifiLevel:           wifiLevel,
+			WifiPosition:        device.WifiPosition,
+			WifiStyle:           device.WifiStyle,
+			OverlayChipFlow:     device.OverlayChipFlow,
 			OverlayHiddenIcons:  device.OverlayHiddenIcons,
 		})
 		if renderErr != nil {

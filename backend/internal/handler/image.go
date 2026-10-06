@@ -225,6 +225,11 @@ func (h *ImageHandler) ServeImage(c echo.Context) error {
 	batteryStatus := c.Request().Header.Get("X-Battery-Status")
 	batteryCharging := batteryStatus == "charging" || batteryStatus == "full"
 
+	// Wi-Fi link quality (firmware >= 2.20.0): RSSI of the current AP, and the
+	// throughput of the previous download. 0 = not reported.
+	wifiRSSI, wifiKbps := service.ParseWifiHeaders(
+		c.Request().Header.Get("X-Wifi-RSSI"), c.Request().Header.Get("X-Wifi-Kbps"))
+
 	// Record this pull attempt to the device's activity log — success or
 	// failure alike, unlike DeviceHistory which only records a successful
 	// serve. Reads c.Response().Status, which Echo has already set by the time
@@ -263,6 +268,8 @@ func (h *ImageHandler) ServeImage(c echo.Context) error {
 			IP:              c.RealIP(),
 			DisplayWidth:    dispW,
 			DisplayHeight:   dispH,
+			WifiRSSI:        wifiRSSI,
+			WifiKbps:        wifiKbps,
 		}
 		safego.Go("record device log", func() {
 			service.RecordDeviceLog(h.db, params)
@@ -304,6 +311,26 @@ func (h *ImageHandler) ServeImage(c echo.Context) error {
 			device.BatteryStatus = batteryStatus
 			safego.Go("update battery_status", func() {
 				h.db.Model(&model.Device{}).Where("id = ?", device.ID).Update("battery_status", batteryStatus)
+			})
+		}
+	}
+
+	// Keep the latest Wi-Fi readings on the device for the Devices list and the
+	// HA sensors. Kbps only arrives on some pulls, so a missing one keeps the
+	// last value rather than blanking it. Only write on change.
+	if deviceFound && !preview {
+		updates := map[string]interface{}{}
+		if wifiRSSI != 0 && wifiRSSI != device.WifiRSSI {
+			device.WifiRSSI = wifiRSSI
+			updates["wifi_rssi"] = wifiRSSI
+		}
+		if wifiKbps != 0 && wifiKbps != device.WifiKbps {
+			device.WifiKbps = wifiKbps
+			updates["wifi_kbps"] = wifiKbps
+		}
+		if len(updates) > 0 {
+			safego.Go("update wifi link", func() {
+				h.db.Model(&model.Device{}).Where("id = ?", device.ID).Updates(updates)
 			})
 		}
 	}
@@ -626,8 +653,20 @@ func (h *ImageHandler) ServeImage(c echo.Context) error {
 	}
 	showRotation := device.ShowRotation && rotationText != ""
 
+	// Wi-Fi chip: the signal reported on this pull. A preview carries no frame
+	// headers, so it falls back to the last value the frame reported.
+	overlayRSSI := wifiRSSI
+	if overlayRSSI == 0 && preview {
+		overlayRSSI = device.WifiRSSI
+	}
+	wifiText, wifiLevel := "", -1
+	if deviceFound && device.ShowWifi {
+		wifiText, wifiLevel = service.FormatWifiOverlay(overlayRSSI)
+	}
+	showWifi := wifiText != ""
+
 	// 2. Render layout (photo + overlay + calendar)
-	needsOverlay := showDate || showPhotoDate || showWeather || showCalendar || showBattery || showNames || showLocation || showDescription || showRotation
+	needsOverlay := showDate || showPhotoDate || showWeather || showCalendar || showBattery || showNames || showLocation || showDescription || showRotation || showWifi
 	var imgWithOverlay image.Image
 
 	// People-names + location + description strings, formatted per device
@@ -736,6 +775,12 @@ func (h *ImageHandler) ServeImage(c echo.Context) error {
 			RotationText:        rotationText,
 			RotationIcon:        rotationIcon,
 			RotationPosition:    device.RotationPosition,
+			ShowWifi:            showWifi,
+			WifiText:            wifiText,
+			WifiLevel:           wifiLevel,
+			WifiPosition:        device.WifiPosition,
+			WifiStyle:           device.WifiStyle,
+			OverlayChipFlow:     device.OverlayChipFlow,
 			OverlayHiddenIcons:  device.OverlayHiddenIcons,
 
 			ShowLowBatteryWarn:          showLowBattWarn,

@@ -233,6 +233,7 @@ func (h *ImageHandler) composeNextOverlay(device *model.Device, source string, i
 		ShowDescription:     showDescription,
 		Description:         descriptionStr,
 		DescriptionPosition: device.DescriptionPosition,
+		OverlayChipFlow:     device.OverlayChipFlow,
 		OverlayHiddenIcons:  device.OverlayHiddenIcons,
 	})
 	if rerr != nil {

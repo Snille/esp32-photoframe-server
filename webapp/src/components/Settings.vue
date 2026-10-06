@@ -1718,6 +1718,17 @@
                         >{{ device.host }}</a
                       >
                       <template v-else>{{ device.host }}</template>
+                      <div
+                        v-if="device.wifi_rssi"
+                        class="text-caption text-no-wrap"
+                        :class="`text-${wifiQuality(device.wifi_rssi).color}`"
+                        :title="`${wifiQuality(device.wifi_rssi).label} on the last check-in${device.wifi_kbps ? ` — last download ${formatKbps(device.wifi_kbps)}` : ''}`"
+                      >
+                        <v-icon size="x-small" class="mr-1">{{
+                          wifiIcon(device.wifi_rssi)
+                        }}</v-icon
+                        >{{ device.wifi_rssi }} dBm
+                      </div>
                     </td>
                     <td>
                       <template v-if="deviceCharging(device)">
@@ -2127,6 +2138,7 @@
                           <th>Source</th>
                           <th>Battery</th>
                           <th>Charge</th>
+                          <th>Wi-Fi</th>
                           <th>Firmware</th>
                           <th>Reset</th>
                           <th>IP</th>
@@ -2167,6 +2179,23 @@
                             <template v-else>—</template>
                           </td>
                           <td>{{ entry.battery_status || '—' }}</td>
+                          <td class="text-no-wrap">
+                            <template v-if="entry.wifi_rssi">
+                              <span
+                                :class="`text-${wifiQuality(entry.wifi_rssi).color}`"
+                                :title="wifiQuality(entry.wifi_rssi).label"
+                                >{{ entry.wifi_rssi }} dBm</span
+                              >
+                              <span
+                                v-if="entry.wifi_kbps > 0"
+                                class="text-medium-emphasis"
+                                title="Download speed of the frame's previous image"
+                              >
+                                · {{ formatKbps(entry.wifi_kbps) }}</span
+                              >
+                            </template>
+                            <template v-else>—</template>
+                          </td>
                           <td>{{ entry.firmware_version || '—' }}</td>
                           <td>{{ entry.reset_reason || '—' }}</td>
                           <td>{{ entry.ip || '—' }}</td>
@@ -2718,6 +2747,12 @@
                               color="primary"
                               hide-details
                             ></v-checkbox>
+                            <v-checkbox
+                              v-model="editingDevice.show_wifi"
+                              label="Show Wi-Fi Signal"
+                              color="primary"
+                              hide-details
+                            ></v-checkbox>
                           </div>
 
                           <!-- People name options (Immich face metadata) -->
@@ -2834,6 +2869,27 @@
                               hide-details
                             ></v-checkbox>
                           </template>
+                          <!-- Wi-Fi signal chip -->
+                          <div
+                            v-if="editingDevice.show_wifi"
+                            class="text-caption text-disabled mt-3 mb-1"
+                          >
+                            Draws the Wi-Fi signal the frame measured on that
+                            pull (e.g. -62 dBm). Handy while finding a spot for
+                            the frame: above about -67 dBm is good, below about
+                            -80 dBm pulls start to fail. Shows in every layout,
+                            like the battery badge. Needs firmware 2.20.0 or
+                            newer.
+                            <template v-if="editingDevice.wifi_rssi">
+                              Last reported:
+                              <span
+                                :class="`text-${wifiQuality(editingDevice.wifi_rssi).color}`"
+                                >{{ editingDevice.wifi_rssi }} dBm ({{
+                                  wifiQuality(editingDevice.wifi_rssi).label
+                                }})</span
+                              >.
+                            </template>
+                          </div>
                           <v-select
                             v-if="editingDevice.show_date"
                             v-model="editingDevice.date_format"
@@ -2882,7 +2938,9 @@
                               editingDevice.show_battery ||
                               editingDevice.show_names ||
                               editingDevice.show_location ||
-                              editingDevice.show_description
+                              editingDevice.show_description ||
+                              editingDevice.show_rotation ||
+                              editingDevice.show_wifi
                             "
                           >
                             <div
@@ -3099,6 +3157,38 @@
                                 ></v-checkbox>
                               </v-col>
                               <v-col
+                                v-if="editingDevice.show_wifi"
+                                cols="12"
+                                sm="6"
+                              >
+                                <v-select
+                                  v-model="editingDevice.wifi_position"
+                                  :items="positionOptions"
+                                  item-title="label"
+                                  item-value="value"
+                                  label="Wi-Fi signal position"
+                                  variant="outlined"
+                                  density="compact"
+                                  hide-details
+                                ></v-select>
+                              </v-col>
+                              <v-col
+                                v-if="editingDevice.show_wifi"
+                                cols="12"
+                                sm="6"
+                              >
+                                <v-select
+                                  v-model="editingDevice.wifi_style"
+                                  :items="batteryStyleOptions"
+                                  item-title="label"
+                                  item-value="value"
+                                  label="Wi-Fi signal display"
+                                  variant="outlined"
+                                  density="compact"
+                                  hide-details
+                                ></v-select>
+                              </v-col>
+                              <v-col
                                 v-if="editingDevice.show_battery"
                                 cols="12"
                                 sm="6"
@@ -3197,6 +3287,19 @@
                                 </span>
                               </template>
                             </v-slider>
+
+                            <v-select
+                              v-model="editingDevice.overlay_chip_flow"
+                              :items="chipFlowOptions"
+                              item-title="label"
+                              item-value="value"
+                              label="Fields in the same position"
+                              hint="Side by side puts e.g. a battery icon and a Wi-Fi icon next to each other in one corner."
+                              persistent-hint
+                              variant="outlined"
+                              density="compact"
+                              class="mt-4"
+                            ></v-select>
 
                             <v-slider
                               v-model="editingDevice.overlay_scale"
@@ -3353,6 +3456,10 @@
                             </div>
                             <div
                               class="overlay-preview"
+                              :class="{
+                                'op-chips-row':
+                                  editingDevice.overlay_chip_flow === 'row',
+                              }"
                               :style="previewBoxStyle"
                             >
                               <div
@@ -3392,6 +3499,23 @@
                                             :style="{ width: el.pct + '%' }"
                                           ></span>
                                         </span>
+                                        <svg
+                                          v-if="el.wifiLevel !== undefined"
+                                          class="op-wifi"
+                                          viewBox="0 0 30 22"
+                                        >
+                                          <path
+                                            v-for="(d, i) in WIFI_BAND_PATHS"
+                                            :key="i"
+                                            :d="d"
+                                            fill="currentColor"
+                                            :opacity="
+                                              i < wifiLitBands(el.wifiLevel)
+                                                ? 1
+                                                : 0.28
+                                            "
+                                          />
+                                        </svg>
                                         <v-icon
                                           v-if="el.icon"
                                           size="x-small"
@@ -3422,6 +3546,23 @@
                                           :style="{ width: el.pct + '%' }"
                                         ></span>
                                       </span>
+                                      <svg
+                                        v-if="el.wifiLevel !== undefined"
+                                        class="op-wifi"
+                                        viewBox="0 0 30 22"
+                                      >
+                                        <path
+                                          v-for="(d, i) in WIFI_BAND_PATHS"
+                                          :key="i"
+                                          :d="d"
+                                          fill="currentColor"
+                                          :opacity="
+                                            i < wifiLitBands(el.wifiLevel)
+                                              ? 1
+                                              : 0.28
+                                          "
+                                        />
+                                      </svg>
                                       <v-icon
                                         v-if="el.icon"
                                         size="x-small"
@@ -5439,6 +5580,7 @@ interface PreviewEl {
   batteryIconScale?: number;
   pct?: number;
   low?: boolean;
+  wifiLevel?: number; // draw the Wi-Fi fan at this signal level (0-4)
 }
 
 // Date/photo-date/weather only float on the full-photo (overlay) layout;
@@ -5535,6 +5677,18 @@ const previewElements = computed<PreviewEl[]>(() => {
           ? 'mdi-shuffle-variant'
           : 'mdi-image-multiple',
       text: showTotal ? `${n}/${total}` : `${n}`,
+    });
+  }
+  if (editingDevice.show_wifi) {
+    // The frame's last reported signal when known, else a typical sample.
+    const rssi = editingDevice.wifi_rssi || -62;
+    const style = editingDevice.wifi_style || 'both';
+    els.push({
+      key: 'wifi',
+      pos: editingDevice.wifi_position || 'top-left',
+      kind: 'wifi',
+      wifiLevel: style !== 'text' ? wifiSignalLevel(rssi) : undefined,
+      text: style !== 'icon' ? `${rssi} dBm` : '',
     });
   }
   if (editingDevice.show_battery) {
@@ -5823,6 +5977,10 @@ const openAddDeviceDialog = () => {
     description_max_len: 80,
     show_rotation: false,
     rotation_position: 'bottom-right',
+    show_wifi: false,
+    wifi_position: 'top-left',
+    wifi_style: 'both',
+    overlay_chip_flow: 'stack',
     rotation_show_total: true,
   });
   Object.assign(deviceConfig, {
@@ -6063,6 +6221,10 @@ const saveDevice = async () => {
         description_max_len: editingDevice.description_max_len ?? 80,
         show_rotation: editingDevice.show_rotation || false,
         rotation_position: editingDevice.rotation_position || 'bottom-right',
+        show_wifi: editingDevice.show_wifi || false,
+        wifi_position: editingDevice.wifi_position || 'top-left',
+        wifi_style: editingDevice.wifi_style || 'both',
+        overlay_chip_flow: editingDevice.overlay_chip_flow || 'stack',
         rotation_show_total: editingDevice.rotation_show_total !== false,
         immich_album_ids: editingDevice.immich_album_ids || '',
         overlay_hidden_icons: editingDevice.overlay_hidden_icons || '',
@@ -6147,6 +6309,10 @@ const saveDevice = async () => {
           description_max_len: editingDevice.description_max_len ?? 80,
           show_rotation: editingDevice.show_rotation || false,
           rotation_position: editingDevice.rotation_position || 'bottom-right',
+          show_wifi: editingDevice.show_wifi || false,
+          wifi_position: editingDevice.wifi_position || 'top-left',
+          wifi_style: editingDevice.wifi_style || 'both',
+          overlay_chip_flow: editingDevice.overlay_chip_flow || 'stack',
           rotation_show_total: editingDevice.rotation_show_total !== false,
           display_order: editingDevice.display_order || 'shuffle',
           immich_album_ids: editingDevice.immich_album_ids || '',
@@ -6450,6 +6616,42 @@ const lastSeenStatusTitle = (device: Device): string => {
     ? 'Online — checked in recently'
     : 'Overdue — no check-in within ~2 rotation cycles (stuck, offline, or asleep)';
 };
+// Wi-Fi RSSI → quality label + theme colour. Same bands as the server's
+// WifiSignalLevel (service/wifi.go), so the UI, HA and the photo chip agree.
+const wifiQuality = (rssi?: number): { label: string; color: string } => {
+  if (!rssi) return { label: 'Not reported', color: 'medium-emphasis' };
+  if (rssi >= -55) return { label: 'Excellent signal', color: 'success' };
+  if (rssi >= -67) return { label: 'Good signal', color: 'success' };
+  if (rssi >= -75) return { label: 'Fair signal', color: 'warning' };
+  if (rssi >= -82) return { label: 'Weak signal', color: 'error' };
+  return { label: 'Poor signal — expect failed pulls', color: 'error' };
+};
+const wifiIcon = (rssi?: number): string => {
+  if (!rssi) return 'mdi-wifi-off';
+  if (rssi >= -55) return 'mdi-wifi-strength-4';
+  if (rssi >= -67) return 'mdi-wifi-strength-3';
+  if (rssi >= -75) return 'mdi-wifi-strength-2';
+  if (rssi >= -82) return 'mdi-wifi-strength-1';
+  return 'mdi-wifi-strength-outline';
+};
+const formatKbps = (kbps: number): string =>
+  kbps >= 1000 ? `${(kbps / 1000).toFixed(1)} Mbit/s` : `${kbps} kbit/s`;
+// Mirrors the server's WifiSignalLevel / WifiLitBands (service/wifi.go).
+const wifiSignalLevel = (rssi: number): number =>
+  rssi >= -55 ? 4 : rssi >= -67 ? 3 : rssi >= -75 ? 2 : rssi >= -82 ? 1 : 0;
+const wifiLitBands = (level: number): number => Math.max(1, level);
+// The Wi-Fi fan's four bands, innermost first: the exact paths the server
+// renderer draws (printed by TestWifiIconSVG), so the preview matches the frame.
+const WIFI_BAND_PATHS = [
+  'M12.10 18.10A4.10 4.10 0 0 1 17.90 18.10L15.00 21.00Z',
+  'M8.35 14.35A9.40 9.40 0 0 1 21.65 14.35L18.75 17.25A5.30 5.30 0 0 0 11.25 17.25Z',
+  'M4.61 10.61A14.70 14.70 0 0 1 25.39 10.61L22.50 13.50A10.60 10.60 0 0 0 7.50 13.50Z',
+  'M0.86 6.86A20.00 20.00 0 0 1 29.14 6.86L26.24 9.76A15.90 15.90 0 0 0 3.76 9.76Z',
+];
+const chipFlowOptions = [
+  { label: 'Stacked (one under the other)', value: 'stack' },
+  { label: 'Side by side', value: 'row' },
+];
 // Reset causes that indicate a crash (vs a normal power-on / deep-sleep wake /
 // software reboot). Flagged in the Devices list so a crash loop is visible.
 const CRASH_RESETS = new Set([
@@ -7703,6 +7905,27 @@ const getDeviceFromUA = (ua: string) => {
 .overlay-preview .op-wide {
   width: 100%;
   align-items: center;
+}
+/* "Side by side": chips sharing a corner sit in a row, like the renderer's
+   .chips-row. */
+.overlay-preview.op-chips-row .op-corner-row .op-slot {
+  flex-direction: row;
+  flex-wrap: wrap;
+  align-items: center;
+}
+.overlay-preview.op-chips-row .op-top-center,
+.overlay-preview.op-chips-row .op-bottom-center {
+  justify-content: center;
+}
+.overlay-preview.op-chips-row .op-top-right,
+.overlay-preview.op-chips-row .op-bottom-right {
+  justify-content: flex-end;
+}
+.overlay-preview .op-wifi {
+  height: 1.05em;
+  width: auto;
+  flex: none;
+  display: block;
 }
 .overlay-preview .op-wide .op-chip {
   max-width: 100%;

@@ -134,6 +134,10 @@ func (h *DeviceHandler) AddDevice(c echo.Context) error {
 		ShowRotation        bool    `json:"show_rotation"`
 		RotationPosition    string  `json:"rotation_position"`
 		RotationShowTotal   bool    `json:"rotation_show_total"`
+		ShowWifi            bool    `json:"show_wifi"`
+		WifiPosition        string  `json:"wifi_position"`
+		WifiStyle           string  `json:"wifi_style"`
+		OverlayChipFlow     string  `json:"overlay_chip_flow"`
 		OverlayHiddenIcons  string  `json:"overlay_hidden_icons"`
 
 		LowBatteryWarnEnabled       bool   `json:"low_battery_warn_enabled"`
@@ -182,6 +186,10 @@ func (h *DeviceHandler) AddDevice(c echo.Context) error {
 		ShowRotation:        req.ShowRotation,
 		RotationPosition:    req.RotationPosition,
 		RotationShowTotal:   req.RotationShowTotal,
+		ShowWifi:            req.ShowWifi,
+		WifiPosition:        req.WifiPosition,
+		WifiStyle:           req.WifiStyle,
+		OverlayChipFlow:     req.OverlayChipFlow,
 		OverlayHiddenIcons:  req.OverlayHiddenIcons,
 
 		LowBatteryWarnEnabled:       req.LowBatteryWarnEnabled,
@@ -263,6 +271,10 @@ func (h *DeviceHandler) UpdateDevice(c echo.Context) error {
 		ShowRotation        bool    `json:"show_rotation"`
 		RotationPosition    string  `json:"rotation_position"`
 		RotationShowTotal   bool    `json:"rotation_show_total"`
+		ShowWifi            bool    `json:"show_wifi"`
+		WifiPosition        string  `json:"wifi_position"`
+		WifiStyle           string  `json:"wifi_style"`
+		OverlayChipFlow     string  `json:"overlay_chip_flow"`
 		OverlayHiddenIcons  string  `json:"overlay_hidden_icons"`
 
 		LowBatteryWarnEnabled       bool   `json:"low_battery_warn_enabled"`
@@ -307,6 +319,10 @@ func (h *DeviceHandler) UpdateDevice(c echo.Context) error {
 		ShowRotation:        req.ShowRotation,
 		RotationPosition:    req.RotationPosition,
 		RotationShowTotal:   req.RotationShowTotal,
+		ShowWifi:            req.ShowWifi,
+		WifiPosition:        req.WifiPosition,
+		WifiStyle:           req.WifiStyle,
+		OverlayChipFlow:     req.OverlayChipFlow,
 		OverlayHiddenIcons:  req.OverlayHiddenIcons,
 
 		LowBatteryWarnEnabled:       req.LowBatteryWarnEnabled,

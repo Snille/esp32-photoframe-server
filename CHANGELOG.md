@@ -1,5 +1,20 @@
 # Changelog
 
+## v1.53.0
+
+### Added
+- **Wi-Fi link quality per frame.** Frames on firmware 2.20.0 or newer report the signal strength of their access point (`X-Wifi-RSSI`, in dBm) on every pull, and the download speed of their previous image (`X-Wifi-Kbps`). Moving a frame to a weak spot now shows up instead of only as failed pulls:
+  - The **Activity Log** has a Wi-Fi column (coloured by quality) and the CSV export gains `wifi_rssi_dbm` and `wifi_kbps`.
+  - The **Devices list** shows the latest signal under each frame's host.
+  - **Home Assistant** gets three diagnostic sensors: Wi-Fi Signal (dBm), Wi-Fi Quality (excellent/good/fair/weak/poor) and Wi-Fi Download Speed (kbit/s).
+  - An optional **Wi-Fi chip on the photo** (Overlay tab → "Show Wi-Fi Signal"): icon, text or both, like the battery badge. The icon is a four-band fan — all bands lit on a strong signal, only the bottom one on a weak signal. It shows in every layout. A preview or server push draws the last signal the frame reported.
+- **Fields in the same position can sit side by side.** New Overlay-tab option "Fields in the same position": *Stacked* (as before) or *Side by side*, e.g. a battery icon and a Wi-Fi icon next to each other in one corner.
+
+### Fixed
+- **"Show icon" for the rotation-position chip now saves.** The server dropped `rotation` from the hidden-icons list, so unticking it had no effect.
+
+Migrations `000064` and `000065` add the new columns.
+
 ## v1.52.0
 
 ### Fixed

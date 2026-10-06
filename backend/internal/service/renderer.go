@@ -103,6 +103,17 @@ type RenderOptions struct {
 	RotationText     string
 	RotationIcon     string
 	RotationPosition string
+	// Wi-Fi signal chip. The caller precomputes the text + signal level from
+	// the RSSI (see FormatWifiOverlay). Like the battery badge it shows in every
+	// layout: it is a placement aid, not photo decoration.
+	ShowWifi     bool
+	WifiText     string
+	WifiLevel    int
+	WifiPosition string
+	WifiStyle    string // both | icon | text
+	// OverlayChipFlow: "stack" puts chips that share a position one under the
+	// other, "row" side by side.
+	OverlayChipFlow string
 	// OverlayHiddenIcons is a comma-separated list of element keys whose leading
 	// icon is suppressed (photo_date, weather, names, location, description, rotation).
 	OverlayHiddenIcons string
@@ -405,6 +416,13 @@ func (s *RendererService) Render(opts RenderOptions) (image.Image, error) {
 		RotationText:        opts.RotationText,
 		RotationIcon:        opts.RotationIcon,
 		RotationPosition:    model.NormalizeOverlayPosition(opts.RotationPosition, "bottom-right"),
+		ShowWifi:            opts.ShowWifi && opts.WifiText != "",
+		WifiText:            opts.WifiText,
+		WifiIconSVG:         WifiIconSVG(opts.WifiLevel),
+		WifiPosition:        model.NormalizeOverlayPosition(opts.WifiPosition, "top-left"),
+		ShowWifiIcon:        model.NormalizeBatteryStyle(opts.WifiStyle) != "text",
+		ShowWifiText:        model.NormalizeBatteryStyle(opts.WifiStyle) != "icon",
+		ChipFlowRow:         model.NormalizeOverlayChipFlow(opts.OverlayChipFlow) == "row",
 		ShowPhotoDateIcon:   !model.OverlayIconHidden(opts.OverlayHiddenIcons, "photo_date"),
 		ShowWeatherIcon:     !model.OverlayIconHidden(opts.OverlayHiddenIcons, "weather"),
 		ShowNamesIcon:       !model.OverlayIconHidden(opts.OverlayHiddenIcons, "names"),
@@ -431,6 +449,7 @@ func (s *RendererService) Render(opts RenderOptions) (image.Image, error) {
 	markUsed(ov && data.ShowDescription, data.DescriptionPosition)
 	markUsed(ov && data.ShowRotation, data.RotationPosition)
 	markUsed(data.ShowBattery, data.BatteryPosition)
+	markUsed(data.ShowWifi, data.WifiPosition)
 	// The low-battery warning chip shows in every layout (like the battery badge),
 	// so it isn't gated on the overlay layout.
 	markUsed(data.ShowLowBatteryWarn, data.LowBatteryWarnPosition)
@@ -550,6 +569,14 @@ type templateData struct {
 	RotationText                string
 	RotationIcon                string
 	RotationPosition            string
+	ShowWifi                    bool
+	WifiText                    string
+	WifiIconSVG                 template.HTML
+	WifiPosition                string
+	ShowWifiIcon                bool
+	ShowWifiText                bool
+	// ChipFlowRow lays chips that share a corner side by side instead of stacked.
+	ChipFlowRow bool
 	// Per-chip icon visibility (true = draw the leading icon).
 	ShowPhotoDateIcon   bool
 	ShowWeatherIcon     bool
@@ -701,6 +728,7 @@ const layoutTemplate = `
 {{- define "el_location"}}<div class="ov-chip location">{{if .ShowLocationIcon}}<span class="material-symbols-outlined">place</span> {{end}}{{.Location}}</div>{{end}}
 {{- define "el_description"}}<div class="ov-chip description">{{if .ShowDescriptionIcon}}<span class="material-symbols-outlined">notes</span> {{end}}{{.Description}}</div>{{end}}
 {{- define "el_rotation"}}<div class="ov-chip rotation">{{if .ShowRotationIcon}}<span class="material-symbols-outlined">{{.RotationIcon}}</span> {{end}}{{.RotationText}}</div>{{end}}
+{{- define "el_wifi"}}<div class="ov-chip wifi">{{if .ShowWifiIcon}}{{.WifiIconSVG}}{{end}}{{if .ShowWifiText}}<span class="wifi-text">{{.WifiText}}</span>{{end}}</div>{{end}}
 {{- define "el_lowbatt"}}<div class="ov-chip low-batt"><span class="material-symbols-outlined">battery_alert</span> {{.LowBatteryWarnText}}</div>{{end}}
 {{- define "ov_slot"}}
   <div class="ov-slot {{.Pos}}">
@@ -712,11 +740,12 @@ const layoutTemplate = `
     {{if and .D.IsOverlayLayout .D.ShowLocation (eq .D.LocationPosition .Pos)}}{{template "el_location" .D}}{{end}}
     {{if and .D.IsOverlayLayout .D.ShowDescription (eq .D.DescriptionPosition .Pos)}}{{template "el_description" .D}}{{end}}
     {{if and .D.IsOverlayLayout .D.ShowRotation (eq .D.RotationPosition .Pos)}}{{template "el_rotation" .D}}{{end}}
+    {{if and .D.ShowWifi (eq .D.WifiPosition .Pos)}}{{template "el_wifi" .D}}{{end}}
     {{if and .D.ShowBattery (eq .D.BatteryPosition .Pos)}}{{template "el_battery" .D}}{{end}}
     {{if and .D.ShowLowBatteryWarn (eq .D.LowBatteryWarnPosition .Pos)}}{{template "el_lowbatt" .D}}{{end}}
   </div>
 {{- end}}
-{{- define "floating"}}<div class="floating">
+{{- define "floating"}}<div class="floating{{if .ChipFlowRow}} chips-row{{end}}">
   <div class="float-region top">
     {{if .TopRowUsed}}<div class="corner-row">
       {{template "ov_slot" (slot . "top-left")}}
@@ -863,6 +892,12 @@ const layoutTemplate = `
   .ov-slot.top-left,   .ov-slot.bottom-left   { justify-self: start;  align-items: flex-start; }
   .ov-slot.top-center, .ov-slot.bottom-center { justify-self: center; align-items: center; }
   .ov-slot.top-right,  .ov-slot.bottom-right  { justify-self: end;    align-items: flex-end; }
+  /* "Side by side": chips sharing a corner sit in a row (wrapping if they run
+     out of room) instead of a column, vertically centred on each other. */
+  .chips-row .corner-row .ov-slot { flex-direction: row; flex-wrap: wrap; align-items: center; }
+  .chips-row .ov-slot.top-left,   .chips-row .ov-slot.bottom-left   { justify-content: flex-start; }
+  .chips-row .ov-slot.top-center, .chips-row .ov-slot.bottom-center { justify-content: center; }
+  .chips-row .ov-slot.top-right,  .chips-row .ov-slot.bottom-right  { justify-content: flex-end; }
   /* Centered band for long content (location / names / description). The slot
      spans the full width and centers its chip, but the chip itself only grows
      to fit its text — expanding symmetrically from the centre — and caps at the
@@ -896,6 +931,9 @@ const layoutTemplate = `
      than a text-only chip. Every overlay field keeps the same background
      height. The 0.25em chip padding absorbs the small visual overflow. */
   .ov-chip .material-symbols-outlined { font-size: 1.3em; line-height: 0.88; }
+  /* Wi-Fi signal fan (inline SVG, see WifiIconSVG). Sized like the icon-font
+     glyphs and trimmed to the same line box, so it never makes its chip taller. */
+  .ov-chip .wifi-icon { height: 1.05em; width: auto; flex: none; display: block; }
   .ov-chip.event { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; display: block; }
   /* Tier-1 low-battery warning: a normal overlay-slot chip in an attention
      colour so it stands out from the neutral info chips. */

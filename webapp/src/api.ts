@@ -137,6 +137,12 @@ export interface Device {
   show_rotation?: boolean;
   rotation_position?: string;
   rotation_show_total?: boolean;
+  // Wi-Fi signal chip on the photo (RSSI the frame reported on that pull).
+  show_wifi?: boolean;
+  wifi_position?: string;
+  wifi_style?: string; // both | icon | text
+  // How chips sharing a position are arranged: stack | row (side by side).
+  overlay_chip_flow?: string;
   // Comma-separated Immich album IDs this frame is restricted to (empty = all).
   immich_album_ids?: string;
   // Rotation-pool filters: only photos from today's date / only favorites.
@@ -170,6 +176,11 @@ export interface Device {
   // on_battery); only boards that can sense USB send it. Drives the "plugged in"
   // indicator instead of a (possibly wrong) percentage while on USB.
   battery_status?: string;
+  // Wi-Fi link quality from the latest pull: RSSI in dBm (closer to 0 is
+  // stronger) and the throughput of the latest measured download in kbit/s.
+  // 0/absent = never reported (firmware older than 2.20.0).
+  wifi_rssi?: number;
+  wifi_kbps?: number;
   // Server-inferred "on USB": the latest reading is physically implausible for a
   // running frame (EE02-on-USB ADC garbage), so we show a plugged-in indicator.
   battery_plugged?: boolean;
@@ -241,6 +252,10 @@ export const addDevice = async (params: {
   show_rotation?: boolean;
   rotation_position?: string;
   rotation_show_total?: boolean;
+  show_wifi?: boolean;
+  wifi_position?: string;
+  wifi_style?: string;
+  overlay_chip_flow?: string;
   immich_album_ids?: string;
   on_this_day?: boolean;
   favorites_only?: boolean;
@@ -307,6 +322,10 @@ export const updateDevice = async (
     show_rotation?: boolean;
     rotation_position?: string;
     rotation_show_total?: boolean;
+    show_wifi?: boolean;
+    wifi_position?: string;
+    wifi_style?: string;
+    overlay_chip_flow?: string;
     display_order?: string;
     immich_album_ids?: string;
     on_this_day?: boolean;
@@ -367,6 +386,10 @@ export const updateDevice = async (
     show_rotation: overlayPositions?.show_rotation || false,
     rotation_position: overlayPositions?.rotation_position || 'bottom-right',
     rotation_show_total: overlayPositions?.rotation_show_total ?? true,
+    show_wifi: overlayPositions?.show_wifi || false,
+    wifi_position: overlayPositions?.wifi_position || 'top-left',
+    wifi_style: overlayPositions?.wifi_style || 'both',
+    overlay_chip_flow: overlayPositions?.overlay_chip_flow || 'stack',
     display_order: overlayPositions?.display_order || 'shuffle',
     immich_album_ids: overlayPositions?.immich_album_ids ?? '',
     on_this_day: overlayPositions?.on_this_day || false,
@@ -520,6 +543,10 @@ export interface DeviceLogEntry {
   ip: string;
   display_width: number;
   display_height: number;
+  // Wi-Fi on this pull: RSSI in dBm, and the throughput of the frame's previous
+  // download in kbit/s. 0 = not reported.
+  wifi_rssi: number;
+  wifi_kbps: number;
 }
 
 export const listDeviceLogs = async (

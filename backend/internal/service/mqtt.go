@@ -647,6 +647,14 @@ func (s *MQTTService) publishState(client mqtt.Client, device *model.Device) {
 	if device.BatteryStatus != "" {
 		state["battery_status"] = device.BatteryStatus
 	}
+	// Wi-Fi link quality from the latest pull (0 = never reported).
+	if device.WifiRSSI != 0 {
+		state["wifi_rssi"] = device.WifiRSSI
+		state["wifi_quality"] = WifiSignalQuality(device.WifiRSSI)
+	}
+	if device.WifiKbps > 0 {
+		state["wifi_kbps"] = device.WifiKbps
+	}
 	// Frame poll / schedule config (from the synced device_config) + network id.
 	pc := parsePollConfig(device.DeviceConfig)
 	if pc.rotateInterval > 0 {
@@ -1179,7 +1187,7 @@ func (s *MQTTService) publishOneImage(client mqtt.Client, topic, thumbID string)
 // mqttSensorKeys are the value_json keys exposed as plain (read-only) HA sensors.
 // Image source / refresh interval / image order are now controllable select /
 // number entities (see publishDiscovery), so they are not in this list.
-var mqttSensorKeys = []string{"battery", "battery_voltage", "days_remaining", "trend", "battery_status", "last_seen", "sleep_schedule", "next_pull", "host", "ip_address", "next_image_status", "timezone", "rotation", "server_host", "trigger", "rotation_total", "rotation_position", "rotation_remaining", "rotation_status", "rotation_completes", "current_photo_date", "immich_albums"}
+var mqttSensorKeys = []string{"battery", "battery_voltage", "days_remaining", "trend", "battery_status", "last_seen", "sleep_schedule", "next_pull", "host", "ip_address", "next_image_status", "timezone", "rotation", "server_host", "trigger", "rotation_total", "rotation_position", "rotation_remaining", "rotation_status", "rotation_completes", "current_photo_date", "immich_albums", "wifi_rssi", "wifi_quality", "wifi_kbps"}
 
 // commandSourceOptions are the image sources offered by the HA "Image Source"
 // select. Matches the server's registered sources (model source constants).
@@ -1256,6 +1264,19 @@ func (s *MQTTService) publishDiscovery(client mqtt.Client, device *model.Device)
 		"icon": "mdi:battery-charging", "entity_category": "diagnostic",
 	})
 	sensor("last_seen", "Last Seen", "last_seen", map[string]interface{}{"device_class": "timestamp"})
+	// Wi-Fi link quality the frame reports on each pull, for spotting a weak
+	// placement in the HA history graph.
+	sensor("wifi_rssi", "Wi-Fi Signal", "wifi_rssi", map[string]interface{}{
+		"device_class": "signal_strength", "unit_of_measurement": "dBm", "state_class": "measurement",
+		"entity_category": "diagnostic",
+	})
+	sensor("wifi_quality", "Wi-Fi Quality", "wifi_quality", map[string]interface{}{
+		"icon": "mdi:wifi", "entity_category": "diagnostic",
+	})
+	sensor("wifi_kbps", "Wi-Fi Download Speed", "wifi_kbps", map[string]interface{}{
+		"device_class": "data_rate", "unit_of_measurement": "kbit/s", "state_class": "measurement",
+		"entity_category": "diagnostic",
+	})
 
 	// (Image Source / Refresh Interval are now controllable select / number
 	// entities — see the controls section below.)

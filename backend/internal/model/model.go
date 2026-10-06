@@ -188,6 +188,15 @@ type Device struct {
 	ShowRotation      bool   `json:"show_rotation" gorm:"default:0"`
 	RotationPosition  string `json:"rotation_position" gorm:"default:'bottom-right'"`
 	RotationShowTotal bool   `json:"rotation_show_total" gorm:"default:1"`
+	// Wi-Fi signal chip: draws the RSSI the frame reported on this very pull
+	// (X-Wifi-RSSI) on the photo, so a weak spot is visible on the frame itself
+	// while placing it. Like the battery badge it shows in every layout.
+	ShowWifi     bool   `json:"show_wifi" gorm:"default:0"`
+	WifiPosition string `json:"wifi_position" gorm:"default:'top-left'"`
+	WifiStyle    string `json:"wifi_style" gorm:"default:'both'"` // both | icon | text
+	// OverlayChipFlow arranges chips that share one position: "stack" (one
+	// under the other) or "row" (side by side, e.g. battery + Wi-Fi icons).
+	OverlayChipFlow string `json:"overlay_chip_flow" gorm:"default:'stack'"`
 	// Rotation-pool filters (ordered DB sources). OnThisDay restricts the frame to
 	// photos taken on today's month/day (any year); FavoritesOnly to starred
 	// photos. Both fall back to the full pool when the filtered set is empty.
@@ -248,6 +257,12 @@ type Device struct {
 	// (X-Battery-Status): "charging", "full" or "on_battery". Empty when the
 	// board can't sense it; surfaced as the HA "Battery Status" sensor.
 	BatteryStatus string `json:"battery_status" gorm:"default:''"`
+	// WifiRSSI is the signal strength (dBm) of the AP the frame was connected to
+	// on its latest pull (X-Wifi-RSSI). WifiKbps is the throughput of its latest
+	// measured image download (X-Wifi-Kbps, reported one pull late). 0 = never
+	// reported for both. History lives in DeviceLog.
+	WifiRSSI int `json:"wifi_rssi" gorm:"column:wifi_rssi;default:0"`
+	WifiKbps int `json:"wifi_kbps" gorm:"column:wifi_kbps;default:0"`
 	// LastTrigger is what caused the frame's most recent image change, surfaced as
 	// the HA "Last Trigger" sensor: "timer" (auto-rotate wake), "button" (wake
 	// button), "boot" (cold boot/reset), "push" (server-initiated) or "pull"
@@ -352,6 +367,10 @@ type OverlaySettings struct {
 	ShowRotation                bool
 	RotationPosition            string
 	RotationShowTotal           bool
+	ShowWifi                    bool
+	WifiPosition                string
+	WifiStyle                   string
+	OverlayChipFlow             string
 	OverlayHiddenIcons          string
 }
 
@@ -418,6 +437,15 @@ func NormalizeBatteryStyle(style string) string {
 	default:
 		return "both"
 	}
+}
+
+// NormalizeOverlayChipFlow clamps how same-position chips are arranged to a
+// known value, defaulting to "stack" (one under the other).
+func NormalizeOverlayChipFlow(flow string) string {
+	if flow == "row" {
+		return flow
+	}
+	return "stack"
 }
 
 // NormalizeBatteryRotation clamps the battery badge rotation to one of the
@@ -599,7 +627,7 @@ func ParseImmichAlbumIDs(s string) []string {
 // style control.
 var validOverlayIconKeys = map[string]bool{
 	"photo_date": true, "weather": true, "names": true,
-	"location": true, "description": true,
+	"location": true, "description": true, "rotation": true,
 }
 
 // NormalizeOverlayHiddenIcons keeps only valid, de-duplicated element keys in a
@@ -663,6 +691,10 @@ type DeviceLog struct {
 	IP              string `json:"ip"`
 	DisplayWidth    int    `json:"display_width"`
 	DisplayHeight   int    `json:"display_height"`
+	// Wi-Fi link quality on this pull: RSSI in dBm, and the throughput of the
+	// frame's previous download in kbit/s. 0 = not reported.
+	WifiRSSI int `json:"wifi_rssi" gorm:"column:wifi_rssi"`
+	WifiKbps int `json:"wifi_kbps" gorm:"column:wifi_kbps"`
 }
 
 // BatterySample is one timestamped battery reading reported by a device on an
