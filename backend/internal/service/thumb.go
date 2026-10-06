@@ -29,6 +29,38 @@ func thumbStillReferenced(device *model.Device, thumbID string) bool {
 		(thumbID == device.CurrentThumbID || thumbID == device.PrevThumbID || thumbID == device.NextThumbID)
 }
 
+// ThumbReferenced reports whether any device still uses thumbID for its
+// current, previous or next image. Those files back the Devices-list miniature
+// and the Home Assistant image entities (re-read from disk on every MQTT
+// republish), so the one-shot cleanups for throwaway thumbnails must leave them
+// alone — their lifetime is managed by SetCurrentThumb / SetNextThumb.
+func ThumbReferenced(db *gorm.DB, thumbID string) bool {
+	if thumbID == "" {
+		return false
+	}
+	var n int64
+	db.Model(&model.Device{}).
+		Where("current_thumb_id = ? OR prev_thumb_id = ? OR next_thumb_id = ?", thumbID, thumbID, thumbID).
+		Count(&n)
+	return n > 0
+}
+
+// ReferencedThumbIDs returns every thumbnail id some device still uses (see
+// ThumbReferenced), for a bulk cleanup that must skip them.
+func ReferencedThumbIDs(db *gorm.DB) map[string]bool {
+	var devices []model.Device
+	db.Select("current_thumb_id", "prev_thumb_id", "next_thumb_id").Find(&devices)
+	ids := map[string]bool{}
+	for _, d := range devices {
+		for _, id := range []string{d.CurrentThumbID, d.PrevThumbID, d.NextThumbID} {
+			if id != "" {
+				ids[id] = true
+			}
+		}
+	}
+	return ids
+}
+
 // SetCurrentThumb rotates a device's thumbnail history: the existing current
 // image becomes "previous", newThumbID becomes the current image, and the photo
 // pushed out of the previous slot has its files deleted — unless they still back

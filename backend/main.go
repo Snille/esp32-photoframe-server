@@ -249,7 +249,7 @@ func main() {
 		log.Fatalf("Failed to create data directory: %v", err)
 	}
 
-	cleanupTempThumbnails(dataDir)
+	cleanupTempThumbnails(database, dataDir)
 
 	pickerService := service.NewPickerService(googleClient, database, dataDir)
 
@@ -567,14 +567,24 @@ func main() {
 	e.Logger.Fatal(e.Start(":" + listenPort))
 }
 
-func cleanupTempThumbnails(dataDir string) {
+// cleanupTempThumbnails removes thumbnails left over from before a restart,
+// except the ones a device still uses for its current / previous / next image
+// (see service.ThumbReferenced). Deleting those emptied every Home Assistant
+// image entity after each restart until the frame's next pull, and lost the
+// Previous image for good.
+func cleanupTempThumbnails(database *gorm.DB, dataDir string) {
 	pattern := filepath.Join(dataDir, "thumb_*.jpg")
 	files, err := filepath.Glob(pattern)
 	if err != nil {
 		log.Printf("Failed to list temp thumbnails for cleanup: %v", err)
 		return
 	}
+	keep := service.ReferencedThumbIDs(database)
 	for _, f := range files {
+		id := strings.TrimSuffix(strings.TrimPrefix(filepath.Base(f), "thumb_"), ".jpg")
+		if keep[id] {
+			continue
+		}
 		if err := os.Remove(f); err != nil {
 			log.Printf("Failed to remove temp thumbnail %s: %v", f, err)
 		} else {

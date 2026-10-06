@@ -1262,10 +1262,18 @@ func (h *ImageHandler) GetServedImageThumbnail(c echo.Context) error {
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to read thumbnail"})
 	}
 
-	// Delete after 5 minutes instead of immediately
+	// A thumbnail written only for X-Thumbnail-URL (a preview render, or a pull
+	// from an unknown device) is throwaway: delete it 5 minutes after it was
+	// fetched. One that a device still uses for its current / previous / next
+	// image must survive — the Devices list and the Home Assistant image
+	// entities keep reading it, and deleting it left HA with an empty image on
+	// the next MQTT republish. Checked at deletion time, not now, so a thumbnail
+	// that becomes a device's image in the meantime is kept too.
 	safego.Go("thumbnail cleanup", func() {
 		time.Sleep(5 * time.Minute)
-		os.Remove(thumbPath)
+		if !service.ThumbReferenced(h.db, id) {
+			os.Remove(thumbPath)
+		}
 	})
 
 	// Set Content-Length header

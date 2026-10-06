@@ -1,5 +1,10 @@
 # Changelog
 
+## v1.53.1
+
+### Fixed
+- **Home Assistant frame images no longer turn broken.** Two old clean-ups deleted the thumbnail files the HA image entities are built from. Viewing the Devices list (its miniatures auto-refresh) scheduled each frame's current thumbnail for deletion 5 minutes later, so the next 5-minute MQTT republish sent HA an empty image and the Current/Next Image entities showed as broken until the frame pulled again. A server restart deleted every thumbnail, which also lost the Previous Image for good. Both clean-ups now keep any thumbnail a device still uses for its current, previous or next image; throwaway thumbnails (previews, unknown devices) are still removed as before.
+
 ## v1.53.0
 
 ### Added
