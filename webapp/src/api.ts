@@ -1,4 +1,7 @@
 import axios from 'axios';
+// Circular with stores/auth.ts, which is safe: the store is only used inside
+// the response interceptor, long after both modules have loaded.
+import { useAuthStore } from './stores/auth';
 
 export const api = axios.create({
   baseURL: import.meta.env.VITE_API_BASE_URL || 'api',
@@ -21,12 +24,12 @@ api.interceptors.response.use(
         return Promise.reject(error);
       }
 
-      // Clear token and redirect to login if 401 received
-      // Avoid redirect loop if already on login page
-      if (!window.location.pathname.endsWith('/login')) {
-        localStorage.removeItem('token');
-        window.location.href = 'login';
-      }
+      // Expired or revoked session: drop the token through the auth store so
+      // App.vue swaps to the Login view at once. The SPA has no router, so the
+      // old "redirect to login, unless already on /login" left a stale token in
+      // place whenever the address bar still read /login from an earlier
+      // redirect — the page then showed an empty, logged-in-looking UI.
+      useAuthStore().logout();
     }
     return Promise.reject(error);
   }
