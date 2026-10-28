@@ -1,5 +1,10 @@
 # Changelog
 
+## v1.53.2
+
+### Fixed
+- **An expired login now shows the login page.** When a session expired while the address bar still read `/login` (left there by an earlier logout), the web UI kept the old token: it showed the normal page with a Logout button, but every request failed, so the device list and gallery looked empty. Any "not logged in" answer from the server now clears the token and shows the login page at once.
+
 ## v1.53.1
 
 ### Fixed
