@@ -1,5 +1,10 @@
 # Changelog
 
+## v1.53.3
+
+### Fixed
+- **No more zombie Chrome processes.** The server ran as PID 1 in the container and never reaped orphaned child processes. Each time the renderer closed its idle headless Chrome, about four `chromium`/`chrome_crashpad` zombies stayed behind — over 600 after two and a half days in production. They used no memory, but each one held a process ID, so a long uptime could run the container out of PIDs. The image now starts the server through `tini`, which reaps them. It runs with `-s` so it also works under the init that the Home Assistant Supervisor adds.
+
 ## v1.53.2
 
 ### Fixed

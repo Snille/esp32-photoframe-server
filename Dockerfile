@@ -63,7 +63,8 @@ RUN apk add --no-cache \
     freetype \
     harfbuzz \
     imagemagick \
-    libheif
+    libheif \
+    tini
 
 # Create directories
 RUN mkdir -p /app/bin /app/static /app/data
@@ -104,4 +105,8 @@ ENV ADDON_PORT=$ADDON_PORT
 
 EXPOSE 9607
 
-ENTRYPOINT ["/app/photoframe-server"]
+# tini runs as PID 1 and reaps orphaned processes. Without it, every headless
+# Chrome that the renderer closes leaves chromium/chrome_crashpad zombies behind.
+# -s (subreaper) keeps reaping when something else is PID 1, such as the init
+# that the Home Assistant Supervisor adds to add-ons.
+ENTRYPOINT ["/sbin/tini", "-s", "--", "/app/photoframe-server"]
