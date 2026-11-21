@@ -229,6 +229,9 @@ func (h *ImageHandler) ServeImage(c echo.Context) error {
 	// throughput of the previous download. 0 = not reported.
 	wifiRSSI, wifiKbps := service.ParseWifiHeaders(
 		c.Request().Header.Get("X-Wifi-RSSI"), c.Request().Header.Get("X-Wifi-Kbps"))
+	// Network name (firmware >= 2.21.0), percent-encoded by the frame. "" = not
+	// reported, so older frames log an empty value and keep working.
+	wifiSSID := service.ParseWifiSSID(c.Request().Header.Get("X-Wifi-SSID"))
 
 	// Record this pull attempt to the device's activity log — success or
 	// failure alike, unlike DeviceHistory which only records a successful
@@ -270,6 +273,7 @@ func (h *ImageHandler) ServeImage(c echo.Context) error {
 			DisplayHeight:   dispH,
 			WifiRSSI:        wifiRSSI,
 			WifiKbps:        wifiKbps,
+			WifiSSID:        wifiSSID,
 		}
 		safego.Go("record device log", func() {
 			service.RecordDeviceLog(h.db, params)
@@ -327,6 +331,10 @@ func (h *ImageHandler) ServeImage(c echo.Context) error {
 		if wifiKbps != 0 && wifiKbps != device.WifiKbps {
 			device.WifiKbps = wifiKbps
 			updates["wifi_kbps"] = wifiKbps
+		}
+		if wifiSSID != "" && wifiSSID != device.WifiSSID {
+			device.WifiSSID = wifiSSID
+			updates["wifi_ssid"] = wifiSSID
 		}
 		if len(updates) > 0 {
 			safego.Go("update wifi link", func() {

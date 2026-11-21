@@ -184,6 +184,9 @@ export interface Device {
   // 0/absent = never reported (firmware older than 2.20.0).
   wifi_rssi?: number;
   wifi_kbps?: number;
+  // Network name (SSID) the frame was on at its latest pull. Empty/absent =
+  // never reported (firmware older than 2.21.0).
+  wifi_ssid?: string;
   // Server-inferred "on USB": the latest reading is physically implausible for a
   // running frame (EE02-on-USB ADC garbage), so we show a plugged-in indicator.
   battery_plugged?: boolean;
@@ -550,6 +553,8 @@ export interface DeviceLogEntry {
   // download in kbit/s. 0 = not reported.
   wifi_rssi: number;
   wifi_kbps: number;
+  // Network name (SSID) on this pull. Empty = not reported.
+  wifi_ssid: string;
 }
 
 export const listDeviceLogs = async (

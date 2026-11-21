@@ -263,6 +263,9 @@ type Device struct {
 	// reported for both. History lives in DeviceLog.
 	WifiRSSI int `json:"wifi_rssi" gorm:"column:wifi_rssi;default:0"`
 	WifiKbps int `json:"wifi_kbps" gorm:"column:wifi_kbps;default:0"`
+	// WifiSSID is the network name the frame was on at its latest pull
+	// (X-Wifi-SSID). Empty = never reported (firmware older than 2.21.0).
+	WifiSSID string `json:"wifi_ssid" gorm:"column:wifi_ssid;default:''"`
 	// LastTrigger is what caused the frame's most recent image change, surfaced as
 	// the HA "Last Trigger" sensor: "timer" (auto-rotate wake), "button" (wake
 	// button), "boot" (cold boot/reset), "push" (server-initiated) or "pull"
@@ -695,6 +698,8 @@ type DeviceLog struct {
 	// frame's previous download in kbit/s. 0 = not reported.
 	WifiRSSI int `json:"wifi_rssi" gorm:"column:wifi_rssi"`
 	WifiKbps int `json:"wifi_kbps" gorm:"column:wifi_kbps"`
+	// Network name (SSID) the frame was on for this pull. Empty = not reported.
+	WifiSSID string `json:"wifi_ssid" gorm:"column:wifi_ssid"`
 }
 
 // BatterySample is one timestamped battery reading reported by a device on an

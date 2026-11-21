@@ -1729,6 +1729,15 @@
                         }}</v-icon
                         >{{ device.wifi_rssi }} dBm
                       </div>
+                      <div
+                        v-if="device.wifi_ssid"
+                        class="text-caption text-medium-emphasis text-no-wrap"
+                        title="Wi-Fi network the frame was on at its last check-in"
+                      >
+                        <v-icon size="x-small" class="mr-1"
+                          >mdi-access-point-network</v-icon
+                        >{{ device.wifi_ssid }}
+                      </div>
                     </td>
                     <td>
                       <template v-if="deviceCharging(device)">
@@ -2194,7 +2203,14 @@
                                 · {{ formatKbps(entry.wifi_kbps) }}</span
                               >
                             </template>
-                            <template v-else>—</template>
+                            <template v-else-if="!entry.wifi_ssid">—</template>
+                            <div
+                              v-if="entry.wifi_ssid"
+                              class="text-caption text-medium-emphasis"
+                              title="Wi-Fi network the frame was on"
+                            >
+                              {{ entry.wifi_ssid }}
+                            </div>
                           </td>
                           <td>{{ entry.firmware_version || '—' }}</td>
                           <td>{{ entry.reset_reason || '—' }}</td>

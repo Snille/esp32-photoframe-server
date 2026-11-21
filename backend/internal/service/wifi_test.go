@@ -72,3 +72,24 @@ func TestWifiIconSVG(t *testing.T) {
 		t.Logf("band %d: %s", i, d)
 	}
 }
+
+func TestParseWifiSSID(t *testing.T) {
+	cases := []struct{ in, want string }{
+		{"", ""},                     // older firmware: no header
+		{"   ", ""},                  // blank
+		{"Snille-IOT", "Snille-IOT"}, // plain ASCII
+		{"My%20Home", "My Home"},     // encoded space
+		{"Caf%C3%A9", "Café"},        // UTF-8
+		{"100%25", "100%"},           // encoded percent
+		{"a+b", "a+b"},               // '+' is not a space here
+		{"bad%zz", "bad%zz"},         // undecodable: kept as sent
+		{"x%00y%0Az", "xyz"},         // control bytes dropped
+		{"%FF%FEok", "ok"},           // invalid UTF-8 dropped
+		{strings.Repeat("a", 40), strings.Repeat("a", 32)}, // capped at 32 bytes
+	}
+	for _, c := range cases {
+		if got := ParseWifiSSID(c.in); got != c.want {
+			t.Errorf("ParseWifiSSID(%q) = %q; want %q", c.in, got, c.want)
+		}
+	}
+}

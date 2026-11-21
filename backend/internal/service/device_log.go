@@ -32,6 +32,7 @@ type DeviceLogParams struct {
 	DisplayHeight   int
 	WifiRSSI        int
 	WifiKbps        int
+	WifiSSID        string
 }
 
 // RecordDeviceLog persists one frame check-in attempt (success or failure)
@@ -56,6 +57,7 @@ func RecordDeviceLog(db *gorm.DB, p DeviceLogParams) {
 		DisplayHeight:   p.DisplayHeight,
 		WifiRSSI:        p.WifiRSSI,
 		WifiKbps:        p.WifiKbps,
+		WifiSSID:        p.WifiSSID,
 	}
 	if len(p.ImageIDs) > 0 {
 		entry.ImageID = p.ImageIDs[len(p.ImageIDs)-1]
@@ -121,7 +123,7 @@ func WriteDeviceLogsCSV(db *gorm.DB, deviceID uint, w io.Writer) error {
 		"timestamp", "success", "status_code", "trigger", "source", "image_id",
 		"battery_percent", "voltage_mv", "battery_status", "firmware_version",
 		"reset_reason", "ip", "display_width", "display_height",
-		"wifi_rssi_dbm", "wifi_kbps",
+		"wifi_rssi_dbm", "wifi_kbps", "wifi_ssid",
 	}); err != nil {
 		return err
 	}
@@ -143,6 +145,7 @@ func WriteDeviceLogsCSV(db *gorm.DB, deviceID uint, w io.Writer) error {
 			strconv.Itoa(l.DisplayHeight),
 			strconv.Itoa(l.WifiRSSI),
 			strconv.Itoa(l.WifiKbps),
+			l.WifiSSID,
 		}); err != nil {
 			return err
 		}

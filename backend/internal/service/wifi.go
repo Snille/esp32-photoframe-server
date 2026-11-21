@@ -4,8 +4,10 @@ import (
 	"fmt"
 	"html/template"
 	"math"
+	"net/url"
 	"strconv"
 	"strings"
+	"unicode"
 )
 
 // ParseWifiHeaders reads the Wi-Fi link quality a frame reports on a pull:
@@ -20,6 +22,37 @@ func ParseWifiHeaders(rssiStr, kbpsStr string) (rssi, kbps int) {
 		kbps = v
 	}
 	return rssi, kbps
+}
+
+// maxSSIDBytes is the 802.11 limit on an SSID's length.
+const maxSSIDBytes = 32
+
+// ParseWifiSSID decodes the X-Wifi-SSID header. The frame percent-encodes every
+// byte outside printable ASCII (plus space and '%'), so UTF-8 names and spaces
+// survive the trip. A value that does not decode is kept as sent. Control
+// characters and invalid UTF-8 are dropped and the result is capped at 32
+// bytes, so a garbled header can't break the log or the HA state. "" = not
+// reported (firmware older than 2.21.0).
+func ParseWifiSSID(raw string) string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return ""
+	}
+	s := raw
+	if dec, err := url.PathUnescape(raw); err == nil {
+		s = dec
+	}
+	s = strings.ToValidUTF8(s, "")
+	s = strings.Map(func(r rune) rune {
+		if unicode.IsControl(r) {
+			return -1
+		}
+		return r
+	}, s)
+	if len(s) > maxSSIDBytes {
+		s = strings.ToValidUTF8(s[:maxSSIDBytes], "")
+	}
+	return s
 }
 
 // WifiSignalLevel buckets an RSSI into a coarse quality level, 0 (unusable)

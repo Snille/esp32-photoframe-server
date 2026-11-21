@@ -655,6 +655,9 @@ func (s *MQTTService) publishState(client mqtt.Client, device *model.Device) {
 	if device.WifiKbps > 0 {
 		state["wifi_kbps"] = device.WifiKbps
 	}
+	if device.WifiSSID != "" {
+		state["wifi_ssid"] = device.WifiSSID
+	}
 	// Frame poll / schedule config (from the synced device_config) + network id.
 	pc := parsePollConfig(device.DeviceConfig)
 	if pc.rotateInterval > 0 {
@@ -1187,7 +1190,7 @@ func (s *MQTTService) publishOneImage(client mqtt.Client, topic, thumbID string)
 // mqttSensorKeys are the value_json keys exposed as plain (read-only) HA sensors.
 // Image source / refresh interval / image order are now controllable select /
 // number entities (see publishDiscovery), so they are not in this list.
-var mqttSensorKeys = []string{"battery", "battery_voltage", "days_remaining", "trend", "battery_status", "last_seen", "sleep_schedule", "next_pull", "host", "ip_address", "next_image_status", "timezone", "rotation", "server_host", "trigger", "rotation_total", "rotation_position", "rotation_remaining", "rotation_status", "rotation_completes", "current_photo_date", "immich_albums", "wifi_rssi", "wifi_quality", "wifi_kbps"}
+var mqttSensorKeys = []string{"battery", "battery_voltage", "days_remaining", "trend", "battery_status", "last_seen", "sleep_schedule", "next_pull", "host", "ip_address", "next_image_status", "timezone", "rotation", "server_host", "trigger", "rotation_total", "rotation_position", "rotation_remaining", "rotation_status", "rotation_completes", "current_photo_date", "immich_albums", "wifi_rssi", "wifi_quality", "wifi_kbps", "wifi_ssid"}
 
 // commandSourceOptions are the image sources offered by the HA "Image Source"
 // select. Matches the server's registered sources (model source constants).
@@ -1272,6 +1275,11 @@ func (s *MQTTService) publishDiscovery(client mqtt.Client, device *model.Device)
 	})
 	sensor("wifi_quality", "Wi-Fi Quality", "wifi_quality", map[string]interface{}{
 		"icon": "mdi:wifi", "entity_category": "diagnostic",
+	})
+	// Which network the frame was on at its latest pull, so a frame that goes
+	// silent still shows where it was last seen.
+	sensor("wifi_ssid", "Wi-Fi Network", "wifi_ssid", map[string]interface{}{
+		"icon": "mdi:access-point-network", "entity_category": "diagnostic",
 	})
 	sensor("wifi_kbps", "Wi-Fi Download Speed", "wifi_kbps", map[string]interface{}{
 		"device_class": "data_rate", "unit_of_measurement": "kbit/s", "state_class": "measurement",
