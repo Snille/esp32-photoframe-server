@@ -1,5 +1,10 @@
 # Changelog
 
+## v1.54.1
+
+### Fixed
+- **Right firmware version for the Wi-Fi network name.** The WebGUI said frames need firmware 2.21.0 to report their network name. That firmware was never released: the first release with it is **2.22.0**. The text now says 2.22.0.
+
 ## v1.54.0
 
 ### Added
