@@ -2379,6 +2379,118 @@
                             ></v-text-field>
                           </v-col>
                         </v-row>
+
+                        <v-divider class="my-4" />
+                        <div class="text-subtitle-2 mb-1">Wi-Fi network</div>
+                        <div class="text-caption text-medium-emphasis mb-2">
+                          Now on:
+                          <strong>{{
+                            editingDevice.wifi_ssid || 'unknown'
+                          }}</strong>
+                          <template v-if="!editingDevice.wifi_ssid">
+                            (the frame reports its network from firmware
+                            2.21.0)</template
+                          >
+                        </div>
+                        <v-alert
+                          v-if="wifiChange"
+                          :type="wifiChangeAlert.type"
+                          variant="tonal"
+                          density="compact"
+                          class="mb-2"
+                        >
+                          {{ wifiChangeAlert.text }}
+                          <template #append>
+                            <v-btn
+                              size="small"
+                              variant="text"
+                              :loading="wifiChangeBusy"
+                              @click="cancelWifiChange"
+                              >{{
+                                wifiChange.state === 'pending'
+                                  ? 'Cancel'
+                                  : 'Clear'
+                              }}</v-btn
+                            >
+                          </template>
+                        </v-alert>
+                        <v-btn
+                          v-if="!wifiChangeFormOpen"
+                          variant="tonal"
+                          size="small"
+                          prepend-icon="mdi-wifi-sync"
+                          @click="openWifiChangeForm"
+                          >Change Wi-Fi network</v-btn
+                        >
+                        <template v-else>
+                          <v-alert
+                            type="warning"
+                            variant="tonal"
+                            density="compact"
+                            class="mb-3"
+                          >
+                            This only works while the frame still reaches this
+                            server. The change is sent once, on the frame's next
+                            image pull. The frame then tries the new network. If
+                            it cannot connect (wrong password, or the network
+                            does not reach the place where the frame is), it
+                            goes back to the old network. The password is kept
+                            in server memory only, until it is sent. A server
+                            restart drops a change that was not sent yet.
+                          </v-alert>
+                          <v-row>
+                            <v-col cols="12" md="6">
+                              <v-text-field
+                                v-model="wifiChangeSSID"
+                                label="New network name (SSID)"
+                                variant="outlined"
+                                density="compact"
+                                :counter="32"
+                                autocomplete="off"
+                                hide-details="auto"
+                              ></v-text-field>
+                            </v-col>
+                            <v-col cols="12" md="6">
+                              <v-text-field
+                                v-model="wifiChangePassword"
+                                label="Password"
+                                variant="outlined"
+                                density="compact"
+                                :type="
+                                  wifiChangeShowPassword ? 'text' : 'password'
+                                "
+                                :append-inner-icon="
+                                  wifiChangeShowPassword
+                                    ? 'mdi-eye-off'
+                                    : 'mdi-eye'
+                                "
+                                autocomplete="new-password"
+                                hint="Leave empty to keep the frame's current password."
+                                persistent-hint
+                                @click:append-inner="
+                                  wifiChangeShowPassword =
+                                    !wifiChangeShowPassword
+                                "
+                              ></v-text-field>
+                            </v-col>
+                          </v-row>
+                          <div class="d-flex ga-2 mt-2">
+                            <v-btn
+                              color="primary"
+                              size="small"
+                              :disabled="!wifiChangeValid"
+                              :loading="wifiChangeBusy"
+                              @click="submitWifiChange"
+                              >Send on next pull</v-btn
+                            >
+                            <v-btn
+                              size="small"
+                              variant="text"
+                              @click="closeWifiChangeForm"
+                              >Cancel</v-btn
+                            >
+                          </div>
+                        </template>
                       </v-tabs-window-item>
 
                       <!-- Auto Rotate Tab -->
@@ -4463,6 +4575,10 @@ import {
   getBatteryHistory,
   updateDeviceBatteryCapacity,
   updateDeviceAutoUpdate,
+  getDeviceWifiChange,
+  requestDeviceWifiChange,
+  cancelDeviceWifiChange,
+  type WifiChangeStatus,
   updateDeviceFirmwareSource,
   type BatteryEstimate,
   type BatterySample,
@@ -6036,6 +6152,7 @@ const editDevice = async (device: Device) => {
     enabled: !!device.auto_update,
     min: device.auto_update_battery_min || 30,
   };
+  loadWifiChange(device.id);
   // Populate the Immich album picker (best-effort; only matters for Immich frames).
   if (!immichStore.albums || immichStore.albums.length === 0) {
     immichStore.fetchAlbums().catch(() => {});
@@ -6085,6 +6202,113 @@ const saveAutoUpdate = async () => {
     autoUpdateBatteryMin.value = autoUpdateSaved.value.min;
   } finally {
     autoUpdateSaving.value = false;
+  }
+};
+
+// Wi-Fi network change (General tab). Sent once by the server on the frame's
+// next pull; the password lives in server memory only and is never read back.
+const wifiChange = ref<WifiChangeStatus | null>(null);
+const wifiChangeFormOpen = ref(false);
+const wifiChangeSSID = ref('');
+const wifiChangePassword = ref('');
+const wifiChangeShowPassword = ref(false);
+const wifiChangeBusy = ref(false);
+
+const utf8Length = (s: string) => new TextEncoder().encode(s).length;
+const wifiChangeValid = computed(() => {
+  const n = utf8Length(wifiChangeSSID.value);
+  const p = wifiChangePassword.value.length;
+  return n >= 1 && n <= 32 && (p === 0 || (p >= 8 && p <= 63));
+});
+
+const wifiChangeAlert = computed(() => {
+  const ch = wifiChange.value;
+  if (!ch) return { type: 'info' as const, text: '' };
+  const target = `"${ch.target_ssid}"`;
+  switch (ch.state) {
+    case 'pending':
+      return {
+        type: 'info' as const,
+        text: `Waiting for the frame's next pull to send the move to ${target}.`,
+      };
+    case 'sent':
+      return {
+        type: 'info' as const,
+        text: `Sent to the frame. The next pull shows if it moved to ${target}.`,
+      };
+    case 'moved':
+      return {
+        type: 'success' as const,
+        text: `The frame moved to ${target}.`,
+      };
+    case 'reverted':
+      return {
+        type: 'error' as const,
+        text: `The frame could not use ${target}. It is still on "${ch.reported_ssid}".`,
+      };
+    default:
+      return {
+        type: 'warning' as const,
+        text: `The frame did not pull within 48 hours. The change to ${target} was dropped.`,
+      };
+  }
+});
+
+const closeWifiChangeForm = () => {
+  wifiChangeFormOpen.value = false;
+  // Do not keep the password in the page longer than needed.
+  wifiChangePassword.value = '';
+};
+
+const loadWifiChange = async (deviceId?: number) => {
+  wifiChange.value = null;
+  closeWifiChangeForm();
+  if (!deviceId) return;
+  try {
+    wifiChange.value = await getDeviceWifiChange(deviceId);
+  } catch {
+    wifiChange.value = null;
+  }
+};
+
+const openWifiChangeForm = () => {
+  wifiChangeSSID.value = '';
+  wifiChangePassword.value = '';
+  wifiChangeShowPassword.value = false;
+  wifiChangeFormOpen.value = true;
+};
+
+const submitWifiChange = async () => {
+  if (!editingDevice.id || !wifiChangeValid.value) return;
+  wifiChangeBusy.value = true;
+  try {
+    wifiChange.value = await requestDeviceWifiChange(
+      editingDevice.id,
+      wifiChangeSSID.value,
+      wifiChangePassword.value
+    );
+    closeWifiChangeForm();
+    showMessage('Wi-Fi change will be sent on the next pull');
+  } catch (e: any) {
+    showMessage(
+      e?.response?.data?.error || 'Failed to request the Wi-Fi change',
+      true
+    );
+  } finally {
+    wifiChangeBusy.value = false;
+  }
+};
+
+const cancelWifiChange = async () => {
+  if (!editingDevice.id) return;
+  wifiChangeBusy.value = true;
+  try {
+    await cancelDeviceWifiChange(editingDevice.id);
+    wifiChange.value = null;
+  } catch {
+    showMessage('Failed to cancel the Wi-Fi change', true);
+  } finally {
+    wifiChangeBusy.value = false;
   }
 };
 

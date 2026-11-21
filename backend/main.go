@@ -273,6 +273,10 @@ func main() {
 	mqttService := service.NewMQTTService(database, settingsService, service.NewBatteryService(database), authService, dataDir)
 	mqttService.Start()
 	deviceHandler.SetMQTT(mqttService)
+	// Requested Wi-Fi network changes: set from the device dialog, sent once
+	// on the frame's next pull. Memory only, so a password is never at rest.
+	wifiChanges := service.NewWifiChangeStore()
+	deviceHandler.SetWifiChanges(wifiChanges)
 
 	// Initialize Telegram Service
 	// Pass deviceService as Pusher
@@ -308,6 +312,7 @@ func main() {
 		DB:             database,
 		DataDir:        dataDir,
 		MQTT:           mqttService,
+		WifiChanges:    wifiChanges,
 		Firmware:       firmwareService,
 	})
 	pah := handler.NewPublicArtHandler(publicArtService, settingsService)
@@ -396,6 +401,9 @@ func main() {
 	protectedApi.PUT("/devices/:id/log-retention", deviceHandler.UpdateDeviceLogRetention)
 	protectedApi.PUT("/devices/:id/battery-capacity", deviceHandler.UpdateDeviceBatteryCapacity)
 	protectedApi.PUT("/devices/:id/auto-update", deviceHandler.UpdateDeviceAutoUpdate)
+	protectedApi.GET("/devices/:id/wifi", deviceHandler.GetDeviceWifiChange)
+	protectedApi.PUT("/devices/:id/wifi", deviceHandler.RequestDeviceWifiChange)
+	protectedApi.DELETE("/devices/:id/wifi", deviceHandler.CancelDeviceWifiChange)
 	protectedApi.PUT("/devices/:id/firmware-source", deviceHandler.UpdateDeviceFirmwareSource)
 	protectedApi.GET("/devices/:id/config", ih.GetDeviceConfig)
 	protectedApi.PUT("/devices/:id/config", ih.UpdateDeviceConfig)

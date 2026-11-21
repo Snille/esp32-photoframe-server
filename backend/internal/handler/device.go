@@ -27,7 +27,65 @@ type DeviceHandler struct {
 	immichService   *service.ImmichService
 	battery         *service.BatteryService
 	mqtt            *service.MQTTService
+	wifiChanges     *service.WifiChangeStore
 	db              *gorm.DB
+}
+
+// SetWifiChanges wires the in-memory store shared with the image handler,
+// which sends a requested network change on the frame's next pull.
+func (h *DeviceHandler) SetWifiChanges(s *service.WifiChangeStore) {
+	h.wifiChanges = s
+}
+
+// GET /api/devices/:id/wifi — where a requested Wi-Fi network change stands
+// (never the password). {"change": null} when none was requested.
+func (h *DeviceHandler) GetDeviceWifiChange(c echo.Context) error {
+	id, _ := strconv.Atoi(c.Param("id"))
+	if h.wifiChanges == nil {
+		return c.JSON(http.StatusOK, map[string]interface{}{"change": nil})
+	}
+	if st, ok := h.wifiChanges.Status(uint(id)); ok {
+		return c.JSON(http.StatusOK, map[string]interface{}{"change": st})
+	}
+	return c.JSON(http.StatusOK, map[string]interface{}{"change": nil})
+}
+
+// PUT /api/devices/:id/wifi — ask the frame to move to another Wi-Fi network.
+// body: {"ssid": "...", "password": "..."} (empty password = keep current).
+// The change is held in memory only and sent once, in the config-sync header
+// of the frame's next pull; the frame tests the network and goes back to the
+// old one if it cannot connect.
+func (h *DeviceHandler) RequestDeviceWifiChange(c echo.Context) error {
+	id, _ := strconv.Atoi(c.Param("id"))
+	if h.wifiChanges == nil {
+		return c.JSON(http.StatusServiceUnavailable, map[string]string{"error": "wifi change unavailable"})
+	}
+	var req struct {
+		SSID     string `json:"ssid"`
+		Password string `json:"password"`
+	}
+	if err := c.Bind(&req); err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid request"})
+	}
+	var device model.Device
+	if err := h.db.Select("id", "wifi_ssid").First(&device, id).Error; err != nil {
+		return c.JSON(http.StatusNotFound, map[string]string{"error": "device not found"})
+	}
+	st, err := h.wifiChanges.Request(device.ID, req.SSID, req.Password, device.WifiSSID)
+	if err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": err.Error()})
+	}
+	return c.JSON(http.StatusOK, map[string]interface{}{"change": st})
+}
+
+// DELETE /api/devices/:id/wifi — drop a change that was not sent yet, or
+// clear the status of one that was.
+func (h *DeviceHandler) CancelDeviceWifiChange(c echo.Context) error {
+	id, _ := strconv.Atoi(c.Param("id"))
+	if h.wifiChanges != nil {
+		h.wifiChanges.Cancel(uint(id))
+	}
+	return c.JSON(http.StatusOK, map[string]interface{}{"change": nil})
 }
 
 func NewDeviceHandler(deviceService *service.DeviceService, synologyService *service.SynologyService, immichService *service.ImmichService, db *gorm.DB) *DeviceHandler {

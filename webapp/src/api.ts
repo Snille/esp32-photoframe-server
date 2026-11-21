@@ -502,6 +502,39 @@ export const updateDeviceAutoUpdate = async (
   return response.data;
 };
 
+// Server-requested Wi-Fi network change. Held in server memory only and sent
+// once in the frame's next config-sync; the frame tests the network and goes
+// back to the old one if it cannot connect. The password is never returned.
+export interface WifiChangeStatus {
+  state: 'pending' | 'sent' | 'moved' | 'reverted' | 'expired';
+  target_ssid: string;
+  previous_ssid: string;
+  reported_ssid?: string;
+  requested_at: string;
+  sent_at?: string;
+  resolved_at?: string;
+}
+
+export const getDeviceWifiChange = async (
+  id: number
+): Promise<WifiChangeStatus | null> => {
+  const response = await api.get(`/devices/${id}/wifi`);
+  return response.data.change;
+};
+
+export const requestDeviceWifiChange = async (
+  id: number,
+  ssid: string,
+  password: string
+): Promise<WifiChangeStatus> => {
+  const response = await api.put(`/devices/${id}/wifi`, { ssid, password });
+  return response.data.change;
+};
+
+export const cancelDeviceWifiChange = async (id: number) => {
+  await api.delete(`/devices/${id}/wifi`);
+};
+
 export const refreshDevice = async (id: number) => {
   const response = await api.post(`/devices/${id}/refresh`);
   return response.data;

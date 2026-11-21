@@ -53,6 +53,7 @@ type ImageHandlerDeps struct {
 	DataDir        string
 	MQTT           *service.MQTTService
 	Firmware       *service.FirmwareService
+	WifiChanges    *service.WifiChangeStore
 }
 
 type ImageHandler struct {
@@ -68,6 +69,7 @@ type ImageHandler struct {
 	battery        *service.BatteryService
 	mqtt           *service.MQTTService
 	firmware       *service.FirmwareService
+	wifiChanges    *service.WifiChangeStore
 	dataDir        string
 }
 
@@ -85,6 +87,7 @@ func NewImageHandler(deps ImageHandlerDeps) *ImageHandler {
 		battery:        service.NewBatteryService(deps.DB),
 		mqtt:           deps.MQTT,
 		firmware:       deps.Firmware,
+		wifiChanges:    deps.WifiChanges,
 		dataDir:        deps.DataDir,
 	}
 }
@@ -331,6 +334,11 @@ func (h *ImageHandler) ServeImage(c echo.Context) error {
 		if wifiKbps != 0 && wifiKbps != device.WifiKbps {
 			device.WifiKbps = wifiKbps
 			updates["wifi_kbps"] = wifiKbps
+		}
+		// Settle a server-requested network change before this pull's sync
+		// may send a new one (see WifiChangeStore.Observe).
+		if h.wifiChanges != nil {
+			h.wifiChanges.Observe(device.ID, wifiSSID)
 		}
 		if wifiSSID != "" && wifiSSID != device.WifiSSID {
 			device.WifiSSID = wifiSSID
@@ -1209,6 +1217,12 @@ func buildConfigPayload(device *model.Device) string {
 			config = map[string]json.RawMessage{}
 		}
 	}
+	// The frame-reported config carries the frame's own wifi_ssid. Never echo
+	// it back: after a server-requested network change the stored copy is
+	// stale, and pushing it would send the frame back to the old network. A
+	// requested change is added on its own by withWifiChange.
+	delete(config, "wifi_ssid")
+	delete(config, "wifi_password")
 	config["auto_update"] = jsonBool(device.AutoUpdate)
 	config["auto_update_battery_min"] = jsonInt(model.NormalizeAutoUpdateBatteryMin(device.AutoUpdateBatteryMin))
 	if configData, err := json.Marshal(config); err == nil {
@@ -1485,16 +1499,104 @@ func (h *ImageHandler) applyConfigSync(c echo.Context, device *model.Device, dev
 
 	// Server has newer config: push it down. (Nothing to push if we've never
 	// recorded a server-side edit, or the device is already current.)
-	if device.ConfigLastUpdated <= 0 || device.ConfigLastUpdated <= deviceConfigTS {
-		return
+	serverNewer := device.ConfigLastUpdated > 0 && device.ConfigLastUpdated > deviceConfigTS
+	payload := ""
+	if serverNewer {
+		payload = buildConfigPayload(device)
 	}
-	payload := buildConfigPayload(device)
+
+	// A requested Wi-Fi change rides along once. Never on a preview render: the
+	// companion app would consume the one-shot password, not the frame.
+	if h.wifiChanges != nil && c.QueryParam("preview") != "1" {
+		if ssid, password, ok := h.wifiChanges.Take(device.ID); ok {
+			payload = withWifiChange(payload, ssid, password)
+			// Never log the payload itself: it holds the password.
+			log.Printf("Config sync: sending Wi-Fi network change to %q", ssid)
+		}
+	}
+
 	if payload == "" {
 		return
 	}
 	c.Response().Header().Set("X-Config-Payload", payload)
-	log.Printf("Config sync: pushing config to device (server=%d, device=%d)",
-		device.ConfigLastUpdated, deviceConfigTS)
+	if serverNewer {
+		log.Printf("Config sync: pushing config to device (server=%d, device=%d)",
+			device.ConfigLastUpdated, deviceConfigTS)
+	}
+}
+
+// maxConfigPayloadBytes is what the frame's header buffer holds (2048 incl.
+// NUL). A longer header is cut short, fails to parse, and is dropped whole.
+const maxConfigPayloadBytes = 2000
+
+// withWifiChange adds wifi_ssid + wifi_password to the "config" object of a
+// config-sync payload (or makes a wifi-only payload when payload is ""). A
+// wifi-only payload carries no config_last_updated, so the frame keeps its
+// own config timestamp and the normal sync is untouched. If the merged
+// payload would not fit the frame's header buffer, the wifi-only payload is
+// sent instead and the regular config goes out on a later pull (the frame
+// still reports an older timestamp, so the server pushes it again).
+func withWifiChange(payload, ssid, password string) string {
+	wifiOnly := func() string {
+		cfg := map[string]string{"wifi_ssid": ssid}
+		if password != "" {
+			cfg["wifi_password"] = password
+		}
+		data, _ := json.Marshal(map[string]interface{}{"config": cfg})
+		return asciiJSON(data)
+	}
+	if payload == "" {
+		return wifiOnly()
+	}
+	var full map[string]json.RawMessage
+	if json.Unmarshal([]byte(payload), &full) != nil {
+		return wifiOnly()
+	}
+	config := map[string]json.RawMessage{}
+	if raw, ok := full["config"]; ok {
+		if json.Unmarshal(raw, &config) != nil {
+			config = map[string]json.RawMessage{}
+		}
+	}
+	config["wifi_ssid"], _ = json.Marshal(ssid)
+	if password != "" {
+		config["wifi_password"], _ = json.Marshal(password)
+	}
+	cfgData, err := json.Marshal(config)
+	if err != nil {
+		return wifiOnly()
+	}
+	full["config"] = cfgData
+	data, err := json.Marshal(full)
+	if err != nil {
+		return wifiOnly()
+	}
+	merged := asciiJSON(data)
+	if len(merged) > maxConfigPayloadBytes {
+		return wifiOnly()
+	}
+	return merged
+}
+
+// asciiJSON rewrites every non-ASCII rune of a JSON text as a \uXXXX escape
+// (surrogate pairs above U+FFFF). The result is the same JSON value, but safe
+// to put in an HTTP header: an SSID or password may hold any UTF-8. Outside
+// strings JSON is ASCII only, so escaping every rune is correct.
+func asciiJSON(data []byte) string {
+	var b strings.Builder
+	for _, r := range string(data) {
+		if r < 0x80 {
+			b.WriteRune(r)
+			continue
+		}
+		if r > 0xFFFF {
+			r -= 0x10000
+			fmt.Fprintf(&b, `\u%04x\u%04x`, 0xD800+(r>>10), 0xDC00+(r&0x3FF))
+			continue
+		}
+		fmt.Fprintf(&b, `\u%04x`, r)
+	}
+	return b.String()
 }
 
 // pullDeviceConfigAsync fetches the device's current config in the background and

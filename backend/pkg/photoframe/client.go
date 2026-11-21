@@ -593,6 +593,12 @@ func (c *Client) PushConfig(config map[string]interface{}, configLastUpdated int
 	for k, v := range config {
 		body[k] = v
 	}
+	// The stored config mirrors the frame's own wifi_ssid. Echoing it back
+	// would undo a network change the server sent over config-sync (the copy
+	// is stale until the next sync-from-device), so the network is never part
+	// of a settings push.
+	delete(body, "wifi_ssid")
+	delete(body, "wifi_password")
 	if configLastUpdated > 0 {
 		body["config_last_updated"] = configLastUpdated
 	}
