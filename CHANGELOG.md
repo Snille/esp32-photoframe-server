@@ -3,7 +3,7 @@
 ## v1.54.0
 
 ### Added
-- **Which Wi-Fi network each frame is on.** Frames on firmware 2.21.0 or newer report the name (SSID) of their network on every pull (`X-Wifi-SSID`). A frame that goes silent now still shows where it was last seen, instead of only a stale config-sync copy:
+- **Which Wi-Fi network each frame is on.** Frames on firmware 2.22.0 or newer report the name (SSID) of their network on every pull (`X-Wifi-SSID`). A frame that goes silent now still shows where it was last seen, instead of only a stale config-sync copy:
   - The **Activity Log** shows the network under the Wi-Fi signal, and the CSV export gains `wifi_ssid`.
   - The **Devices list** shows the latest network under each frame's signal.
   - **Home Assistant** gets a diagnostic **Wi-Fi Network** sensor.

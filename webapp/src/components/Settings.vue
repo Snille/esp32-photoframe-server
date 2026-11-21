@@ -2389,7 +2389,7 @@
                           }}</strong>
                           <template v-if="!editingDevice.wifi_ssid">
                             (the frame reports its network from firmware
-                            2.21.0)</template
+                            2.22.0)</template
                           >
                         </div>
                         <v-alert

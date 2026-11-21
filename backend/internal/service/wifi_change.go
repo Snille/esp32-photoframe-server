@@ -146,7 +146,7 @@ func (s *WifiChangeStore) Take(deviceID uint) (ssid, password string, ok bool) {
 // Observe records the SSID a frame reported on a pull. Call it BEFORE Take on
 // the same pull: that pull's header still shows the network the frame was on
 // when it asked, so only pulls after the send can tell the result. An empty
-// SSID (firmware older than 2.21.0) leaves the result unknown.
+// SSID (firmware older than 2.22.0) leaves the result unknown.
 func (s *WifiChangeStore) Observe(deviceID uint, reportedSSID string) {
 	if reportedSSID == "" {
 		return

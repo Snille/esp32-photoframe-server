@@ -1,5 +1,5 @@
 -- Name (SSID) of the Wi-Fi network the frame was on, from X-Wifi-SSID
--- (firmware >= 2.21.0). Empty = not reported (older firmware).
+-- (firmware >= 2.22.0). Empty = not reported (older firmware).
 --
 -- The devices column holds the latest value (Devices list, HA sensor); the
 -- device_logs column keeps it per pull, so the Activity Log shows which network

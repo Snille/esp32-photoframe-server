@@ -185,7 +185,7 @@ export interface Device {
   wifi_rssi?: number;
   wifi_kbps?: number;
   // Network name (SSID) the frame was on at its latest pull. Empty/absent =
-  // never reported (firmware older than 2.21.0).
+  // never reported (firmware older than 2.22.0).
   wifi_ssid?: string;
   // Server-inferred "on USB": the latest reading is physically implausible for a
   // running frame (EE02-on-USB ADC garbage), so we show a plugged-in indicator.

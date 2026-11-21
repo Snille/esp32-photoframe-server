@@ -264,7 +264,7 @@ type Device struct {
 	WifiRSSI int `json:"wifi_rssi" gorm:"column:wifi_rssi;default:0"`
 	WifiKbps int `json:"wifi_kbps" gorm:"column:wifi_kbps;default:0"`
 	// WifiSSID is the network name the frame was on at its latest pull
-	// (X-Wifi-SSID). Empty = never reported (firmware older than 2.21.0).
+	// (X-Wifi-SSID). Empty = never reported (firmware older than 2.22.0).
 	WifiSSID string `json:"wifi_ssid" gorm:"column:wifi_ssid;default:''"`
 	// LastTrigger is what caused the frame's most recent image change, surfaced as
 	// the HA "Last Trigger" sensor: "timer" (auto-rotate wake), "button" (wake

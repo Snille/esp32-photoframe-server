@@ -32,7 +32,7 @@ const maxSSIDBytes = 32
 // survive the trip. A value that does not decode is kept as sent. Control
 // characters and invalid UTF-8 are dropped and the result is capped at 32
 // bytes, so a garbled header can't break the log or the HA state. "" = not
-// reported (firmware older than 2.21.0).
+// reported (firmware older than 2.22.0).
 func ParseWifiSSID(raw string) string {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {

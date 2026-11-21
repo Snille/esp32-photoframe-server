@@ -232,7 +232,7 @@ func (h *ImageHandler) ServeImage(c echo.Context) error {
 	// throughput of the previous download. 0 = not reported.
 	wifiRSSI, wifiKbps := service.ParseWifiHeaders(
 		c.Request().Header.Get("X-Wifi-RSSI"), c.Request().Header.Get("X-Wifi-Kbps"))
-	// Network name (firmware >= 2.21.0), percent-encoded by the frame. "" = not
+	// Network name (firmware >= 2.22.0), percent-encoded by the frame. "" = not
 	// reported, so older frames log an empty value and keep working.
 	wifiSSID := service.ParseWifiSSID(c.Request().Header.Get("X-Wifi-SSID"))
 
