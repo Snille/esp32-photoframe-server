@@ -8,6 +8,11 @@
   - The **Devices list** shows the latest network under each frame's signal.
   - **Home Assistant** gets a diagnostic **Wi-Fi Network** sensor.
   - Older frames keep working: they log an empty network name. Migration 000066.
+- **Move a frame to another Wi-Fi network from the WebGUI.** Device dialog → General has a **Change Wi-Fi network** action (SSID + password; an empty password keeps the current one). The change goes out once, in the config payload of the frame's next pull. The frame tests the new network and goes back to the old one if it cannot connect. The next pull's network name shows the result (moved or reverted) in the dialog. The password stays in server memory only: never in the database or a log, cleared once it is sent, and dropped after 48 h or a restart. It only works while the frame can still reach the server. New API: `GET/PUT/DELETE /api/devices/:id/wifi`.
+
+### Fixed
+- **Config sync no longer sends a frame back to its old network.** Config sync and the direct settings push echoed the stored `wifi_ssid` to the frame. After a move that copy is stale. Both now leave `wifi_ssid` / `wifi_password` out.
+- **Custom rotation intervals show a unit.** An interval set on the frame's own web UI (for example 2 minutes) showed in the device dialog as a bare `120`, which looked like 120 minutes. Every option now has a unit label, such as "2 minutes". The stored value was correct all along.
 
 ## v1.53.3
 
