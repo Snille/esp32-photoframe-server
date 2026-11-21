@@ -106,22 +106,22 @@ func (s *BatteryService) RecordSample(deviceID uint, percent, voltageMV int) err
 
 // BatteryEstimate is the derived drain picture for one device.
 type BatteryEstimate struct {
-	HasData          bool                  `json:"has_data"`
-	CurrentPercent   int                   `json:"current_percent"`
-	CurrentVoltageMV int                   `json:"current_voltage_mv"`
+	HasData          bool `json:"has_data"`
+	CurrentPercent   int  `json:"current_percent"`
+	CurrentVoltageMV int  `json:"current_voltage_mv"`
 	// DrainPerDay (%/day, positive = discharging) is deliberately
 	// conservative when Trend is "discharging": it's the WORST
 	// robustly-confirmed rate seen across the trailing window, not just the
 	// current run's own average — an unusually calm recent stretch shouldn't
 	// make "days remaining" claim more runway than the device has actually
 	// proven capable of burning through. See Estimate / robustDrainAcrossWindow.
-	DrainPerDay float64 `json:"drain_per_day"`
-	DaysRemaining    float64               `json:"days_remaining"` // -1 = unknown/charging/stable
-	Trend            string                `json:"trend"`          // discharging | charging | stable | insufficient
-	SampleCount      int                   `json:"sample_count"`
-	WindowStart      time.Time             `json:"window_start"`
-	LastSampledAt    time.Time             `json:"last_sampled_at"`
-	Recent           []model.BatterySample `json:"recent"`
+	DrainPerDay   float64               `json:"drain_per_day"`
+	DaysRemaining float64               `json:"days_remaining"` // -1 = unknown/charging/stable
+	Trend         string                `json:"trend"`          // discharging | charging | stable | insufficient
+	SampleCount   int                   `json:"sample_count"`
+	WindowStart   time.Time             `json:"window_start"`
+	LastSampledAt time.Time             `json:"last_sampled_at"`
+	Recent        []model.BatterySample `json:"recent"`
 	// Basis reports what the drain regression ran on: "voltage" (finer, via the
 	// LiPo curve) when the frame reports mV, else "percent".
 	Basis string `json:"basis"`

@@ -88,16 +88,16 @@ func (h *GalleryHandler) ListPhotos(c echo.Context) error {
 	}
 
 	type PhotoResponse struct {
-		ID            uint      `json:"id"`
-		ThumbnailURL  string    `json:"thumbnail_url"`
-		CreatedAt     time.Time `json:"created_at"`
-		Caption       string    `json:"caption"`
-		Width         int       `json:"width"`
-		Height        int       `json:"height"`
-		Orientation   string    `json:"orientation"`
-		Source        string    `json:"source"`
-		DisplayOrder  int       `json:"display_order"`
-		ImmichAlbums  []string  `json:"immich_albums,omitempty"`
+		ID           uint      `json:"id"`
+		ThumbnailURL string    `json:"thumbnail_url"`
+		CreatedAt    time.Time `json:"created_at"`
+		Caption      string    `json:"caption"`
+		Width        int       `json:"width"`
+		Height       int       `json:"height"`
+		Orientation  string    `json:"orientation"`
+		Source       string    `json:"source"`
+		DisplayOrder int       `json:"display_order"`
+		ImmichAlbums []string  `json:"immich_albums,omitempty"`
 	}
 
 	// Photo -> album name(s), for the per-thumbnail "which album" badge. Empty

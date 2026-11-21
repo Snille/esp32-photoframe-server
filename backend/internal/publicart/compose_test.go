@@ -111,7 +111,7 @@ func TestComposeImageEmptySource(t *testing.T) {
 
 func TestParseColor(t *testing.T) {
 	tests := []struct {
-		input          string
+		input                           string
 		expectedR, expectedG, expectedB uint8
 	}{
 		{input: "white", expectedR: 255, expectedG: 255, expectedB: 255},
