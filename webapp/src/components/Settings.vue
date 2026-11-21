@@ -4599,6 +4599,7 @@ import Gallery from './Gallery.vue';
 import ConfirmDialog from './ConfirmDialog.vue';
 import PublicArtPanel from './PublicArtPanel.vue';
 import { timezoneOptionsFor } from '../timezones';
+import { rotateIntervalOptions as buildRotateIntervalOptions } from '../rotateInterval';
 
 const store = useSettingsStore();
 const synologyStore = useSynologyStore();
@@ -5228,17 +5229,11 @@ const collidingDeviceNames = computed(() => {
     .map((d) => d.name || `Device ${d.id}`);
 });
 
-const rotateIntervalOptions = [
-  { title: '5 minutes', value: 300 },
-  { title: '15 minutes', value: 900 },
-  { title: '30 minutes', value: 1800 },
-  { title: '1 hour', value: 3600 },
-  { title: '2 hours', value: 7200 },
-  { title: '4 hours', value: 14400 },
-  { title: '6 hours', value: 21600 },
-  { title: '12 hours', value: 43200 },
-  { title: '24 hours', value: 86400 },
-];
+// Presets + the frame's current value (which may be a custom one set on the
+// frame's own web UI, e.g. 2 minutes) -- see rotateInterval.ts.
+const rotateIntervalOptions = computed(() =>
+  buildRotateIntervalOptions(Number(deviceConfig.rotate_interval))
+);
 
 const loadDeviceConfig = async (deviceId: number) => {
   try {
